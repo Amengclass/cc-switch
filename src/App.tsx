@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -25,6 +25,9 @@ import {
   Shield,
   Cpu,
   LayoutDashboard,
+  Server,
+  Laptop,
+  RefreshCw,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Provider, VisibleApps } from "@/types";
@@ -57,6 +60,22 @@ import {
   DRAG_REGION_STYLE,
 } from "@/lib/platform";
 import { AppSwitcher } from "@/components/AppSwitcher";
+import {
+  checkLocalClaudeInstalled,
+  checkRemoteClaudeInstalled,
+  getRemoteCurrentProvider,
+  listDockerContainers,
+  listRemoteHosts,
+  switchRemoteProvider,
+} from "@/lib/api/remote";
+import type { RemoteHost } from "@/types/remote";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
@@ -81,6 +100,7 @@ import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
+import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
 import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
@@ -106,6 +126,7 @@ type View =
   | "universal"
   | "sessions"
   | "workspace"
+  | "remote"
   | "openclawEnv"
   | "openclawTools"
   | "openclawAgents"
@@ -152,6 +173,7 @@ const VALID_VIEWS: View[] = [
   "universal",
   "sessions",
   "workspace",
+  "remote",
   "openclawEnv",
   "openclawTools",
   "openclawAgents",
@@ -179,6 +201,144 @@ function App() {
   const [settingsDefaultTab, setSettingsDefaultTab] = useState("general");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isWindowMaximized, setIsWindowMaximized] = useState(false);
+
+  // ===== 目标选择器（本机 / 远程服务器）=====
+  const [servers, setServers] = useState<RemoteHost[]>([]);
+  const [remoteTargetId, setRemoteTargetId] = useState<string>(
+    () => localStorage.getItem("cc-switch-remote-target") ?? "",
+  );
+  const [remoteCurrentProviderId, setRemoteCurrentProviderId] = useState<
+    string | null
+  >(null);
+  const [remoteClaudeInstalled, setRemoteClaudeInstalled] = useState<
+    boolean | null
+  >(null);
+  const [localClaudeInstalled, setLocalClaudeInstalled] = useState<
+    boolean | null
+  >(null);
+  // 目标细化到 Docker 容器：选中服务器后可再选容器，所有远程操作作用于容器内。
+  const [containers, setContainers] = useState<string[]>([]);
+  const [remoteContainerId, setRemoteContainerId] = useState<string>(
+    () => localStorage.getItem("cc-switch-remote-container") ?? "",
+  );
+
+  useEffect(() => {
+    localStorage.setItem("cc-switch-remote-target", remoteTargetId);
+  }, [remoteTargetId]);
+
+  useEffect(() => {
+    localStorage.setItem("cc-switch-remote-container", remoteContainerId);
+  }, [remoteContainerId]);
+
+  // 每次切换视图时刷新服务器列表（远程页面增删后回到主界面能同步）；
+  // 若当前选中的目标已被删除，自动重置回「本机」。
+  useEffect(() => {
+    checkLocalClaudeInstalled()
+      .then(setLocalClaudeInstalled)
+      .catch(() => setLocalClaudeInstalled(null));
+  }, []);
+
+  useEffect(() => {
+    listRemoteHosts()
+      .then((list) => {
+        setServers(list);
+        setRemoteTargetId((prev) =>
+          prev && !list.some((s) => s.id === prev) ? "" : prev,
+        );
+      })
+      .catch(() => {});
+    // 注：切回主界面时刷新远端当前供应商 + 安装状态的工作，由下方依赖
+    // `[remoteTargetId, remoteContainerId]` 的 effect 统一负责（它拿到最新容器）。
+    // 这里不重复刷新，避免两个 effect 用不同 container 并行覆盖 setRemoteClaudeInstalled。
+  }, [currentView]);
+
+  // 选中服务器时：读取远端当前生效的供应商（按 base_url 匹配本地供应商）
+  // 并检测远端 Claude Code 安装状态（用于主面板横幅徽标）。
+  // 同时加载该主机的 Docker 容器列表，供「目标 = 容器」选择。
+  useEffect(() => {
+    if (!remoteTargetId) {
+      setRemoteCurrentProviderId(null);
+      setRemoteClaudeInstalled(null);
+      setContainers([]);
+      setRemoteContainerId("");
+      return;
+    }
+    let active = true;
+    const container = remoteContainerId || undefined;
+    getRemoteCurrentProvider(remoteTargetId, container)
+      .then((id) => {
+        if (active) setRemoteCurrentProviderId(id);
+      })
+      .catch(() => {
+        if (active) setRemoteCurrentProviderId(null);
+      });
+    checkRemoteClaudeInstalled(remoteTargetId, container)
+      .then((s) => {
+        if (active) setRemoteClaudeInstalled(s);
+      })
+      .catch(() => {
+        if (active) setRemoteClaudeInstalled(null);
+      });
+    listDockerContainers(remoteTargetId)
+      .then((list) => {
+        if (active) {
+          setContainers(list);
+          // 若已选容器不在当前主机列表中，清空
+          setRemoteContainerId((prev) =>
+            prev && !list.includes(prev) ? "" : prev,
+          );
+        }
+      })
+      .catch(() => {
+        if (active) setContainers([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [remoteTargetId, remoteContainerId, currentView]);
+
+  const activeRemoteHost = servers.find((s) => s.id === remoteTargetId) ?? null;
+  // 当前目标（本机/服务器）的 Claude Code 安装状态
+  const currentInstalled = remoteTargetId
+    ? remoteClaudeInstalled
+    : localClaudeInstalled;
+
+  // 刷新 Claude Code 安装状态：本机与当前远端目标共用同一策略。
+  // 依赖必须含 remoteContainerId：否则切容器后 useCallback 缓存旧闭包，
+  // 点刷新会用上一次的 container 检测，导致宿主机/容器状态串扰。
+  const refreshClaudeStatus = useCallback(() => {
+    checkLocalClaudeInstalled()
+      .then(setLocalClaudeInstalled)
+      .catch(() => setLocalClaudeInstalled(null));
+    if (remoteTargetId) {
+      const container = remoteContainerId || undefined;
+      checkRemoteClaudeInstalled(remoteTargetId, container)
+        .then(setRemoteClaudeInstalled)
+        .catch(() => setRemoteClaudeInstalled(null));
+      getRemoteCurrentProvider(remoteTargetId, container)
+        .then(setRemoteCurrentProviderId)
+        .catch(() => setRemoteCurrentProviderId(null));
+    }
+  }, [remoteTargetId, remoteContainerId]);
+
+  // 窗口重新聚焦时自动刷新（如装完 Claude Code 切回应用即更新）
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      try {
+        unlisten = await getCurrentWindow().onFocusChanged(
+          ({ payload: focused }) => {
+            if (focused) refreshClaudeStatus();
+          },
+        );
+      } catch (e) {
+        console.error("[App] Failed to listen window focus", e);
+      }
+    })();
+    return () => {
+      unlisten?.();
+    };
+  }, [refreshClaudeStatus]);
 
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, currentView);
@@ -277,6 +437,10 @@ function App() {
   });
   const providers = useMemo(() => data?.providers ?? {}, [data]);
   const currentProviderId = data?.currentProviderId ?? "";
+  // 选中服务器时，当前供应商高亮取自远端 settings.json 匹配
+  const effectiveCurrentProviderId = remoteTargetId
+    ? (remoteCurrentProviderId ?? "")
+    : currentProviderId;
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||
@@ -309,6 +473,44 @@ function App() {
     isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
   );
+
+  // 供应商切换：选中服务器目标时走远端原子写回，否则走本地
+  const handleProviderSwitch = async (provider: Provider) => {
+    if (remoteTargetId) {
+      try {
+        const container = remoteContainerId || undefined;
+        const report = await switchRemoteProvider(
+          remoteTargetId,
+          provider.id,
+          container,
+        );
+        const cur = await getRemoteCurrentProvider(
+          remoteTargetId,
+          container,
+        ).catch(() => null);
+        setRemoteCurrentProviderId(cur);
+        await refetch();
+        toast.success(
+          t("remote.switchDone", {
+            defaultValue: "已在 {{target}} 切换到 {{provider}}",
+            target:
+              (activeRemoteHost?.name ?? remoteTargetId) +
+              (container ? ` / ${container}` : ""),
+            provider: report.providerName,
+          }),
+          { description: report.notes.join("；"), closeButton: true },
+        );
+      } catch (error) {
+        console.error("Failed to switch remote provider:", error);
+        toast.error(
+          t("remote.switchError", { defaultValue: "远程切换失败" }),
+          { description: extractErrorMessage(error) },
+        );
+      }
+      return;
+    }
+    await switchProvider(provider);
+  };
 
   const disableOmoMutation = useDisableCurrentOmo();
   const handleDisableOmo = () => {
@@ -647,7 +849,52 @@ function App() {
     provider: Provider;
     originalId?: string;
   }) => {
+    // 与原生 cc switch 策略一致：仅当被编辑的供应商是「当前生效供应商」时，保存后
+    // 立即重写 live（原生 ProviderService::update 用 DB 的 is_current 判断）。
+    // 选中远端目标时，live 就是该远端的 settings.json → 原子写回。
+    // 「当前生效」用本地 DB 的 currentProviderId（SSOT）判定，而不是靠 base_url 猜
+    // 远端当前：用户改 base_url / 通用配置片段时，匹配必然失败，导致编辑推送被跳过
+    // （这是前几次反复失败的根因）。编辑非当前供应商 → 仅更新数据库，切换到它时再生效。
+    // 注意：EditProviderDialog 总是传 originalId（Claude 不支持改名），不能拿它当守卫。
+    let isRemoteCurrentProvider = false;
+    if (remoteTargetId) {
+      isRemoteCurrentProvider = provider.id === currentProviderId;
+    }
+
     await updateProvider(provider, originalId);
+
+    if (isRemoteCurrentProvider) {
+      try {
+        const container = remoteContainerId || undefined;
+        const report = await switchRemoteProvider(
+          remoteTargetId!,
+          provider.id,
+          container,
+        );
+        const cur = await getRemoteCurrentProvider(
+          remoteTargetId!,
+          container,
+        ).catch(() => null);
+        setRemoteCurrentProviderId(cur);
+        await refetch();
+        toast.success(
+          t("remote.editSynced", {
+            defaultValue: "已同步更新后的配置到远端 {{target}}",
+            target: activeRemoteHost?.name ?? remoteTargetId,
+          }),
+          { description: report.notes.join("；"), closeButton: true },
+        );
+      } catch (error) {
+        console.error("Failed to sync edited provider to remote:", error);
+        toast.error(
+          t("remote.editSyncError", {
+            defaultValue: "供应商已更新，但同步远端失败",
+          }),
+          { description: extractErrorMessage(error) },
+        );
+      }
+    }
+
     setEditingProvider(null);
   };
 
@@ -908,6 +1155,8 @@ function App() {
               open={true}
               onOpenChange={() => setCurrentView("providers")}
               appId={sharedFeatureApp}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "hermesMemory":
@@ -920,6 +1169,8 @@ function App() {
               currentApp={
                 sharedFeatureApp === "openclaw" ? "claude" : sharedFeatureApp
               }
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "skillsDiscovery":
@@ -937,6 +1188,8 @@ function App() {
             <UnifiedMcpPanel
               ref={mcpPanelRef}
               onOpenChange={() => setCurrentView("providers")}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "agents":
@@ -949,12 +1202,16 @@ function App() {
               <UniversalProviderPanel />
             </div>
           );
+        case "remote":
+          return <RemoteHostsPanel />;
 
         case "sessions":
           return (
             <SessionManagerPage
-              key={sharedFeatureApp}
+              key={`${sharedFeatureApp}-${remoteTargetId}-${remoteContainerId}`}
               appId={sharedFeatureApp}
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "workspace":
@@ -980,7 +1237,7 @@ function App() {
                   >
                     <ProviderList
                       providers={providers}
-                      currentProviderId={currentProviderId}
+                      currentProviderId={effectiveCurrentProviderId}
                       appId={activeApp}
                       isLoading={isLoading}
                       isProxyRunning={isProxyRunning}
@@ -988,7 +1245,7 @@ function App() {
                         isProxyRunning && isCurrentAppTakeoverActive
                       }
                       activeProviderId={activeProviderId}
-                      onSwitch={switchProvider}
+                      onSwitch={handleProviderSwitch}
                       onEdit={(provider) => {
                         setEditingProvider(provider);
                       }}
@@ -1182,6 +1439,8 @@ function App() {
                     })}
                   {currentView === "sessions" && t("sessionManager.title")}
                   {currentView === "workspace" && t("workspace.title")}
+                  {currentView === "remote" &&
+                    t("remote.title", { defaultValue: "远程主机" })}
                   {currentView === "openclawEnv" && t("openclaw.env.title")}
                   {currentView === "openclawTools" && t("openclaw.tools.title")}
                   {currentView === "openclawAgents" &&
@@ -1396,6 +1655,70 @@ function App() {
                       visibleApps={visibleApps}
                     />
 
+                    {activeApp === "claude" && (
+                      <Select
+                        value={
+                          remoteTargetId === ""
+                            ? "__local__"
+                            : remoteTargetId
+                        }
+                        onValueChange={(v) =>
+                          setRemoteTargetId(v === "__local__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-[150px] text-xs">
+                          <SelectValue
+                            placeholder={t("remote.targetLocal", {
+                              defaultValue: "本机",
+                            })}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__local__">
+                            {t("remote.targetLocal", {
+                              defaultValue: "本机",
+                            })}
+                          </SelectItem>
+                          {servers.map((s) => (
+                            <SelectItem key={s.id} value={s.id}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
+                    {activeApp === "claude" && remoteTargetId && (
+                      <Select
+                        value={remoteContainerId || "__host__"}
+                        onValueChange={(v) =>
+                          setRemoteContainerId(
+                            v === "__host__" ? "" : v,
+                          )
+                        }
+                      >
+                        <SelectTrigger className="h-8 w-[130px] text-xs">
+                          <SelectValue
+                            placeholder={t("remote.targetHost", {
+                              defaultValue: "宿主机",
+                            })}
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__host__">
+                            {t("remote.targetHost", {
+                              defaultValue: "宿主机",
+                            })}
+                          </SelectItem>
+                          {containers.map((c) => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+
                     <div className="flex items-center gap-1 p-1 bg-muted rounded-xl">
                       <AnimatePresence mode="wait">
                         <motion.div
@@ -1551,6 +1874,17 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("remote")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("remote.title", {
+                                  defaultValue: "远程主机",
+                                })}
+                              >
+                                <Server className="flex-shrink-0 w-4 h-4" />
+                              </Button>
                             </>
                           )}
                         </motion.div>
@@ -1576,6 +1910,81 @@ function App() {
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/40 px-6 py-2 text-sm">
+          {remoteTargetId && activeRemoteHost ? (
+            <>
+              <Server className="h-4 w-4 shrink-0 text-primary" />
+              <span>
+                {t("remote.targetActive", {
+                  defaultValue:
+                    "当前目标：服务器 {{name}} —— 供应商切换与配置将写入该远端",
+                  name: activeRemoteHost.name,
+                })}
+              </span>
+            </>
+          ) : (
+            <>
+              <Laptop className="h-4 w-4 shrink-0 text-primary" />
+              <span>
+                {t("remote.targetLocalActive", {
+                  defaultValue: "当前目标：本机 —— 配置作用于本机",
+                })}
+              </span>
+            </>
+          )}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+              currentInstalled === true
+                ? "bg-emerald-500/15 text-emerald-600"
+                : currentInstalled === false
+                  ? "bg-amber-500/15 text-amber-600"
+                  : "bg-muted text-muted-foreground",
+            )}
+          >
+            {currentInstalled === true
+              ? t("remote.claudeInstalledBadge", {
+                  defaultValue: "Claude Code 已安装",
+                })
+              : currentInstalled === false
+                ? `⚠ ${t("remote.claudeNotInstalledBadge", {
+                    defaultValue: "Claude Code 未安装 · 配置已预置,安装后生效",
+                  })}`
+                : t("remote.claudeDetectFailed", {
+                    defaultValue: "安装状态检测中/未知",
+                  })}
+          </span>
+          {currentInstalled === false && (
+            <span className="text-xs text-amber-600">
+              {remoteTargetId
+                ? t("remote.installCmd", {
+                    defaultValue:
+                      "安装: curl -fsSL https://claude.ai/install.sh | bash",
+                  })
+                : t("remote.installCmdLocal", {
+                    defaultValue: "安装: npm install -g @anthropic-ai/claude-code",
+                  })}
+            </span>
+          )}
+          {remoteTargetId && (
+            <span className="text-xs text-muted-foreground">
+              {t("remote.targetActiveHint", {
+                defaultValue:
+                  "MCP / Prompts / Skills 仍作用于本机（二期再支持远程编辑）",
+              })}
+            </span>
+          )}
+          <button
+            onClick={refreshClaudeStatus}
+            title={t("remote.refreshStatus", {
+              defaultValue: "刷新安装状态",
+            })}
+            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            {t("remote.refreshStatus", { defaultValue: "刷新" })}
+          </button>
+        </div>
         {renderContent()}
       </main>
 

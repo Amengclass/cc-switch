@@ -14,17 +14,60 @@ import {
   type SkillsShSearchResult,
 } from "@/lib/api/skills";
 import type { AppId } from "@/lib/api/types";
+import {
+  deleteRemoteSkill,
+  installRemoteSkillsFromZip,
+  listRemoteSkills,
+  type RemoteSkillEntry,
+} from "@/lib/api/remote";
 import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
+
+/** 把远端技能目录项适配成 InstalledSkill（远端无 DB，仅目录名 + claude 启用）。 */
+function remoteToInstalled(entry: RemoteSkillEntry): InstalledSkill {
+  return {
+    id: entry.name,
+    name: entry.displayName || entry.name,
+    description: entry.description,
+    directory: entry.name,
+    apps: {
+      claude: true,
+      codex: false,
+      gemini: false,
+      opencode: false,
+      openclaw: false,
+      hermes: false,
+    },
+    installedAt: 0,
+    updatedAt: 0,
+  };
+}
 
 /**
  * 查询所有已安装的 Skills
  * 使用 staleTime: Infinity 和 placeholderData: keepPreviousData
  * 实现首次进入使用缓存，只有刷新时才重新获取
  */
-export function useInstalledSkills() {
+export function useInstalledSkills(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   return useQuery({
-    queryKey: ["skills", "installed"],
-    queryFn: () => skillsApi.getInstalled(),
+    queryKey: remoteTargetId
+      ? [
+          "skills",
+          "installed",
+          "remote",
+          remoteTargetId,
+          remoteContainerId ?? "__host__",
+        ]
+      : ["skills", "installed"],
+    queryFn: async () => {
+      if (remoteTargetId) {
+        const entries = await listRemoteSkills(remoteTargetId, remoteContainerId);
+        return entries.map(remoteToInstalled);
+      }
+      return skillsApi.getInstalled();
+    },
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
@@ -113,36 +156,51 @@ export function useInstallSkill() {
  * 卸载 Skill
  * 成功后直接更新缓存，不触发重新加载/刷新
  */
-export function useUninstallSkill() {
+export function useUninstallSkill(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
+  const installedKey = remoteTargetId
+    ? [
+        "skills",
+        "installed",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "installed"];
   return useMutation({
-    mutationFn: ({ id, skillKey }: { id: string; skillKey: string }) =>
-      skillsApi
-        .uninstallUnified(id)
-        .then((result) => ({ ...result, skillKey })),
+    mutationFn: async ({ id, skillKey }: { id: string; skillKey: string }) => {
+      if (remoteTargetId) {
+        await deleteRemoteSkill(remoteTargetId, id, remoteContainerId);
+        return { backupPath: undefined, skillKey };
+      }
+      const result = await skillsApi.uninstallUnified(id);
+      return { ...result, skillKey };
+    },
     onSuccess: ({ skillKey }, _vars) => {
       // 直接更新 installed 缓存，移除该 skill
-      queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.filter((s) => s.id !== _vars.id);
-        },
-      );
+      queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) => {
+        if (!oldData) return oldData;
+        return oldData.filter((s) => s.id !== _vars.id);
+      });
 
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        ["skills", "discoverable"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: false };
-            }
-            return s;
-          });
-        },
-      );
+      // 远端无 discoverable 概念，仅在本地模式更新 discoverable 缓存
+      if (!remoteTargetId) {
+        queryClient.setQueryData<DiscoverableSkill[]>(
+          ["skills", "discoverable"],
+          (oldData) => {
+            if (!oldData) return oldData;
+            return oldData.map((s) => {
+              if (s.key === skillKey) {
+                return { ...s, installed: false };
+              }
+              return s;
+            });
+          },
+        );
+      }
     },
   });
 }
@@ -267,20 +325,41 @@ export function useRemoveSkillRepo() {
  * 从 ZIP 文件安装 Skills
  * 成功后直接更新缓存，不触发重新加载/刷新
  */
-export function useInstallSkillsFromZip() {
+export function useInstallSkillsFromZip(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       filePath,
       currentApp,
     }: {
       filePath: string;
       currentApp: AppId;
-    }) => skillsApi.installFromZip(filePath, currentApp),
+    }) => {
+      if (remoteTargetId) {
+        const names = await installRemoteSkillsFromZip(
+          remoteTargetId,
+          filePath,
+          remoteContainerId,
+        );
+        return names.map((name) => remoteToInstalled({ name, path: "" }));
+      }
+      return skillsApi.installFromZip(filePath, currentApp);
+    },
     onSuccess: (installedSkills) => {
       // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        remoteTargetId
+          ? [
+              "skills",
+              "installed",
+              "remote",
+              remoteTargetId,
+              remoteContainerId ?? "__host__",
+            ]
+          : ["skills", "installed"],
         (oldData) => {
           if (!oldData) return installedSkills;
           return [...oldData, ...installedSkills];

@@ -47,6 +47,10 @@ import {
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
   currentApp: AppId;
+  /** 选中远端目标时，Skills 面板直接操作该主机 ~/.claude/skills/ */
+  remoteTargetId?: string;
+  /** 目标细化到 Docker 容器时，操作容器内 ~/.claude/skills/ */
+  remoteContainerId?: string;
 }
 
 export interface UnifiedSkillsPanelHandle {
@@ -67,8 +71,9 @@ function formatSkillBackupDate(unixSeconds: number): string {
 const UnifiedSkillsPanel = React.forwardRef<
   UnifiedSkillsPanelHandle,
   UnifiedSkillsPanelProps
->(({ onOpenDiscovery, currentApp }, ref) => {
+>(({ onOpenDiscovery, currentApp, remoteTargetId, remoteContainerId }, ref) => {
   const { t } = useTranslation();
+  const isRemote = Boolean(remoteTargetId);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -80,7 +85,10 @@ const UnifiedSkillsPanel = React.forwardRef<
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
 
-  const { data: skills, isLoading } = useInstalledSkills();
+  const { data: skills, isLoading } = useInstalledSkills(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const {
     data: skillBackups = [],
     refetch: refetchSkillBackups,
@@ -88,13 +96,16 @@ const UnifiedSkillsPanel = React.forwardRef<
   } = useSkillBackups();
   const deleteBackupMutation = useDeleteSkillBackup();
   const toggleAppMutation = useToggleSkillApp();
-  const uninstallMutation = useUninstallSkill();
+  const uninstallMutation = useUninstallSkill(remoteTargetId, remoteContainerId);
   const restoreBackupMutation = useRestoreSkillBackup();
   // enabled: true —— 进入 Skill 页面时自动静默扫描一次（绿点提示来源）
   const { data: unmanagedSkills, refetch: scanUnmanaged } =
-    useScanUnmanagedSkills({ enabled: true });
+    useScanUnmanagedSkills({ enabled: !isRemote });
   const importMutation = useImportSkillsFromApps();
-  const installFromZipMutation = useInstallSkillsFromZip();
+  const installFromZipMutation = useInstallSkillsFromZip(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const {
     data: skillUpdates,
     refetch: checkUpdates,
@@ -339,65 +350,80 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   React.useImperativeHandle(ref, () => ({
-    openDiscovery: onOpenDiscovery,
-    openImport: handleOpenImport,
+    openDiscovery: isRemote ? () => undefined : onOpenDiscovery,
+    openImport: isRemote ? () => undefined : handleOpenImport,
     openInstallFromZip: handleInstallFromZip,
-    openRestoreFromBackup: handleOpenRestoreFromBackup,
-    checkUpdates: handleCheckUpdates,
+    openRestoreFromBackup: isRemote
+      ? () => undefined
+      : handleOpenRestoreFromBackup,
+    checkUpdates: isRemote ? () => undefined : handleCheckUpdates,
   }));
 
   return (
     <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
       <div className="flex items-center justify-between">
         <AppCountBar
-          totalLabel={t("skills.installed", { count: skills?.length || 0 })}
+          totalLabel={
+            isRemote
+              ? t("remote.skillsInstalled", {
+                  defaultValue: "远端技能 {{count}}",
+                  count: skills?.length || 0,
+                })
+              : t("skills.installed", { count: skills?.length || 0 })
+          }
           counts={enabledCounts}
           appIds={SKILLS_APP_IDS}
         />
         <div className="flex items-center gap-1.5">
-          <div
-            className="transition-all duration-300 ease-out overflow-hidden"
-            style={{
-              maxWidth:
-                skillUpdates && skillUpdates.length > 0 ? "200px" : "0px",
-              opacity: skillUpdates && skillUpdates.length > 0 ? 1 : 0,
-            }}
-          >
+          {!isRemote && (
+            <div
+              className="transition-all duration-300 ease-out overflow-hidden"
+              style={{
+                maxWidth:
+                  skillUpdates && skillUpdates.length > 0 ? "200px" : "0px",
+                opacity: skillUpdates && skillUpdates.length > 0 ? 1 : 0,
+              }}
+            >
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs gap-1 whitespace-nowrap"
+                onClick={handleUpdateAll}
+                disabled={isUpdatingAll || updateSkillMutation.isPending}
+              >
+                {isUpdatingAll ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <RefreshCw size={12} />
+                )}
+                {isUpdatingAll
+                  ? t("skills.updatingAll")
+                  : t("skills.updateAll", {
+                      count: skillUpdates?.length ?? 0,
+                    })}
+              </Button>
+            </div>
+          )}
+          {!isRemote && (
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="h-7 text-xs gap-1 whitespace-nowrap"
-              onClick={handleUpdateAll}
-              disabled={isUpdatingAll || updateSkillMutation.isPending}
+              className="h-7 text-xs gap-1"
+              onClick={handleCheckUpdates}
+              disabled={isCheckingUpdates || !skills || skills.length === 0}
             >
-              {isUpdatingAll ? (
+              {isCheckingUpdates ? (
                 <Loader2 size={12} className="animate-spin" />
               ) : (
                 <RefreshCw size={12} />
               )}
-              {isUpdatingAll
-                ? t("skills.updatingAll")
-                : t("skills.updateAll", { count: skillUpdates?.length ?? 0 })}
+              {isCheckingUpdates
+                ? t("skills.checkingUpdates")
+                : t("skills.checkUpdates")}
             </Button>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs gap-1"
-            onClick={handleCheckUpdates}
-            disabled={isCheckingUpdates || !skills || skills.length === 0}
-          >
-            {isCheckingUpdates ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <RefreshCw size={12} />
-            )}
-            {isCheckingUpdates
-              ? t("skills.checkingUpdates")
-              : t("skills.checkUpdates")}
-          </Button>
+          )}
         </div>
       </div>
 
@@ -412,10 +438,19 @@ const UnifiedSkillsPanel = React.forwardRef<
               <Sparkles size={24} className="text-muted-foreground" />
             </div>
             <h3 className="text-lg font-medium text-foreground mb-2">
-              {t("skills.noInstalled")}
+              {isRemote
+                ? t("remote.skillsEmptyTitle", {
+                    defaultValue: "远端没有已安装的技能",
+                  })
+                : t("skills.noInstalled")}
             </h3>
             <p className="text-muted-foreground text-sm">
-              {t("skills.noInstalledDescription")}
+              {isRemote
+                ? t("remote.skillsEmptyHint", {
+                    defaultValue:
+                      "点击上方「从 ZIP 安装」把本地技能部署到远端 ~/.claude/skills/",
+                  })
+                : t("skills.noInstalledDescription")}
             </p>
           </div>
         ) : (
@@ -430,6 +465,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                     updateSkillMutation.isPending &&
                     updateSkillMutation.variables === skill.id
                   }
+                  isRemote={isRemote}
                   onToggleApp={handleToggleApp}
                   onUninstall={() => handleUninstall(skill)}
                   onUpdate={() => handleUpdateSkill(skill)}
@@ -454,7 +490,7 @@ const UnifiedSkillsPanel = React.forwardRef<
         />
       )}
 
-      {importDialogOpen && unmanagedSkills && (
+      {!isRemote && importDialogOpen && unmanagedSkills && (
         <ImportSkillsDialog
           skills={unmanagedSkills}
           isImporting={importMutation.isPending}
@@ -463,16 +499,18 @@ const UnifiedSkillsPanel = React.forwardRef<
         />
       )}
 
-      <RestoreSkillsDialog
-        backups={skillBackups}
-        isDeleting={deleteBackupMutation.isPending}
-        isLoading={isFetchingSkillBackups}
-        onDelete={handleDeleteBackup}
-        isRestoring={restoreBackupMutation.isPending}
-        onRestore={handleRestoreFromBackup}
-        onClose={() => setRestoreDialogOpen(false)}
-        open={restoreDialogOpen}
-      />
+      {!isRemote && (
+        <RestoreSkillsDialog
+          backups={skillBackups}
+          isDeleting={deleteBackupMutation.isPending}
+          isLoading={isFetchingSkillBackups}
+          onDelete={handleDeleteBackup}
+          isRestoring={restoreBackupMutation.isPending}
+          onRestore={handleRestoreFromBackup}
+          onClose={() => setRestoreDialogOpen(false)}
+          open={restoreDialogOpen}
+        />
+      )}
     </div>
   );
 });
@@ -483,6 +521,7 @@ interface InstalledSkillListItemProps {
   skill: InstalledSkill;
   hasUpdate?: boolean;
   isUpdating?: boolean;
+  isRemote?: boolean;
   onToggleApp: (id: string, app: AppId, enabled: boolean) => void;
   onUninstall: () => void;
   onUpdate?: () => void;
@@ -493,6 +532,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
   skill,
   hasUpdate,
   isUpdating,
+  isRemote,
   onToggleApp,
   onUninstall,
   onUpdate,
@@ -554,17 +594,19 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
         )}
       </div>
 
-      <AppToggleGroup
-        apps={skill.apps}
-        onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
-        appIds={SKILLS_APP_IDS}
-      />
+      {!isRemote && (
+        <AppToggleGroup
+          apps={skill.apps}
+          onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
+          appIds={SKILLS_APP_IDS}
+        />
+      )}
 
       <div
         className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
         style={hasUpdate ? { opacity: 1 } : undefined}
       >
-        {hasUpdate && onUpdate && (
+        {!isRemote && hasUpdate && onUpdate && (
           <Button
             type="button"
             variant="ghost"

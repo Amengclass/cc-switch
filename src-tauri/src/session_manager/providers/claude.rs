@@ -32,13 +32,18 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open session file: {e}"))?;
     let reader = BufReader::new(file);
+    let lines = reader.lines().map_while(Result::ok);
+    Ok(parse_messages_from_lines(lines))
+}
+
+/// 纯消息解析：给定 JSONL 各行，返回消息列表。
+/// **本机与远端共用**（FileOps 提供行数据，这里只做解析）。
+pub fn parse_messages_from_lines(
+    lines: impl IntoIterator<Item = String>,
+) -> Vec<SessionMessage> {
     let mut messages = Vec::new();
 
-    for line in reader.lines() {
-        let line = match line {
-            Ok(value) => value,
-            Err(_) => continue,
-        };
+    for line in lines {
         let value: Value = match serde_json::from_str(&line) {
             Ok(parsed) => parsed,
             Err(_) => continue,
@@ -82,7 +87,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
         messages.push(SessionMessage { role, content, ts });
     }
 
-    Ok(messages)
+    messages
 }
 
 pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
@@ -121,11 +126,20 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
 }
 
 fn parse_session(path: &Path) -> Option<SessionMeta> {
-    if is_agent_session(path) {
+    let (head, tail) = read_head_tail_lines(path, 10, 30).ok()?;
+    parse_session_meta_from_lines(&path.to_string_lossy(), &head, &tail)
+}
+
+/// 纯解析函数：给定文件路径字符串 + 头/尾行，提取会话元数据。
+/// **本机与远端共用**（FileOps 提供数据，这里只做解析，不碰文件系统）。
+pub fn parse_session_meta_from_lines(
+    path: &str,
+    head: &[String],
+    tail: &[String],
+) -> Option<SessionMeta> {
+    if is_agent_session_str(path) {
         return None;
     }
-
-    let (head, tail) = read_head_tail_lines(path, 10, 30).ok()?;
 
     let mut session_id: Option<String> = None;
     let mut project_dir: Option<String> = None;
@@ -133,7 +147,7 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
     let mut first_user_message: Option<String> = None;
 
     // Extract metadata and first user message from head lines
-    for line in &head {
+    for line in head {
         let value: Value = match serde_json::from_str(line) {
             Ok(parsed) => parsed,
             Err(_) => continue,
@@ -223,7 +237,7 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         }
     }
 
-    let session_id = session_id.or_else(|| infer_session_id_from_filename(path));
+    let session_id = session_id.or_else(|| infer_session_id_from_filename_str(path));
     let session_id = session_id?;
 
     // Title priority: custom-title > first user message > directory basename
@@ -247,22 +261,62 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
         project_dir,
         created_at,
         last_active_at,
-        source_path: Some(path.to_string_lossy().to_string()),
+        source_path: Some(path.to_string()),
         resume_command: Some(format!("claude --resume {session_id}")),
     })
 }
 
-fn is_agent_session(path: &Path) -> bool {
-    path.file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.starts_with("agent-"))
-        .unwrap_or(false)
+fn file_name_of(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
 }
 
-fn infer_session_id_from_filename(path: &Path) -> Option<String> {
-    path.file_stem()
-        .and_then(|stem| stem.to_str())
-        .map(|stem| stem.to_string())
+fn file_stem_of(path: &str) -> &str {
+    let name = file_name_of(path);
+    name.strip_suffix(".jsonl").unwrap_or(name)
+}
+
+fn is_agent_session_str(path: &str) -> bool {
+    file_name_of(path).starts_with("agent-")
+}
+
+fn infer_session_id_from_filename_str(path: &str) -> Option<String> {
+    Some(file_stem_of(path).to_string())
+}
+
+/// 通过 FileOps 扫描会话（本机 LocalFileOps / 远端 RemoteSftpFileOps 共用）。
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
+    let mut files = Vec::new();
+    collect_jsonl_files_fs(fs, root, &mut files).await;
+
+    let mut sessions = Vec::new();
+    for path in files {
+        if let Ok((head, tail)) = fs.read_head_tail_lines(&path, 10, 30).await {
+            if let Some(meta) = parse_session_meta_from_lines(&path, &head, &tail) {
+                sessions.push(meta);
+            }
+        }
+    }
+    sessions
+}
+
+async fn collect_jsonl_files_fs<F: crate::fsops::FileOps>(
+    fs: &F,
+    root: &str,
+    files: &mut Vec<String>,
+) {
+    if !fs.exists(root).await {
+        return;
+    }
+    let Ok(entries) = fs.read_dir(root).await else {
+        return;
+    };
+    for entry in entries {
+        if entry.is_dir {
+            Box::pin(collect_jsonl_files_fs(fs, &entry.path, files)).await;
+        } else if entry.name.ends_with(".jsonl") {
+            files.push(entry.path);
+        }
+    }
 }
 
 fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {

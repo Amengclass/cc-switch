@@ -3127,7 +3127,8 @@ impl SkillService {
     /// 同步等一长串 `?`，任何一处提前返回都会把最多 512 MiB 的临时内容永久留在
     /// 磁盘上。守卫交给调用方持有，清理就变成作用域结束时自动发生，不再依赖每条
     /// 出口都记得手写 `remove_dir_all`（实测漏了不止一条）。
-    fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
+    /// 解压本地 ZIP 到临时目录（远程安装复用：解压 → 扫描 SKILL.md → 上传远端）。
+    pub(crate) fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
         Self::extract_local_zip_in(zip_path, &std::env::temp_dir())
     }
 
@@ -3214,8 +3215,8 @@ impl SkillService {
         Ok(temp_dir)
     }
 
-    /// 递归扫描目录查找包含 SKILL.md 的技能目录
-    fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    /// 递归扫描目录查找包含 SKILL.md 的技能目录（远程安装复用）。
+    pub(crate) fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut skill_dirs = Vec::new();
         Self::scan_skills_recursive(dir, &mut skill_dirs)?;
         Ok(skill_dirs)

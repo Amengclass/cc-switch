@@ -12,6 +12,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod fsops;
 mod gemini_config;
 mod gemini_mcp;
 mod grok_config;
@@ -29,6 +30,7 @@ mod prompt;
 mod prompt_files;
 mod provider;
 mod proxy;
+mod remote;
 mod services;
 mod session_manager;
 mod settings;
@@ -1559,6 +1561,32 @@ pub fn run() {
             commands::probe_tool_installations,
             // Provider terminal
             commands::open_provider_terminal,
+            // Remote host management (SSH)
+            remote::commands::list_remote_hosts,
+            remote::commands::save_remote_host,
+            remote::commands::delete_remote_host,
+            remote::commands::test_remote_connection,
+            remote::commands::read_remote_settings,
+            remote::commands::switch_remote_provider,
+            remote::commands::scan_remote_env_conflicts,
+            remote::commands::clean_remote_env_conflicts,
+            remote::commands::list_remote_sessions,
+            remote::commands::list_remote_sessions_detailed,
+            remote::commands::get_remote_session_messages,
+            remote::commands::delete_remote_session,
+            remote::commands::get_remote_current_provider,
+            remote::commands::check_remote_claude_installed,
+            remote::commands::check_local_claude_installed,
+            remote::commands::read_remote_mcp_servers,
+            remote::commands::read_remote_mcp_json,
+            remote::commands::upsert_remote_mcp_server,
+            remote::commands::delete_remote_mcp_server,
+            remote::commands::read_remote_prompt,
+            remote::commands::write_remote_prompt,
+            remote::commands::list_remote_skills,
+            remote::commands::delete_remote_skill,
+            remote::commands::install_remote_skills_from_zip,
+            remote::commands::list_docker_containers,
             // Universal Provider management
             commands::get_universal_providers,
             commands::get_universal_provider,

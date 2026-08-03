@@ -24,6 +24,10 @@ import { ListItemRow } from "@/components/common/ListItemRow";
 
 interface UnifiedMcpPanelProps {
   onOpenChange: (open: boolean) => void;
+  /** 选中远端目标时，MCP 面板直接操作该主机 ~/.claude.json */
+  remoteTargetId?: string;
+  /** 目标细化到 Docker 容器时，操作容器内 ~/.claude.json */
+  remoteContainerId?: string;
 }
 
 export interface UnifiedMcpPanelHandle {
@@ -34,7 +38,7 @@ export interface UnifiedMcpPanelHandle {
 const UnifiedMcpPanel = React.forwardRef<
   UnifiedMcpPanelHandle,
   UnifiedMcpPanelProps
->(({ onOpenChange: _onOpenChange }, ref) => {
+>(({ onOpenChange: _onOpenChange, remoteTargetId, remoteContainerId }, ref) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -45,15 +49,47 @@ const UnifiedMcpPanel = React.forwardRef<
     onConfirm: () => void;
   } | null>(null);
 
-  const { data: serversMap, isLoading } = useAllMcpServers();
-  const toggleAppMutation = useToggleMcpApp();
-  const deleteServerMutation = useDeleteMcpServer();
-  const importMutation = useImportMcpFromApps();
+  const { data: serversMap, isLoading } = useAllMcpServers(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const toggleAppMutation = useToggleMcpApp(remoteTargetId, remoteContainerId);
+  const deleteServerMutation = useDeleteMcpServer(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const importMutation = useImportMcpFromApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
 
+  // 本地模式 serversMap 是 McpServer 结构（含 apps/description 等）；
+  // 远端模式读到的是裸 `{id: spec}`，适配成 McpServer 供列表/表单统一使用。
   const serverEntries = useMemo((): Array<[string, McpServer]> => {
     if (!serversMap) return [];
-    return Object.entries(serversMap);
-  }, [serversMap]);
+    if (!remoteTargetId) {
+      return Object.entries(serversMap as Record<string, McpServer>);
+    }
+    return Object.entries(
+      serversMap as Record<string, Record<string, unknown>>,
+    ).map(([id, spec]) => [
+      id,
+      {
+        id,
+        name: id,
+        server: spec,
+        apps: {
+          claude: true,
+          codex: false,
+          gemini: false,
+          grokbuild: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+      },
+    ]);
+  }, [serversMap, remoteTargetId]);
 
   const enabledCounts = useMemo(() => {
     const counts = {
@@ -188,10 +224,14 @@ const UnifiedMcpPanel = React.forwardRef<
         <McpFormModal
           editingId={editingId || undefined}
           initialData={
-            editingId && serversMap ? serversMap[editingId] : undefined
+            editingId && serversMap
+              ? serverEntries.find(([id]) => id === editingId)?.[1]
+              : undefined
           }
           existingIds={serversMap ? Object.keys(serversMap) : []}
           defaultFormat="json"
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
           onSave={async () => {
             setIsFormOpen(false);
             setEditingId(null);

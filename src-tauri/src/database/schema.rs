@@ -323,6 +323,24 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 20. Remote Hosts 表（增强版：SSH 远程主机管理）
+        //     密码不落库，存系统钥匙串（见 remote::credentials）。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_hosts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                username TEXT NOT NULL,
+                auth_method TEXT NOT NULL DEFAULT 'password',
+                save_password BOOLEAN NOT NULL DEFAULT 1,
+                created_at INTEGER,
+                updated_at INTEGER
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
         // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
         // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
         if conn

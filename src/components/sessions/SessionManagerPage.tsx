@@ -21,6 +21,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  Server,
 } from "lucide-react";
 import {
   useDeleteSessionMutation,
@@ -47,6 +48,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { deleteRemoteSession } from "@/lib/api/remote";
 import {
   Tooltip,
   TooltipContent,
@@ -186,10 +188,21 @@ const filterSetToAllowedValues = (
   return changed ? next : current;
 };
 
-export function SessionManagerPage({ appId }: { appId: string }) {
+export function SessionManagerPage({
+  appId,
+  remoteTargetId,
+  remoteContainerId,
+}: {
+  appId: string;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useSessionsQuery();
+  const { data, isLoading, refetch } = useSessionsQuery(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const sessions = data ?? [];
   const detailRef = useRef<HTMLDivElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -324,6 +337,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     useSessionMessagesQuery(
       selectedSession?.providerId,
       selectedSession?.sourcePath,
+      remoteTargetId,
+      remoteContainerId,
     );
   const deleteSessionMutation = useDeleteSessionMutation();
   const isDeleting = deleteSessionMutation.isPending || isBatchDeleting;
@@ -448,6 +463,55 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     setDeleteTargets(null);
 
     if (targets.length === 0) {
+      return;
+    }
+
+    // 远端目标：逐个删除（走 FileOps 远端实现），再刷新远端会话缓存
+    if (remoteTargetId) {
+      setIsBatchDeleting(true);
+      try {
+        let deletedCount = 0;
+        for (const target of targets) {
+          try {
+            await deleteRemoteSession(
+              remoteTargetId,
+              target.sourcePath!,
+              target.sessionId,
+              remoteContainerId,
+            );
+            deletedCount += 1;
+            queryClient.removeQueries({
+              queryKey: [
+                "sessionMessages",
+                "remote",
+                remoteTargetId,
+                remoteContainerId ?? "__host__",
+                target.sourcePath,
+              ],
+            });
+          } catch (e) {
+            console.error("Failed to delete remote session:", e);
+          }
+        }
+        await queryClient.invalidateQueries({
+          queryKey: [
+            "sessions",
+            "remote",
+            remoteTargetId,
+            remoteContainerId ?? "__host__",
+          ],
+        });
+        if (deletedCount > 0) {
+          toast.success(
+            t("sessionManager.batchDeleteSuccess", {
+              defaultValue: "已删除 {{count}} 个会话",
+              count: deletedCount,
+            }),
+          );
+        }
+      } finally {
+        setIsBatchDeleting(false);
+      }
       return;
     }
 
@@ -793,6 +857,14 @@ export function SessionManagerPage({ appId }: { appId: string }) {
         className="mx-auto px-4 sm:px-6 flex flex-col h-full min-h-0"
         onWheel={(e) => e.stopPropagation()}
       >
+        {remoteTargetId && (
+          <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+            <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+            {t("sessionManager.remoteBrowsing", {
+              defaultValue: "正在浏览远端会话（删除 / 查看消息暂未支持远程，后续迭代）",
+            })}
+          </div>
+        )}
         <div className="flex-1 overflow-hidden flex flex-col gap-4">
           {/* 主内容区域 - 左右分栏 */}
           <div className="flex-1 overflow-hidden grid gap-4 md:grid-cols-[320px_1fr]">

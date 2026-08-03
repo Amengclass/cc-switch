@@ -33,6 +33,10 @@ interface McpFormModalProps {
   existingIds?: string[];
   defaultFormat?: "json" | "toml";
   defaultEnabledApps?: AppId[];
+  /** 选中远端目标时，表单保存直接写该主机 ~/.claude.json */
+  remoteTargetId?: string;
+  /** 目标细化到 Docker 容器时，写容器内 ~/.claude.json */
+  remoteContainerId?: string;
 }
 
 const McpFormModal: React.FC<McpFormModalProps> = ({
@@ -43,12 +47,14 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   existingIds = [],
   defaultFormat = "json",
   defaultEnabledApps = ["claude", "codex", "gemini", "grokbuild"],
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const { formatTomlError, validateTomlConfig, validateJsonConfig } =
     useMcpValidation();
 
-  const upsertMutation = useUpsertMcpServer();
+  const upsertMutation = useUpsertMcpServer(remoteTargetId, remoteContainerId);
 
   const [formId, setFormId] = useState(
     () => editingId || initialData?.id || "",
