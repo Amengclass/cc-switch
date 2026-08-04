@@ -43,7 +43,7 @@
 ### 远程功能面板
 - **远程会话**:浏览/查看消息/删除远端 `~/.claude/projects/*.jsonl`(复用本机解析,FileOps)
 - **远程 MCP**:读/写/增/删远端 `~/.claude.json` 的 `mcpServers`(原子写回)
-- **远程 Prompts**:编辑远端 `~/.claude/CLAUDE.md`(单文件整读写)
+- **远程 Prompts**:`~/.cc-switch/prompts.json` 存多提示词列表 + 启用那条原子写入 `~/.claude/CLAUDE.md`,与本地 SQLite 完全对称。列表/添加/编辑/删除/启用切换全功能,乐观更新 + toast 提示
 - **远程 Skills**:远端 `~/.cc-switch/skills/` SSOT + `skills.json` + symlink/copy 同步,与本地完全对称。列出/删除/导入已有/ZIP 安装/切换应用全功能,跟随 `skill_sync_method` 和 `skill_storage_location` 设置
 
 ### Docker 容器支持
@@ -160,10 +160,13 @@
 | ✅ | 安装检测 | Claude Code 安装检测 | `command -v claude` + 哨兵判断;面板徽标 |
 | ✅ | 远程会话 | 远程会话前端闭环 | 目标选服务器 → 浏览/查看/删除远端 jsonl(FileOps) |
 | ✅ | 远程 MCP | 远程 MCP 编辑 | 读写远端 `~/.claude.json` mcpServers(原子写回) |
-| ✅ | 远程 Prompts | 远程 Prompts 编辑 | 编辑远端 `~/.claude/CLAUDE.md` |
+| ✅ | 远程 Prompts | 远程 Prompts 基础管理 | 编辑远端 `~/.claude/CLAUDE.md`（单文件） |
+| ✅ | 远程 Prompts SSOT | 远端 Prompts 对称管理 | 远端 `~/.cc-switch/prompts.json` + 启用项原子写入 `~/.claude/CLAUDE.md`,列表/添加/编辑/删除/启用切换全功能,乐观更新 + toast |
 | ✅ | 远程 Skills | 远程 Skills 基础管理 | 列出/删除远端 `~/.claude/skills/` 目录 |
 | ✅ | 远程 Skills SSOT | 远端 Skills SSOT 重构 | 远端 SSOT + skills.json + symlink/copy,导入已有/ZIP/删除/切换全功能,跟随设置 |
 | ✅ | 容器 stdin 管道 | 容器文件写入 stdin 管道 | docker exec -i + channel.data(),无文件大小限制 |
+| ✅ | 容器批量扫描 | 导入已有容器批量扫描 | 一个 shell 脚本一次 exec 收集所有源目录技能 |
+| ✅ | toggle 合并 | 容器 toggle 合并 exec | 读 JSON → 修改 → 写 JSON + 操作链接合并为一次 exec_with_stdin |
 | ✅ | Docker 容器 | Docker 容器目标(方案 B) | FileOps + RemoteTarget + 全部面板泛型 + ZIP/导入支持容器 |
 | ✅ | 推送 | 推送到 GitHub fork | `https://github.com/Amengclass/cc-switch` |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |
