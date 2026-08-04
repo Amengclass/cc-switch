@@ -300,6 +300,9 @@ pub struct ImportSkillSelection {
     pub directory: String,
     #[serde(default)]
     pub apps: SkillApps,
+    /// 本地磁盘完整路径（远端导入时使用；本地导入忽略）
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

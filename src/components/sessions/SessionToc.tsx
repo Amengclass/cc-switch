@@ -1,7 +1,9 @@
-import { List, X } from "lucide-react";
+import { useState, useMemo } from "react";
+import { List, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
@@ -77,6 +79,18 @@ export function SessionTocDialog({
   onOpenChange,
 }: SessionTocDialogProps) {
   const { t } = useTranslation();
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredItems = useMemo(
+    () =>
+      searchQuery.trim()
+        ? items.filter((item) =>
+            item.preview.toLowerCase().includes(searchQuery.toLowerCase().trim()),
+          )
+        : items,
+    [items, searchQuery],
+  );
+
   if (items.length <= 2) return null;
 
   return (
@@ -107,28 +121,56 @@ export function SessionTocDialog({
             <X className="size-4 text-muted-foreground" />
           </DialogClose>
         </DialogHeader>
-        <div className="overflow-y-auto max-h-[calc(70vh-80px)]">
+
+        {/* 搜索框 */}
+        <div className="px-3 py-2 border-b">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              placeholder={t("common.search", { defaultValue: "搜索..." })}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 pl-7 text-xs"
+            />
+          </div>
+        </div>
+
+        {/* 目录列表 - 可见滚动条 */}
+        <div
+          className="overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent"
+          style={{ maxHeight: "calc(70vh - 120px)" }}
+        >
           <div className="p-3 pb-4 space-y-1">
-            {items.map((item, tocIndex) => (
-              <button
-                key={item.index}
-                type="button"
-                onClick={() => onItemClick(item.index)}
-                className={cn(
-                  "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all",
-                  "hover:bg-primary/10 text-foreground",
-                  "flex items-start gap-3",
-                  "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset",
-                )}
-              >
-                <span className="shrink-0 w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-semibold">
-                  {tocIndex + 1}
-                </span>
-                <span className="line-clamp-2 leading-relaxed pt-0.5">
-                  {item.preview}
-                </span>
-              </button>
-            ))}
+            {filteredItems.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-6">
+                {t("common.noResults", { defaultValue: "无匹配结果" })}
+              </p>
+            ) : (
+              filteredItems.map((item, tocIndex) => (
+                <button
+                  key={item.index}
+                  type="button"
+                  onClick={() => {
+                    onItemClick(item.index);
+                    setSearchQuery("");
+                    onOpenChange(false);
+                  }}
+                  className={cn(
+                    "w-full text-left px-3 py-2.5 rounded-lg text-sm transition-all",
+                    "hover:bg-primary/10 text-foreground",
+                    "flex items-start gap-3",
+                    "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-inset",
+                  )}
+                >
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center font-semibold">
+                    {tocIndex + 1}
+                  </span>
+                  <span className="line-clamp-2 leading-relaxed pt-0.5">
+                    {item.preview}
+                  </span>
+                </button>
+              ))
+            )}
           </div>
         </div>
       </DialogContent>

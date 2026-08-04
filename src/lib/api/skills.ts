@@ -76,6 +76,8 @@ export interface UnmanagedSkill {
 export interface ImportSkillSelection {
   directory: string;
   apps: SkillApps;
+  /** 本地磁盘完整路径（远端导入时使用；本地导入忽略） */
+  path?: string;
 }
 
 /** 技能对象（兼容旧 API） */

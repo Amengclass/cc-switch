@@ -17,7 +17,7 @@ export async function listRemoteHosts(): Promise<RemoteHost[]> {
   return invoke<RemoteHost[]>("list_remote_hosts");
 }
 
-/** 保存（新增/更新）远程主机；携带密码时写入系统钥匙串 */
+/** 保存（新增/更新）远程主机；携带密码时写入 DPAPI 加密存储 */
 export async function saveRemoteHost(
   host: RemoteHost,
   password?: string,
@@ -25,7 +25,7 @@ export async function saveRemoteHost(
   return invoke<RemoteHost>("save_remote_host", { host, password });
 }
 
-/** 删除远程主机（同时清除钥匙串密码） */
+/** 删除远程主机（同时清除加密保存的密码） */
 export async function deleteRemoteHost(hostId: string): Promise<boolean> {
   return invoke<boolean>("delete_remote_host", { hostId });
 }
@@ -38,6 +38,21 @@ export async function testRemoteConnection(
   return invoke<RemoteConnectionInfo>("test_remote_connection", {
     hostId,
     container: container ?? null,
+  });
+}
+
+/** 用未保存的连接信息直接测试 SSH（新增主机场景） */
+export async function testRemoteConnectionInfo(
+  host: string,
+  port: number,
+  username: string,
+  password: string,
+): Promise<RemoteConnectionInfo> {
+  return invoke<RemoteConnectionInfo>("test_remote_connection_info", {
+    host,
+    port,
+    username,
+    password,
   });
 }
 
@@ -238,14 +253,59 @@ export async function writeRemotePrompt(
   });
 }
 
+/** 提示词条目（与 SQLite Prompt 结构一致） */
+export interface RemotePrompt {
+  id: string;
+  name: string;
+  content: string;
+  description?: string;
+  enabled: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** 列出远端 prompts.json 中的提示词列表 */
+export async function listRemotePrompts(
+  hostId: string,
+  container?: string,
+): Promise<RemotePrompt[]> {
+  return invoke<RemotePrompt[]>("list_remote_prompts", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 保存远端提示词列表，并同步启用项到 CLAUDE.md */
+export async function saveRemotePrompts(
+  hostId: string,
+  prompts: RemotePrompt[],
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("save_remote_prompts", {
+    hostId,
+    prompts,
+    container: container ?? null,
+  });
+}
+
 /** 远端 ~/.claude/skills 下的技能目录项 */
 export interface RemoteSkillEntry {
+  id: string;
   name: string;
   path: string;
   /** 从 SKILL.md frontmatter 解析的显示名（无则回退目录名） */
   displayName?: string;
   /** 从 SKILL.md frontmatter 解析的描述 */
   description?: string;
+  /** 各应用启用状态 */
+  apps: RemoteSkillApps;
+  installedAt: number;
+  updatedAt: number;
+  repoOwner?: string;
+  repoName?: string;
+  repoBranch?: string;
+  readmeUrl?: string;
+  contentHash?: string;
 }
 
 /** 列出远端 ~/.claude/skills/ 下的已安装技能目录 */
@@ -281,6 +341,95 @@ export async function installRemoteSkillsFromZip(
   return invoke<string[]>("install_remote_skills_from_zip", {
     hostId,
     zipPath,
+    container: container ?? null,
+  });
+}
+
+/** 从本地单个技能目录直接上传到远端 ~/.claude/skills/（递归） */
+export async function installRemoteSkillFromDir(
+  hostId: string,
+  localPath: string,
+  container?: string,
+): Promise<string> {
+  return invoke<string>("install_remote_skill_from_dir", {
+    hostId,
+    localPath,
+    container: container ?? null,
+  });
+}
+
+/** 远端未管理技能条目（扫描远端文件系统） */
+export interface RemoteUnmanagedSkill {
+  directory: string;
+  name: string;
+  description?: string;
+  /** 在哪些应用目录中找到 */
+  foundIn: string[];
+  /** 远端完整路径 */
+  path: string;
+}
+
+/** 在远端文件系统上扫描未管理的技能目录 */
+export async function scanRemoteUnmanagedSkills(
+  hostId: string,
+  container?: string,
+): Promise<RemoteUnmanagedSkill[]> {
+  return invoke<RemoteUnmanagedSkill[]>("scan_remote_unmanaged_skills", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** skills.json 中的记录 */
+export interface RemoteSkillRecord {
+  name: string;
+  description?: string;
+  directory: string;
+  apps: RemoteSkillApps;
+  installedAt: number;
+  updatedAt: number;
+  repoOwner?: string;
+  repoName?: string;
+  repoBranch?: string;
+}
+
+export interface RemoteSkillApps {
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
+  opencode: boolean;
+  openclaw: boolean;
+  hermes: boolean;
+}
+
+/** 切换远端技能在某应用的启用状态 */
+export async function toggleRemoteSkillApp(
+  hostId: string,
+  name: string,
+  app: string,
+  enabled: boolean,
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("toggle_remote_skill_app", {
+    hostId,
+    name,
+    app,
+    enabled,
+    container: container ?? null,
+  });
+}
+
+/** 在远端将技能目录复制到 SSOT → 更新 skills.json → 创建 symlink */
+export async function importRemoteSkill(
+  hostId: string,
+  sourcePath: string,
+  name: string,
+  container?: string,
+): Promise<RemoteSkillRecord> {
+  return invoke<RemoteSkillRecord>("import_remote_skill", {
+    hostId,
+    sourcePath,
+    name,
     container: container ?? null,
   });
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Server,
@@ -12,12 +12,29 @@ import {
   ShieldAlert,
   Eye,
   EyeOff,
+  Tag,
+  Globe,
+  User,
+  Key,
+  Info,
+  X,
+  ChevronUp,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetFooter,
+} from "@/components/ui/sheet";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +46,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
-  checkRemoteClaudeInstalled,
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
   listRemoteHosts,
@@ -37,6 +53,7 @@ import {
   saveRemoteHost,
   scanRemoteEnvConflicts,
   testRemoteConnection,
+  testRemoteConnectionInfo,
 } from "@/lib/api/remote";
 import type { RemoteEnvConflict, RemoteHost } from "@/types/remote";
 
@@ -53,17 +70,18 @@ const EMPTY_FORM: HostFormState = {
   name: "",
   host: "",
   port: "22",
-  username: "root",
+  username: "",
   password: "",
   savePassword: true,
 };
 
 function formToDraft(f: HostFormState) {
   return {
-    name: f.name.trim(),
+    // 名称为选填：留空时回退为主机地址
+    name: f.name.trim() || f.host.trim(),
     host: f.host.trim(),
     port: Math.max(1, Number(f.port) || 22),
-    username: f.username.trim() || "root",
+    username: f.username.trim(),
     authMethod: "password" as const,
     savePassword: f.savePassword,
     password: f.password,
@@ -74,15 +92,16 @@ export function RemoteHostsPanel() {
   const { t } = useTranslation();
 
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
-  const [claudeStatus, setClaudeStatus] = useState<
-    Record<string, boolean | null>
-  >({});
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RemoteHost | null>(null);
   const [form, setForm] = useState<HostFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  // 测试「未保存」的新连接信息
+  const [testFormLoading, setTestFormLoading] = useState(false);
+  // 抽屉打开时初始焦点指向「名称」输入框（而非右上角 X）
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const [readingId, setReadingId] = useState<string | null>(null);
   const [viewSettings, setViewSettings] = useState<{
     host: RemoteHost;
@@ -108,12 +127,6 @@ export function RemoteHostsPanel() {
       setLoading(true);
       const data = await listRemoteHosts();
       setHosts(data);
-      // 后台检测每台主机的 Claude Code 安装状态（带超时，失败/超时置 null）
-      data.forEach((h) => {
-        checkRemoteClaudeInstalled(h.id)
-          .then((s) => setClaudeStatus((prev) => ({ ...prev, [h.id]: s })))
-          .catch(() => setClaudeStatus((prev) => ({ ...prev, [h.id]: null })));
-      });
     } catch (error) {
       console.error("Failed to load remote hosts:", error);
       toast.error(t("remote.loadError", { defaultValue: "加载远程主机失败" }));
@@ -146,9 +159,15 @@ export function RemoteHostsPanel() {
   };
 
   const handleSave = async () => {
-    if (!form.name.trim() || !form.host.trim()) {
+    if (!form.host.trim()) {
       toast.error(
-        t("remote.formRequired", { defaultValue: "名称和主机地址不能为空" }),
+        t("remote.hostRequired", { defaultValue: "主机地址不能为空" }),
+      );
+      return;
+    }
+    if (!form.username.trim()) {
+      toast.error(
+        t("remote.usernameRequired", { defaultValue: "用户名不能为空" }),
       );
       return;
     }
@@ -198,10 +217,6 @@ export function RemoteHostsPanel() {
     setTestingId(host.id);
     try {
       const info = await testRemoteConnection(host.id);
-      setClaudeStatus((prev) => ({
-        ...prev,
-        [host.id]: info.claudeCodeInstalled,
-      }));
       const claudeStatusText = info.claudeCodeInstalled
         ? t("remote.claudeInstalled", {
             defaultValue: "已检测到 Claude Code",
@@ -240,6 +255,64 @@ export function RemoteHostsPanel() {
       );
     } finally {
       setTestingId(null);
+    }
+  };
+
+  // 测试「未保存」的新连接信息（新增主机时直接测，无需先保存）
+  const handleTestForm = async () => {
+    if (!form.host.trim() || !form.username.trim() || !form.password) {
+      toast.error(
+        t("remote.formRequired", {
+          defaultValue: "请先填写主机地址、用户名和密码",
+        }),
+      );
+      return;
+    }
+    setTestFormLoading(true);
+    try {
+      const info = await testRemoteConnectionInfo(
+        form.host.trim(),
+        Math.max(1, Number(form.port) || 22),
+        form.username.trim(),
+        form.password,
+      );
+      const claudeStatusText = info.claudeCodeInstalled
+        ? t("remote.claudeInstalled", {
+            defaultValue: "已检测到 Claude Code",
+          })
+        : info.claudeCodeInstalled === false
+          ? t("remote.claudeNotInstalled", {
+              defaultValue: "未检测到 Claude Code（配置会预置，安装后生效）",
+            })
+          : t("remote.claudeDetectFailed", {
+              defaultValue: "Claude Code 安装状态检测失败",
+            });
+      toast.success(
+        t("remote.connected", {
+          defaultValue: `连接成功（远端目录 ${info.home}）`,
+          home: info.home,
+        }),
+        {
+          description: [
+            info.settingsExists
+              ? t("remote.settingsExists", {
+                  defaultValue: "检测到远端 settings.json",
+                })
+              : t("remote.settingsMissing", {
+                  defaultValue: "远端尚未创建 settings.json",
+                }),
+            claudeStatusText,
+          ].join(" · "),
+        },
+      );
+    } catch (error) {
+      console.error("Failed to test new connection:", error);
+      toast.error(
+        t("remote.connectionFailed", { defaultValue: "连接失败" }),
+        { description: String(error) },
+      );
+    } finally {
+      setTestFormLoading(false);
     }
   };
 
@@ -334,17 +407,7 @@ export function RemoteHostsPanel() {
 
   return (
     <div className="space-y-4 px-6 pt-4">
-      {/* 头部 */}
-      <div className="flex items-center gap-2">
-        <Server className="h-5 w-5 text-primary" />
-        <h2 className="text-lg font-semibold">
-          {t("remote.title", { defaultValue: "远程主机" })}
-        </h2>
-        <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-          {hosts.length}
-        </span>
-      </div>
-
+      {/* 顶部导航已含标题「远程主机」，此处仅保留有信息量的描述 */}
       <p className="text-sm text-muted-foreground">{description}</p>
 
       {/* 主机列表 */}
@@ -369,7 +432,11 @@ export function RemoteHostsPanel() {
           {hosts.map((host) => (
             <div
               key={host.id}
-              className="rounded-xl border bg-card p-4 shadow-sm"
+              className={cn(
+                "rounded-xl border bg-card p-4 shadow-sm transition-shadow",
+                editing?.id === host.id &&
+                  "ring-2 ring-primary/60 border-primary/40",
+              )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -380,22 +447,6 @@ export function RemoteHostsPanel() {
                 </div>
                 <Server className="h-4 w-4 shrink-0 text-muted-foreground/60" />
               </div>
-
-              {claudeStatus[host.id] === false && (
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
-                  <ShieldAlert className="h-3 w-3" />
-                  {t("remote.claudeNotInstalledBadge", {
-                    defaultValue: "Claude Code 未安装",
-                  })}
-                </div>
-              )}
-              {claudeStatus[host.id] === true && (
-                <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600">
-                  {t("remote.claudeInstalledBadge", {
-                    defaultValue: "Claude Code 已安装",
-                  })}
-                </div>
-              )}
 
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <Button
@@ -462,129 +513,266 @@ export function RemoteHostsPanel() {
         {t("remote.add", { defaultValue: "添加远程主机" })}
       </Button>
 
-      {/* 添加/编辑表单弹窗 */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {editing
-                ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
-                : t("remote.addTitle", { defaultValue: "添加远程主机" })}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="host-name">
-                {t("remote.nameLabel", { defaultValue: "名称" })}
-              </Label>
-              <Input
-                id="host-name"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder={t("remote.namePlaceholder", {
-                  defaultValue: "例如：GPU 训练机 / 生产服务器",
-                })}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="col-span-2 space-y-2">
-                <Label htmlFor="host-address">
-                  {t("remote.hostLabel", { defaultValue: "主机地址" })}
-                </Label>
-                <Input
-                  id="host-address"
-                  value={form.host}
-                  onChange={(e) => setForm({ ...form, host: e.target.value })}
-                  placeholder="192.168.1.10"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="host-port">
-                  {t("remote.portLabel", { defaultValue: "端口" })}
-                </Label>
-                <Input
-                  id="host-port"
-                  value={form.port}
-                  onChange={(e) => setForm({ ...form, port: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="host-user">
-                {t("remote.usernameLabel", { defaultValue: "用户名" })}
-              </Label>
-              <Input
-                id="host-user"
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                placeholder="root"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="host-pass">
-                {t("remote.passwordLabel", { defaultValue: "密码" })}
-              </Label>
-              <div className="relative">
-                <Input
-                  id="host-pass"
-                  type={showPassword ? "text" : "password"}
-                  value={form.password}
-                  onChange={(e) =>
-                    setForm({ ...form, password: e.target.value })
-                  }
-                  placeholder={
-                    editing
-                      ? t("remote.passwordKeepHint", {
-                          defaultValue: "留空则保留已保存的密码",
-                        })
-                      : ""
-                  }
-                  className="pr-9"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  title={
-                    showPassword
-                      ? t("remote.hidePassword", {
-                          defaultValue: "隐藏密码",
-                        })
-                      : t("remote.showPassword", {
-                          defaultValue: "显示密码",
-                        })
-                  }
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {showPassword ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div className="space-y-0.5">
-                <Label className="text-sm">
-                  {t("remote.savePassword", {
-                    defaultValue: "保存密码到系统钥匙串",
-                  })}
-                </Label>
+      {/* 添加/编辑表单 - 右侧抽屉 */}
+      <Sheet open={formOpen} onOpenChange={setFormOpen}>
+        <SheetContent
+          className="top-16 h-[calc(100dvh-64px)] max-h-[calc(100dvh-64px)]"
+          onOpenAutoFocus={(e) => {
+            // 初始焦点指向「名称」输入框，避免聚焦到右上角 X
+            e.preventDefault();
+            nameInputRef.current?.focus();
+          }}
+        >
+          <SheetHeader>
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-1">
+                <SheetTitle className="flex items-center gap-2">
+                  <Server className="h-4 w-4 text-primary" />
+                  {editing
+                    ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
+                    : t("remote.addTitle", { defaultValue: "添加远程主机" })}
+                </SheetTitle>
                 <p className="text-xs text-muted-foreground">
-                  {t("remote.savePasswordHint", {
-                    defaultValue:
-                      "密码经系统钥匙串加密保存，用于一键连接 / 切换",
+                  {t("remote.formSubtitle", {
+                    defaultValue: "填写 SSH 连接信息，保存后可快速连接与管理",
                   })}
                 </p>
               </div>
-              <Switch
-                checked={form.savePassword}
-                onCheckedChange={(v) => setForm({ ...form, savePassword: v })}
-              />
+              <SheetClose className="shrink-0 rounded-full p-1.5 hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
+                <X className="size-4 text-muted-foreground" />
+              </SheetClose>
+            </div>
+          </SheetHeader>
+
+          {/* 可滚动表单区域 - 与 header/footer 对齐 px-6 */}
+          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-0">
+            {/* 基础信息 */}
+            <div className="space-y-3 pb-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
+                {t("remote.basicInfo", { defaultValue: "基础信息" })}
+              </h4>
+              <div className="space-y-2">
+                <Label htmlFor="host-name" className="flex items-center gap-1.5 text-foreground/80">
+                  <Tag className="h-3.5 w-3.5 text-foreground/70" />
+                  {t("remote.nameLabel", { defaultValue: "名称" })}
+                  <span className="text-xs font-normal text-muted-foreground/60">
+                    {t("remote.optional", { defaultValue: "选填" })}
+                  </span>
+                </Label>
+                <Input
+                  id="host-name"
+                  ref={nameInputRef}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder={t("remote.namePlaceholder", {
+                    defaultValue: "GPU 训练机 / 生产服务器…",
+                  })}
+                />
+                <p className="text-xs text-muted-foreground/70">
+                  {t("remote.nameHint", {
+                    defaultValue: "不填时将使用主机地址作为显示名",
+                  })}
+                </p>
+              </div>
             </div>
 
-            <Alert>
-              <AlertDescription className="text-xs text-muted-foreground">
+            {/* 分隔线 */}
+            <div className="border-t border-border/50" />
+
+            {/* 连接信息 */}
+            <div className="space-y-3 pt-4 pb-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
+                {t("remote.connectionInfo", { defaultValue: "连接信息" })}
+              </h4>
+              <div className="space-y-2">
+                {/* 标签行 */}
+                <div className="flex items-center gap-3">
+                  <Label htmlFor="host-address" className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-foreground/80">
+                    <Globe className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
+                    {t("remote.hostLabel", { defaultValue: "主机地址" })}
+                    <span className="text-destructive">*</span>
+                  </Label>
+                  <Label htmlFor="host-port" className="w-24 shrink-0 text-center text-foreground/80">
+                    {t("remote.portLabel", { defaultValue: "端口" })}
+                  </Label>
+                </div>
+                {/* 输入框行 - 与标签行分离，保证两个输入框水平对齐 */}
+                <div className="flex items-center gap-3">
+                  <Input
+                    id="host-address"
+                    value={form.host}
+                    onChange={(e) => setForm({ ...form, host: e.target.value })}
+                    placeholder={t("remote.hostPlaceholder", {
+                      defaultValue: "例如 192.168.1.10",
+                    })}
+                    className="min-w-0 flex-1"
+                  />
+                  <div className="relative w-24 shrink-0">
+                    <Input
+                      id="host-port"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={form.port}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          port: e.target.value.replace(/[^\d]/g, ""),
+                        })
+                      }
+                      placeholder={t("remote.portPlaceholder", {
+                        defaultValue: "例如 22",
+                      })}
+                      className="pr-8 text-center"
+                    />
+                    <div className="absolute right-0.5 top-1/2 flex -translate-y-1/2 flex-col">
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            port: String(
+                              Math.max(1, (Number(form.port) || 0) + 1),
+                            ),
+                          })
+                        }
+                        className="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <ChevronUp className="h-3 w-3" />
+                      </button>
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        onClick={() =>
+                          setForm({
+                            ...form,
+                            port: String(
+                              Math.max(1, (Number(form.port) || 0) - 1),
+                            ),
+                          })
+                        }
+                        className="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                      >
+                        <ChevronDown className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="host-user" className="flex items-center gap-1.5 text-foreground/80">
+                  <User className="h-3.5 w-3.5 text-foreground/70" />
+                  {t("remote.usernameLabel", { defaultValue: "用户名" })}
+                  <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  id="host-user"
+                  value={form.username}
+                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  placeholder={t("remote.usernamePlaceholder", {
+                    defaultValue: "例如 root",
+                  })}
+                />
+                {form.username === "root" ? (
+                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Info className="h-3 w-3 shrink-0 text-foreground/50" />
+                    {t("remote.rootWarning", {
+                      defaultValue: "不建议使用 root，推荐具有 sudo 权限的普通用户",
+                    })}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground/70">
+                    {t("remote.usernameHint", {
+                      defaultValue: "建议使用具有 SSH 权限的普通用户",
+                    })}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 分隔线 */}
+            <div className="border-t border-border/50" />
+
+            {/* 认证信息 */}
+            <div className="space-y-3 pt-4 pb-3">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
+                {t("remote.authInfo", { defaultValue: "认证信息" })}
+              </h4>
+              <div className="space-y-2">
+                <Label htmlFor="host-pass" className="flex items-center gap-1.5 text-foreground/80">
+                  <Key className="h-3.5 w-3.5 text-foreground/70" />
+                  {t("remote.passwordLabel", { defaultValue: "密码" })}
+                  {!editing && <span className="text-destructive">*</span>}
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="host-pass"
+                    type={showPassword ? "text" : "password"}
+                    value={form.password}
+                    onChange={(e) =>
+                      setForm({ ...form, password: e.target.value })
+                    }
+                    placeholder={
+                      editing
+                        ? t("remote.passwordKeepHint", {
+                            defaultValue: "留空则保留已保存的密码",
+                          })
+                        : t("remote.passwordPlaceholder", {
+                            defaultValue: "请输入 SSH 登录密码",
+                          })
+                    }
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    title={
+                      showPassword
+                        ? t("remote.hidePassword", {
+                            defaultValue: "隐藏密码",
+                          })
+                        : t("remote.showPassword", {
+                            defaultValue: "显示密码",
+                          })
+                    }
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground/60 hover:text-foreground"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+              {/* 保存密码 - 轻量行内样式 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="space-y-0.5">
+                  <Label className={`text-sm font-normal ${editing || form.password ? "text-foreground/80" : "text-muted-foreground/60"}`}>
+                    {t("remote.savePassword", {
+                      defaultValue: "加密保存密码",
+                    })}
+                  </Label>
+                  <p className="text-xs text-muted-foreground/70">
+                    {t("remote.savePasswordHint", {
+                      defaultValue:
+                        "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
+                    })}
+                  </p>
+                </div>
+                <Switch
+                  checked={form.savePassword}
+                  onCheckedChange={(v) => setForm({ ...form, savePassword: v })}
+                  // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
+                  disabled={!editing && !form.password}
+                />
+              </div>
+            </div>
+
+            <Alert className="border-amber-200/40 bg-amber-50/40 dark:border-amber-800/20 dark:bg-amber-950/10">
+              <Info className="h-4 w-4 text-amber-500/80" />
+              <AlertDescription className="text-xs text-muted-foreground/80">
                 {t("remote.formHint", {
                   defaultValue:
                     "M1 阶段仅支持密码认证；密钥认证将在后续版本加入。",
@@ -592,21 +780,45 @@ export function RemoteHostsPanel() {
               </AlertDescription>
             </Alert>
           </div>
-          <DialogFooter>
+
+          <SheetFooter>
             <Button
               variant="outline"
               onClick={() => setFormOpen(false)}
-              disabled={saving}
+              disabled={saving || testFormLoading}
             >
               {t("common.cancel", { defaultValue: "取消" })}
             </Button>
-            <Button onClick={() => void handleSave()} disabled={saving}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (editing) {
+                  void handleTest(editing);
+                } else {
+                  void handleTestForm();
+                }
+              }}
+              disabled={saving || testFormLoading}
+            >
+              {testFormLoading || (editing && testingId === editing.id) ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <PlugZap className="mr-1 h-4 w-4" />
+              )}
+              {testFormLoading || (editing && testingId === editing.id)
+                ? t("remote.testing", { defaultValue: "测试中…" })
+                : t("remote.test", { defaultValue: "测试连接" })}
+            </Button>
+            <Button
+              onClick={() => void handleSave()}
+              disabled={saving || testFormLoading}
+            >
               {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
               {t("common.save", { defaultValue: "保存" })}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* 远端配置查看 */}
       <Dialog
@@ -713,7 +925,7 @@ export function RemoteHostsPanel() {
           defaultValue: "删除远程主机",
         })}
         message={t("remote.deleteConfirmMessage", {
-          defaultValue: `确定要删除 "${deleteConfirm.host?.name}" 吗？系统钥匙串中的密码也会一并清除。`,
+          defaultValue: `确定要删除 "${deleteConfirm.host?.name}" 吗？已加密保存的密码也会一并清除。`,
           name: deleteConfirm.host?.name ?? "",
         })}
         confirmText={t("common.delete", { defaultValue: "删除" })}

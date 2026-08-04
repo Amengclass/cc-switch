@@ -99,3 +99,44 @@ pub async fn exec_command(
         .map_err(|e| format!("读取命令输出失败: {e}"))?;
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
+
+/// 执行命令并通过 stdin 管道传入数据（不嵌入命令字符串，避免大文件撑爆 SSH 通道）。
+///
+/// 流程：打开通道 → exec 命令 → data() 分块写入 stdin → eof() → 读 stdout。
+/// 数据经 base64 编码后写入，远端命令需自行 `base64 -d` 解码。
+pub async fn exec_command_with_stdin(
+    session: &Handle<RemoteHandler>,
+    command: &str,
+    stdin_data: &[u8],
+) -> Result<String, String> {
+    let ch = session
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("打开命令通道失败: {e}"))?;
+    ch.exec(true, command)
+        .await
+        .map_err(|e| format!("执行命令失败: {e}"))?;
+
+    // 分块写入 stdin，每块 64KB
+    use tokio::io::AsyncWriteExt;
+    const CHUNK: usize = 64 * 1024;
+    let mut written = 0usize;
+    while written < stdin_data.len() {
+        let end = (written + CHUNK).min(stdin_data.len());
+        ch.data(&stdin_data[written..end])
+            .await
+            .map_err(|e| format!("写入 stdin 失败: {e}"))?;
+        written = end;
+    }
+    ch.eof()
+        .await
+        .map_err(|e| format!("发送 EOF 失败: {e}"))?;
+
+    let mut stream = ch.into_stream();
+    let mut output = Vec::new();
+    stream
+        .read_to_end(&mut output)
+        .await
+        .map_err(|e| format!("读取命令输出失败: {e}"))?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}

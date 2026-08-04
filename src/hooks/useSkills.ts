@@ -16,29 +16,49 @@ import {
 import type { AppId } from "@/lib/api/types";
 import {
   deleteRemoteSkill,
+  installRemoteSkillFromDir,
   installRemoteSkillsFromZip,
   listRemoteSkills,
-  type RemoteSkillEntry,
+  toggleRemoteSkillApp,
 } from "@/lib/api/remote";
 import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
 
-/** 把远端技能目录项适配成 InstalledSkill（远端无 DB，仅目录名 + claude 启用）。 */
-function remoteToInstalled(entry: RemoteSkillEntry): InstalledSkill {
+/** 把远端技能目录项适配成 InstalledSkill。 */
+function remoteToInstalled(entry: {
+  id?: string;
+  name: string;
+  path?: string;
+  displayName?: string;
+  description?: string;
+  apps?: { claude?: boolean; codex?: boolean; gemini?: boolean; opencode?: boolean; openclaw?: boolean; hermes?: boolean };
+  installedAt?: number;
+  updatedAt?: number;
+  repoOwner?: string;
+  repoName?: string;
+  repoBranch?: string;
+  readmeUrl?: string;
+  contentHash?: string;
+}): InstalledSkill {
   return {
-    id: entry.name,
+    id: entry.id || entry.name,
     name: entry.displayName || entry.name,
     description: entry.description,
     directory: entry.name,
     apps: {
-      claude: true,
-      codex: false,
-      gemini: false,
-      opencode: false,
-      openclaw: false,
-      hermes: false,
+      claude: entry.apps?.claude ?? true,
+      codex: entry.apps?.codex ?? false,
+      gemini: entry.apps?.gemini ?? false,
+      opencode: entry.apps?.opencode ?? false,
+      openclaw: entry.apps?.openclaw ?? false,
+      hermes: entry.apps?.hermes ?? false,
     },
-    installedAt: 0,
-    updatedAt: 0,
+    installedAt: entry.installedAt ?? 0,
+    updatedAt: entry.updatedAt ?? 0,
+    repoOwner: entry.repoOwner,
+    repoName: entry.repoName,
+    repoBranch: entry.repoBranch,
+    readmeUrl: entry.readmeUrl,
+    contentHash: entry.contentHash,
   };
 }
 
@@ -243,6 +263,46 @@ export function useToggleSkillApp() {
   });
 }
 
+/** 切换远端技能在某应用的启用状态（更新 skills.json + symlink）。 */
+export function useToggleRemoteSkillApp(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
+  const queryClient = useQueryClient();
+  const installedKey = remoteTargetId
+    ? [
+        "skills",
+        "installed",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "installed"];
+  return useMutation({
+    mutationFn: ({
+      id,
+      app,
+      enabled,
+    }: {
+      id: string;
+      app: AppId;
+      enabled: boolean;
+    }) => {
+      if (!remoteTargetId) return Promise.resolve(false);
+      return toggleRemoteSkillApp(
+        remoteTargetId,
+        id,
+        app,
+        enabled,
+        remoteContainerId,
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: installedKey });
+    },
+  });
+}
+
 /**
  * 扫描未管理的 Skills
  *
@@ -262,20 +322,62 @@ export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
 }
 
 /**
- * 从应用目录导入 Skills
- * 成功后直接更新缓存，不触发重新加载/刷新
+ * 从应用目录导入 Skills。
+ * 远端模式：逐个上传选中的本地技能目录到远端 ~/.claude/skills/。
+ * 本机模式：调用本机 importFromApps API。
  */
-export function useImportSkillsFromApps() {
+export function useImportSkillsFromApps(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
+  const installedKey = remoteTargetId
+    ? [
+        "skills",
+        "installed",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "installed"];
   return useMutation({
-    mutationFn: (imports: ImportSkillSelection[]) =>
-      skillsApi.importFromApps(imports),
+    mutationFn: async (imports: ImportSkillSelection[]) => {
+      if (remoteTargetId) {
+        const installed: InstalledSkill[] = [];
+        const errors: string[] = [];
+        for (const imp of imports) {
+          const fullPath = imp.path || imp.directory;
+          try {
+            const name = await installRemoteSkillFromDir(
+              remoteTargetId,
+              fullPath,
+              remoteContainerId,
+            );
+            installed.push(
+              remoteToInstalled({ name, path: fullPath }),
+            );
+          } catch (e) {
+            const errMsg = String(e);
+            errors.push(`${imp.directory}: ${errMsg}`);
+            console.warn("[remote-import] 跳过", imp.directory, errMsg);
+          }
+        }
+        if (errors.length > 0 && installed.length === 0) {
+          throw new Error(errors.join("; "));
+        }
+        return installed;
+      }
+      return skillsApi.importFromApps(imports);
+    },
     onSuccess: (importedSkills) => {
-      // 直接更新 installed 缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
+        installedKey,
         (oldData) => mergeImportedSkills(oldData, importedSkills),
       );
+      // 远端导入后重新拉取，获得 SKILL.md 解析出的 displayName / description
+      if (remoteTargetId) {
+        queryClient.invalidateQueries({ queryKey: installedKey });
+      }
       // 刷新 unmanaged 列表（已被导入的应该移除）
       queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
     },
@@ -349,17 +451,22 @@ export function useInstallSkillsFromZip(
       return skillsApi.installFromZip(filePath, currentApp);
     },
     onSuccess: (installedSkills) => {
-      // 直接更新 installed 缓存
+      if (remoteTargetId) {
+        // 远端：安装后重新拉取完整列表（含 SKILL.md 描述）
+        queryClient.invalidateQueries({
+          queryKey: [
+            "skills",
+            "installed",
+            "remote",
+            remoteTargetId,
+            remoteContainerId ?? "__host__",
+          ],
+        });
+        return;
+      }
+      // 本机：直接更新缓存
       queryClient.setQueryData<InstalledSkill[]>(
-        remoteTargetId
-          ? [
-              "skills",
-              "installed",
-              "remote",
-              remoteTargetId,
-              remoteContainerId ?? "__host__",
-            ]
-          : ["skills", "installed"],
+        ["skills", "installed"],
         (oldData) => {
           if (!oldData) return installedSkills;
           return [...oldData, ...installedSkills];

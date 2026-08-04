@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Sparkles,
@@ -18,6 +18,7 @@ import {
   useSkillBackups,
   useRestoreSkillBackup,
   useToggleSkillApp,
+  useToggleRemoteSkillApp,
   useUninstallSkill,
   useScanUnmanagedSkills,
   useImportSkillsFromApps,
@@ -30,6 +31,7 @@ import {
 import type { AppId } from "@/lib/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
+import { scanRemoteUnmanagedSkills, importRemoteSkill } from "@/lib/api/remote";
 import { toast } from "sonner";
 import { SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
@@ -84,6 +86,17 @@ const UnifiedSkillsPanel = React.forwardRef<
   } | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  /** 远端导入时暂存扫描结果（替代 unmanagedSkills） */
+  const unmanagedSkillsOverride = useRef<
+    | Array<{
+        directory: string;
+        name: string;
+        description?: string;
+        foundIn: string[];
+        path: string;
+      }>
+    | null
+  >(null);
 
   const { data: skills, isLoading } = useInstalledSkills(
     remoteTargetId,
@@ -96,12 +109,20 @@ const UnifiedSkillsPanel = React.forwardRef<
   } = useSkillBackups();
   const deleteBackupMutation = useDeleteSkillBackup();
   const toggleAppMutation = useToggleSkillApp();
+  const toggleRemoteAppMutation = useToggleRemoteSkillApp(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const uninstallMutation = useUninstallSkill(remoteTargetId, remoteContainerId);
   const restoreBackupMutation = useRestoreSkillBackup();
   // enabled: true —— 进入 Skill 页面时自动静默扫描一次（绿点提示来源）
+  // 远端模式下也扫描本机未管理技能（"导入已有"会部署到远端）
   const { data: unmanagedSkills, refetch: scanUnmanaged } =
-    useScanUnmanagedSkills({ enabled: !isRemote });
-  const importMutation = useImportSkillsFromApps();
+    useScanUnmanagedSkills({ enabled: true });
+  const importMutation = useImportSkillsFromApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const installFromZipMutation = useInstallSkillsFromZip(
     remoteTargetId,
     remoteContainerId,
@@ -146,7 +167,11 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   const handleToggleApp = async (id: string, app: AppId, enabled: boolean) => {
     try {
-      await toggleAppMutation.mutateAsync({ id, app, enabled });
+      if (isRemote) {
+        await toggleRemoteAppMutation.mutateAsync({ id, app, enabled });
+      } else {
+        await toggleAppMutation.mutateAsync({ id, app, enabled });
+      }
     } catch (error) {
       toast.error(t("common.error"), { description: String(error) });
     }
@@ -184,25 +209,84 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   const handleOpenImport = async () => {
+    let toastId: string | number | undefined;
     try {
+      toastId = toast.loading(t("skills.scanning", { defaultValue: "正在扫描..." }));
+      if (isRemote && remoteTargetId) {
+        // 远端：扫描远端文件系统
+        const remoteUnmanaged = await scanRemoteUnmanagedSkills(
+          remoteTargetId,
+          remoteContainerId || undefined,
+        );
+        if (remoteUnmanaged.length === 0) {
+          toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
+          return;
+        }
+        // 适配为 ImportSkillsDialog 期望的格式
+        unmanagedSkillsOverride.current = remoteUnmanaged.map((s) => ({
+          directory: s.directory,
+          name: s.name,
+          description: s.description ?? undefined,
+          foundIn: s.foundIn,
+          path: s.path,
+        }));
+        setImportDialogOpen(true);
+        return;
+      }
+
+      // 本机：扫描本机文件系统
       const result = await scanUnmanaged();
       if (!result.data || result.data.length === 0) {
         toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
         return;
       }
+      unmanagedSkillsOverride.current = null;
       setImportDialogOpen(true);
     } catch (error) {
       toast.error(t("common.error"), { description: String(error) });
+    } finally {
+      toast.dismiss(toastId);
     }
   };
 
   const handleImport = async (imports: ImportSkillSelection[]) => {
     try {
-      const imported = await importMutation.mutateAsync(imports);
-      setImportDialogOpen(false);
-      toast.success(t("skills.importSuccess", { count: imported.length }), {
-        closeButton: true,
-      });
+      if (isRemote && remoteTargetId) {
+        // 远端：逐个 cp -r → SSOT → skills.json → symlink
+        let count = 0;
+        for (const imp of imports) {
+          try {
+            await importRemoteSkill(
+              remoteTargetId,
+              imp.path || imp.directory,
+              imp.directory,
+              remoteContainerId || undefined,
+            );
+            count++;
+          } catch (e) {
+            toast.error(`${imp.directory}: ${String(e)}`);
+          }
+        }
+        setImportDialogOpen(false);
+        unmanagedSkillsOverride.current = null;
+        if (count > 0) {
+          toast.success(
+            t("skills.importSuccessRemote", {
+              defaultValue: "已将 {{count}} 个技能导入远端",
+              count,
+            }),
+            { closeButton: true },
+          );
+        }
+      } else {
+        // 本机：走 importMutation
+        await importMutation.mutateAsync(imports);
+        setImportDialogOpen(false);
+        toast.success(
+          t("skills.importSuccess", { count: imports.length }),
+          { closeButton: true },
+        );
+      }
     } catch (error) {
       toast.error(t("common.error"), { description: String(error) });
     }
@@ -351,7 +435,7 @@ const UnifiedSkillsPanel = React.forwardRef<
 
   React.useImperativeHandle(ref, () => ({
     openDiscovery: isRemote ? () => undefined : onOpenDiscovery,
-    openImport: isRemote ? () => undefined : handleOpenImport,
+    openImport: handleOpenImport,
     openInstallFromZip: handleInstallFromZip,
     openRestoreFromBackup: isRemote
       ? () => undefined
@@ -448,7 +532,7 @@ const UnifiedSkillsPanel = React.forwardRef<
               {isRemote
                 ? t("remote.skillsEmptyHint", {
                     defaultValue:
-                      "点击上方「从 ZIP 安装」把本地技能部署到远端 ~/.claude/skills/",
+                      "点击「从 ZIP 安装」部署技能到远端，或「导入已有」将远端已有技能目录纳入管理",
                   })
                 : t("skills.noInstalledDescription")}
             </p>
@@ -490,9 +574,9 @@ const UnifiedSkillsPanel = React.forwardRef<
         />
       )}
 
-      {!isRemote && importDialogOpen && unmanagedSkills && (
+      {importDialogOpen && (unmanagedSkillsOverride.current || unmanagedSkills) && (
         <ImportSkillsDialog
-          skills={unmanagedSkills}
+          skills={unmanagedSkillsOverride.current ?? unmanagedSkills!}
           isImporting={importMutation.isPending}
           onImport={handleImport}
           onClose={() => setImportDialogOpen(false)}
@@ -594,13 +678,11 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
         )}
       </div>
 
-      {!isRemote && (
-        <AppToggleGroup
-          apps={skill.apps}
-          onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
-          appIds={SKILLS_APP_IDS}
-        />
-      )}
+      <AppToggleGroup
+        apps={skill.apps}
+        onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
+        appIds={SKILLS_APP_IDS}
+      />
 
       <div
         className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -810,18 +892,22 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
 
   const handleImport = () => {
     onImport(
-      Array.from(selected).map((directory) => ({
-        directory,
-        apps: selectedApps[directory] ?? {
-          claude: false,
-          codex: false,
-          gemini: false,
-          grokbuild: false,
-          opencode: false,
-          openclaw: false,
-          hermes: false,
-        },
-      })),
+      Array.from(selected).map((directory) => {
+        const skill = skills.find((s) => s.directory === directory);
+        return {
+          directory,
+          apps: selectedApps[directory] ?? {
+            claude: false,
+            codex: false,
+            gemini: false,
+            grokbuild: false,
+            opencode: false,
+            openclaw: false,
+            hermes: false,
+          },
+          path: skill?.path,
+        };
+      }),
     );
   };
 

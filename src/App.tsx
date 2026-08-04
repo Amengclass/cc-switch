@@ -26,7 +26,6 @@ import {
   Cpu,
   LayoutDashboard,
   Server,
-  Laptop,
   RefreshCw,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -60,6 +59,8 @@ import {
   DRAG_REGION_STYLE,
 } from "@/lib/platform";
 import { AppSwitcher } from "@/components/AppSwitcher";
+import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
+import { InstallCommandPopover } from "@/components/remote/InstallCommandPopover";
 import {
   checkLocalClaudeInstalled,
   checkRemoteClaudeInstalled,
@@ -69,13 +70,6 @@ import {
   switchRemoteProvider,
 } from "@/lib/api/remote";
 import type { RemoteHost } from "@/types/remote";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
@@ -318,6 +312,9 @@ function App() {
       getRemoteCurrentProvider(remoteTargetId, container)
         .then(setRemoteCurrentProviderId)
         .catch(() => setRemoteCurrentProviderId(null));
+      listDockerContainers(remoteTargetId)
+        .then(setContainers)
+        .catch(() => setContainers([]));
     }
   }, [remoteTargetId, remoteContainerId]);
 
@@ -1574,17 +1571,19 @@ function App() {
                 )}
                 {currentView === "skills" && (
                   <>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() =>
-                        unifiedSkillsPanelRef.current?.openRestoreFromBackup()
-                      }
-                      className="hover:bg-black/5 dark:hover:bg-white/5"
-                    >
-                      <History className="w-4 h-4 mr-2" />
-                      {t("skills.restoreFromBackup.button")}
-                    </Button>
+                    {!remoteTargetId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          unifiedSkillsPanelRef.current?.openRestoreFromBackup()
+                        }
+                        className="hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <History className="w-4 h-4 mr-2" />
+                        {t("skills.restoreFromBackup.button")}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1654,70 +1653,6 @@ function App() {
                       onSwitch={setActiveApp}
                       visibleApps={visibleApps}
                     />
-
-                    {activeApp === "claude" && (
-                      <Select
-                        value={
-                          remoteTargetId === ""
-                            ? "__local__"
-                            : remoteTargetId
-                        }
-                        onValueChange={(v) =>
-                          setRemoteTargetId(v === "__local__" ? "" : v)
-                        }
-                      >
-                        <SelectTrigger className="h-8 w-[150px] text-xs">
-                          <SelectValue
-                            placeholder={t("remote.targetLocal", {
-                              defaultValue: "本机",
-                            })}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__local__">
-                            {t("remote.targetLocal", {
-                              defaultValue: "本机",
-                            })}
-                          </SelectItem>
-                          {servers.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-
-                    {activeApp === "claude" && remoteTargetId && (
-                      <Select
-                        value={remoteContainerId || "__host__"}
-                        onValueChange={(v) =>
-                          setRemoteContainerId(
-                            v === "__host__" ? "" : v,
-                          )
-                        }
-                      >
-                        <SelectTrigger className="h-8 w-[130px] text-xs">
-                          <SelectValue
-                            placeholder={t("remote.targetHost", {
-                              defaultValue: "宿主机",
-                            })}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__host__">
-                            {t("remote.targetHost", {
-                              defaultValue: "宿主机",
-                            })}
-                          </SelectItem>
-                          {containers.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
 
                     <div className="flex items-center gap-1 p-1 bg-muted rounded-xl">
                       <AnimatePresence mode="wait">
@@ -1910,67 +1845,58 @@ function App() {
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/40 px-6 py-2 text-sm">
-          {remoteTargetId && activeRemoteHost ? (
-            <>
-              <Server className="h-4 w-4 shrink-0 text-primary" />
-              <span>
-                {t("remote.targetActive", {
-                  defaultValue:
-                    "当前目标：服务器 {{name}} —— 供应商切换与配置将写入该远端",
-                  name: activeRemoteHost.name,
-                })}
-              </span>
-            </>
-          ) : (
-            <>
-              <Laptop className="h-4 w-4 shrink-0 text-primary" />
-              <span>
-                {t("remote.targetLocalActive", {
-                  defaultValue: "当前目标：本机 —— 配置作用于本机",
-                })}
-              </span>
-            </>
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
+          {activeApp === "claude" && (
+            <TargetBreadcrumb
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId}
+              setRemoteTargetId={setRemoteTargetId}
+              setRemoteContainerId={setRemoteContainerId}
+              servers={servers}
+              containers={containers}
+            />
           )}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
-              currentInstalled === true
-                ? "bg-emerald-500/15 text-emerald-600"
-                : currentInstalled === false
-                  ? "bg-amber-500/15 text-amber-600"
+          {currentInstalled === true || currentInstalled === null ? (
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                currentInstalled === true
+                  ? "bg-emerald-500/15 text-emerald-600"
                   : "bg-muted text-muted-foreground",
-            )}
-          >
-            {currentInstalled === true
-              ? t("remote.claudeInstalledBadge", {
-                  defaultValue: "Claude Code 已安装",
-                })
-              : currentInstalled === false
-                ? `⚠ ${t("remote.claudeNotInstalledBadge", {
-                    defaultValue: "Claude Code 未安装 · 配置已预置,安装后生效",
-                  })}`
+              )}
+            >
+              {currentInstalled === true
+                ? t("remote.claudeInstalledBadge", {
+                    defaultValue: "Claude Code 已安装",
+                  })
                 : t("remote.claudeDetectFailed", {
                     defaultValue: "安装状态检测中/未知",
                   })}
-          </span>
-          {currentInstalled === false && (
-            <span className="text-xs text-amber-600">
-              {remoteTargetId
-                ? t("remote.installCmd", {
-                    defaultValue:
-                      "安装: curl -fsSL https://claude.ai/install.sh | bash",
-                  })
-                : t("remote.installCmdLocal", {
-                    defaultValue: "安装: npm install -g @anthropic-ai/claude-code",
-                  })}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5">
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
+                {`⚠ ${t("remote.claudeNotInstalledBadge", {
+                  defaultValue: "Claude Code 未安装",
+                })}`}
+              </span>
+              <span className="select-none text-amber-600/60 text-lg leading-none">
+                ·
+              </span>
+              <InstallCommandPopover
+                command={
+                  remoteTargetId
+                    ? "curl -fsSL claude.ai/install.sh | bash"
+                    : "npm i -g @anthropic-ai/claude-code"
+                }
+              />
             </span>
           )}
           {remoteTargetId && (
             <span className="text-xs text-muted-foreground">
               {t("remote.targetActiveHint", {
                 defaultValue:
-                  "MCP / Prompts / Skills 仍作用于本机（二期再支持远程编辑）",
+                  "供应商 / MCP / Prompts / Skills / 会话 作用于该主机",
               })}
             </span>
           )}
@@ -1985,7 +1911,7 @@ function App() {
             {t("remote.refreshStatus", { defaultValue: "刷新" })}
           </button>
         </div>
-        {renderContent()}
+        <div className="pt-2">{renderContent()}</div>
       </main>
 
       <AddProviderDialog

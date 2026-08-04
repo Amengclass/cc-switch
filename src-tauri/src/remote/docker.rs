@@ -110,7 +110,7 @@ impl FileOps for RemoteTarget<'_> {
 /// 容器内文件操作：每个方法都通过 `docker exec <container> sh -c '<cmd>'` 封装。
 ///
 /// 借用 `&Handle` 而非持有：`exec_command` 每次调用时才 `channel_open_session`，
-/// 命令调用方可以同时借用 `channel`（exec）与 `sftp`（需要时）。
+/// 命令调用方可以同时借用 `channel`(exec)与 `sftp`(需要时)。
 pub struct DockerExecFileOps<'a> {
     pub channel: &'a Handle<RemoteHandler>,
     pub container: String,
@@ -141,6 +141,38 @@ impl<'a> DockerExecFileOps<'a> {
 
     async fn exec(&self, shell_cmd: &str) -> Result<String, String> {
         exec_command(self.channel, &format!("docker exec {} sh -c {}", self.container, shell_quote(shell_cmd))).await
+    }
+
+    /// 将二进制数据原子写入容器内文件（base64 编码 → stdin 管道 → 临时文件 → mv）。
+    /// 数据通过 SSH channel 的 stdin 流式传入，不嵌入命令字符串，无大小限制。
+    pub async fn write_bytes_atomic(&self, path: &str, data: &[u8]) -> Result<(), String> {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(data);
+
+        let parent = match path.rsplit_once('/') {
+            Some((d, _)) if !d.is_empty() => d,
+            _ => "/",
+        };
+        let tmp = format!("{}.ccswitch.tmp", path);
+
+        let script = format!(
+            "mkdir -p {parent} && base64 -d > {tmp} && mv {tmp} {path}",
+            parent = shell_quote(parent),
+            tmp = shell_quote(&tmp),
+            path = shell_quote(path),
+        );
+        let cmd = format!(
+            "docker exec -i {} sh -c {}",
+            self.container,
+            shell_quote(&script),
+        );
+        let _ = crate::remote::connection::exec_command_with_stdin(
+            self.channel,
+            &cmd,
+            b64.as_bytes(),
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -215,36 +247,17 @@ impl FileOps for DockerExecFileOps<'_> {
     }
 
     async fn read_text_optional(&self, path: &str) -> Result<Option<String>, String> {
-        if !self.exists(path).await {
-            return Ok(None);
+        // 直接 cat，文件不存在时返回空（省一次 test -e 的 round-trip）
+        let out = self.exec(&format!("cat {} 2>/dev/null", shell_quote(path))).await;
+        match out {
+            Ok(text) => Ok(if text.is_empty() { None } else { Some(text) }),
+            Err(_) => Ok(None),
         }
-        self.exec(&format!("cat {}", shell_quote(path)))
-            .await
-            .map(Some)
-            .map_err(|e| format!("容器内读取文件失败 {path}: {e}"))
     }
 
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {
-        // 容器内原子写：父目录就绪 → 写临时文件 → mv 覆盖。
-        // 内容经 base64 编码传进 sh，避免引号/换行/JSON 特殊字符破坏命令。
-        use base64::Engine as _;
-        let b64 = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
-
-        let parent = match path.rsplit_once('/') {
-            Some((d, _)) if !d.is_empty() => d,
-            _ => "/",
-        };
-        let tmp = format!("{}.ccswitch.tmp", path);
-
-        let script = format!(
-            "mkdir -p {parent} && echo {b64} | base64 -d > {tmp} && mv {tmp} {path}",
-            parent = shell_quote(parent),
-            b64 = b64,
-            tmp = shell_quote(&tmp),
-            path = shell_quote(path),
-        );
-        let _ = self.exec(&script).await?;
-        Ok(())
+        // 复用 write_bytes_atomic（text → bytes → base64 → stdin 管道）
+        self.write_bytes_atomic(path, content.as_bytes()).await
     }
 }
 
@@ -257,6 +270,56 @@ fn shell_quote(s: &str) -> String {
     } else {
         format!("'{s}'")
     }
+}
+
+/// 将本地目录递归上传到容器内目标目录（`remote_dir` 作为根被创建）。
+///
+/// 逐个文件 base64 编码后通过 `docker exec` 写入容器，只支持小文件
+///（单个文件 base64 需在 shell 命令行长度限制内，多数技能文件满足）。
+pub(crate) async fn upload_dir_to_container(
+    channel: &Handle<RemoteHandler>,
+    container: &str,
+    local_dir: &std::path::Path,
+    remote_dir: &str,
+) -> Result<(), String> {
+    use crate::remote::skill::{collect_dirs_recursive, collect_files_recursive};
+
+    // 创建远端根目录
+    exec_command(
+        channel,
+        &format!(
+            "docker exec {} sh -c {}",
+            container,
+            shell_quote(&format!("mkdir -p {}", shell_quote(remote_dir))),
+        ),
+    )
+    .await?;
+
+    // 第一遍：递归创建所有子目录
+    let mut dirs: Vec<String> = Vec::new();
+    collect_dirs_recursive(local_dir, remote_dir, &mut dirs)?;
+    for dir in dirs.iter().rev() {
+        exec_command(
+            channel,
+            &format!(
+                "docker exec {} sh -c {}",
+                container,
+                shell_quote(&format!("mkdir -p {}", shell_quote(dir))),
+            ),
+        )
+        .await?;
+    }
+
+    // 第二遍：递归写入所有文件
+    let mut files: Vec<(std::path::PathBuf, String)> = Vec::new();
+    collect_files_recursive(local_dir, remote_dir, &mut files)?;
+    let ops = DockerExecFileOps::new(channel, container)?;
+    for (local_path, remote_path) in &files {
+        let data = std::fs::read(local_path)
+            .map_err(|e| format!("读取本地文件失败 {}: {e}", local_path.display()))?;
+        ops.write_bytes_atomic(remote_path, &data).await?;
+    }
+    Ok(())
 }
 
 /// 通过 `docker ps` 列出容器（id + 名称），供前端选择。
@@ -275,4 +338,23 @@ pub async fn list_docker_containers(channel: &Handle<RemoteHandler>) -> Result<V
         }
     }
     Ok(containers)
+}
+
+/// 将宿主机上的目录复制到容器内（`docker cp`）。
+///
+/// 注意：`docker cp` 在宿主机上执行（通过 SSH），源路径必须是宿主机绝对路径。
+pub(crate) async fn copy_dir_to_container(
+    channel: &Handle<RemoteHandler>,
+    container: &str,
+    host_source: &str,
+    container_dest: &str,
+) -> Result<(), String> {
+    let cmd = format!(
+        "docker cp {} {}:{}",
+        shell_quote(host_source),
+        container,
+        shell_quote(container_dest)
+    );
+    exec_command(channel, &cmd).await?;
+    Ok(())
 }

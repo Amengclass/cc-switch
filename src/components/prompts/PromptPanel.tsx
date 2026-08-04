@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Loader2, Save } from "lucide-react";
+import { FileText } from "lucide-react";
 import { toast } from "sonner";
 import { type AppId } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
@@ -8,9 +8,7 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import PromptListItem from "./PromptListItem";
 import PromptFormPanel from "./PromptFormPanel";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { Button } from "@/components/ui/button";
-import MarkdownEditor from "@/components/MarkdownEditor";
-import { readRemotePrompt, writeRemotePrompt } from "@/lib/api/remote";
+import { listRemotePrompts, saveRemotePrompts, type RemotePrompt } from "@/lib/api/remote";
 
 interface PromptPanelProps {
   open: boolean;
@@ -29,18 +27,8 @@ export interface PromptPanelHandle {
 const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
   ({ open, appId, remoteTargetId, remoteContainerId }, ref) => {
     const { t } = useTranslation();
+    const isRemote = Boolean(remoteTargetId && appId === "claude");
 
-    // 选中远端/容器目标时：远端 ~/.claude/CLAUDE.md 是单个文件，直接整文件编辑，
-    // 不走本地 DB 的「多提示词 + 启用」结构。
-    if (remoteTargetId && appId === "claude") {
-      return (
-        <RemotePromptEditor
-          key={`${remoteTargetId}-${remoteContainerId ?? ""}`}
-          hostId={remoteTargetId}
-          containerId={remoteContainerId}
-        />
-      );
-    }
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [confirmDialog, setConfirmDialog] = useState<{
@@ -51,37 +39,51 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       onConfirm: () => void;
     } | null>(null);
 
-    const {
-      prompts,
-      loading,
-      reload,
-      savePrompt,
-      deletePrompt,
-      toggleEnabled,
-    } = usePromptActions(appId);
+    // 本地：使用 DB hook
+    const localActions = usePromptActions(appId);
+    // 远端：自行管理状态
+    const [remoteLoading, setRemoteLoading] = useState(false);
+    const [remotePrompts, setRemotePrompts] = useState<Record<string, RemotePrompt>>({});
+
+    const prompts = isRemote ? remotePrompts : localActions.prompts;
+    const loading = isRemote ? remoteLoading : localActions.loading;
+
+    const loadRemote = useCallback(async () => {
+      if (!remoteTargetId) return;
+      setRemoteLoading(true);
+      try {
+        const list = await listRemotePrompts(remoteTargetId, remoteContainerId || undefined);
+        const map: Record<string, RemotePrompt> = {};
+        list.forEach((p) => { map[p.id] = p; });
+        setRemotePrompts(map);
+      } catch (e) {
+        toast.error(String(e));
+      } finally {
+        setRemoteLoading(false);
+      }
+    }, [remoteTargetId, remoteContainerId]);
 
     useEffect(() => {
-      if (open) reload();
-    }, [open, reload]);
+      if (open) {
+        if (isRemote) loadRemote();
+        else localActions.reload();
+      }
+    }, [open, isRemote, loadRemote, localActions.reload]);
 
     // Listen for prompt import events from deep link
     useEffect(() => {
       const handlePromptImported = (event: Event) => {
         const customEvent = event as CustomEvent;
-        // Reload if the import is for this app
         if (customEvent.detail?.app === appId) {
-          reload();
+          if (isRemote) loadRemote();
+          else localActions.reload();
         }
       };
-
       window.addEventListener("prompt-imported", handlePromptImported);
-      return () => {
-        window.removeEventListener("prompt-imported", handlePromptImported);
-      };
-    }, [appId, reload]);
+      return () => window.removeEventListener("prompt-imported", handlePromptImported);
+    }, [appId, isRemote, loadRemote, localActions.reload]);
 
-    // 应用项目 Profile 会切换激活的 prompt（prompts 非 react-query，需主动 reload）
-    useTauriEvent("profile-applied", reload);
+    useTauriEvent("profile-applied", isRemote ? loadRemote : localActions.reload);
 
     const handleAdd = () => {
       setEditingId(null);
@@ -97,7 +99,69 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       setIsFormOpen(true);
     };
 
-    const handleDelete = (id: string) => {
+    // 保存（新增/编辑），签名与 PromptFormPanel 的 onSave 匹配
+    const handleSave = async (id: string, data: { name: string; content: string; description?: string; enabled?: boolean }) => {
+      if (isRemote && remoteTargetId) {
+        try {
+          const list = Object.values(remotePrompts);
+          if (editingId) {
+            const idx = list.findIndex((p) => p.id === editingId);
+            if (idx >= 0) {
+              list[idx] = { ...list[idx], ...data, id: editingId, updatedAt: Date.now() };
+            }
+          } else {
+            const newId = crypto.randomUUID();
+            list.push({ id: newId, ...data, enabled: data.enabled ?? false, createdAt: Date.now(), updatedAt: Date.now() });
+          }
+          await saveRemotePrompts(remoteTargetId, list, remoteContainerId || undefined);
+          toast.success(t("prompts.saveSuccess"), { closeButton: true });
+        } catch (e) {
+          toast.error(t("prompts.saveFailed"));
+          throw e;
+        }
+        return;
+      }
+      await localActions.savePrompt(id, { id, ...data, enabled: data.enabled ?? false });
+    };
+
+    // 切换启用（与本地 usePromptActions.toggleEnabled 行为一致：乐观更新 + toast）
+    const handleToggle = async (id: string, enabled: boolean) => {
+      if (isRemote && remoteTargetId) {
+        const prev = { ...remotePrompts };
+        // 乐观更新：立即改 UI
+        if (enabled) {
+          const updated: Record<string, RemotePrompt> = {};
+          Object.keys(remotePrompts).forEach((k) => {
+            updated[k] = { ...remotePrompts[k], enabled: k === id };
+          });
+          setRemotePrompts(updated);
+        } else {
+          setRemotePrompts((p) => ({ ...p, [id]: { ...p[id], enabled: false } }));
+        }
+        try {
+          const list = Object.values(enabled
+            ? Object.keys(remotePrompts).reduce<Record<string, RemotePrompt>>((acc, k) => {
+                acc[k] = { ...remotePrompts[k], enabled: k === id };
+                return acc;
+              }, {})
+            : { ...remotePrompts, [id]: { ...remotePrompts[id], enabled: false } }
+          );
+          await saveRemotePrompts(remoteTargetId, list, remoteContainerId || undefined);
+          toast.success(
+            enabled ? t("prompts.enableSuccess") : t("prompts.disableSuccess"),
+            { closeButton: true },
+          );
+        } catch (e) {
+          setRemotePrompts(prev); // 回滚
+          toast.error(enabled ? t("prompts.enableFailed") : t("prompts.disableFailed"));
+        }
+        return;
+      }
+      await localActions.toggleEnabled(id, enabled);
+    };
+
+    // 删除
+    const handleDeletePrompt = (id: string) => {
       const prompt = prompts[id];
       setConfirmDialog({
         isOpen: true,
@@ -106,17 +170,22 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         messageParams: { name: prompt?.name },
         onConfirm: async () => {
           try {
-            await deletePrompt(id);
+            if (isRemote && remoteTargetId) {
+              const list = Object.values(remotePrompts).filter((p) => p.id !== id);
+              await saveRemotePrompts(remoteTargetId, list, remoteContainerId || undefined);
+              toast.success(t("prompts.deleteSuccess"), { closeButton: true });
+            } else {
+              await localActions.deletePrompt(id);
+            }
             setConfirmDialog(null);
           } catch (e) {
-            // Error handled by hook
+            toast.error(String(e));
           }
         },
       });
     };
 
     const promptEntries = useMemo(() => Object.entries(prompts), [prompts]);
-
     const enabledPrompt = promptEntries.find(([_, p]) => p.enabled);
 
     return (
@@ -154,9 +223,9 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
                   key={id}
                   id={id}
                   prompt={prompt}
-                  onToggle={toggleEnabled}
+                  onToggle={handleToggle}
                   onEdit={handleEdit}
-                  onDelete={handleDelete}
+                  onDelete={handleDeletePrompt}
                 />
               ))}
             </div>
@@ -168,7 +237,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             appId={appId}
             editingId={editingId || undefined}
             initialData={editingId ? prompts[editingId] : undefined}
-            onSave={savePrompt}
+            onSave={handleSave}
             onClose={() => setIsFormOpen(false)}
           />
         )}
@@ -188,103 +257,5 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
 );
 
 PromptPanel.displayName = "PromptPanel";
-
-/** 远端单文件 CLAUDE.md 编辑器：读取 → 编辑 → 原子写回。 */
-function RemotePromptEditor({
-  hostId,
-  containerId,
-}: {
-  hostId: string;
-  containerId?: string;
-}) {
-  const { t } = useTranslation();
-  const [content, setContent] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
-
-  useEffect(() => {
-    setIsDarkMode(document.documentElement.classList.contains("dark"));
-    const observer = new MutationObserver(() => {
-      setIsDarkMode(document.documentElement.classList.contains("dark"));
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    readRemotePrompt(hostId, containerId)
-      .then((text) => {
-        if (active) {
-          setContent(text);
-          setLoading(false);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          toast.error(
-            t("remote.promptLoadError", { defaultValue: "读取远端 CLAUDE.md 失败" }),
-          );
-          setLoading(false);
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [hostId, containerId, t]);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await writeRemotePrompt(hostId, content, containerId);
-      toast.success(
-        t("remote.promptSaved", { defaultValue: "已保存到远端 CLAUDE.md" }),
-        { closeButton: true },
-      );
-    } catch (error) {
-      toast.error(
-        t("remote.promptSaveError", { defaultValue: "保存远端 CLAUDE.md 失败" }),
-        { description: String(error) },
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col flex-1 min-h-0 px-6 pt-4">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-sm text-muted-foreground">
-          {t("remote.promptRemoteHint", {
-            defaultValue: "编辑远端 ~/.claude/CLAUDE.md（整文件覆盖写回）",
-          })}
-        </p>
-        <Button onClick={() => void handleSave()} disabled={loading || saving}>
-          {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-          <Save className="mr-1 h-4 w-4" />
-          {t("common.save")}
-        </Button>
-      </div>
-      <div className="flex-1 overflow-hidden rounded-xl border">
-        {loading ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            {t("prompts.loading")}
-          </div>
-        ) : (
-          <MarkdownEditor
-            value={content}
-            onChange={setContent}
-            darkMode={isDarkMode}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default PromptPanel;

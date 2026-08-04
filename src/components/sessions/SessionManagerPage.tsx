@@ -21,7 +21,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
-  Server,
 } from "lucide-react";
 import {
   useDeleteSessionMutation,
@@ -857,14 +856,6 @@ export function SessionManagerPage({
         className="mx-auto px-4 sm:px-6 flex flex-col h-full min-h-0"
         onWheel={(e) => e.stopPropagation()}
       >
-        {remoteTargetId && (
-          <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
-            <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-            {t("sessionManager.remoteBrowsing", {
-              defaultValue: "正在浏览远端会话（删除 / 查看消息暂未支持远程，后续迭代）",
-            })}
-          </div>
-        )}
         <div className="flex-1 overflow-hidden flex flex-col gap-4">
           {/* 主内容区域 - 左右分栏 */}
           <div className="flex-1 overflow-hidden grid gap-4 md:grid-cols-[320px_1fr]">

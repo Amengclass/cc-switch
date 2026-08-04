@@ -2,6 +2,19 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Sonner 关闭按钮：sonner 内置规则 `[data-sonner-toast][data-styled='true']
+ * [data-close-button]` 的优先级高于 Tailwind className，会把 X 定位在 toast
+ * 左上角并半露出框外（left:0 + translate(-35%,-35%)）。这里显式覆盖，让 X
+ * 稳定显示在 toast 右上角内侧。
+ */
+[data-sonner-toast][data-styled="true"] [data-close-button] {
+  left: auto;
+  right: 8px;
+  top: 8px;
+  transform: none;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
