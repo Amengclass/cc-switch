@@ -29,6 +29,7 @@ import {
   useDiscoverableSkills,
   useInstalledSkills,
   useInstallSkill,
+  useInstallRemoteSkillFromDiscoverable,
   useSkillRepos,
   useAddSkillRepo,
   useRemoveSkillRepo,
@@ -47,6 +48,9 @@ export type SkillsPageSource = "repos" | "skillssh";
 interface SkillsPageProps {
   initialApp?: AppId;
   onSourceChange?: (source: SkillsPageSource) => void;
+  /** 远端目标 id：传入时发现面板的「安装」将安装到该远端目标 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export interface SkillsPageHandle {
@@ -91,7 +95,10 @@ const SKILLSSH_PAGE_SIZE = 20;
  * 用于浏览和安装来自仓库或 skills.sh 的 Skills
  */
 export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
-  ({ initialApp = "claude", onSourceChange }, ref) => {
+  (
+    { initialApp = "claude", onSourceChange, remoteTargetId, remoteContainerId },
+    ref,
+  ) => {
     const { t } = useTranslation();
     const [repoManagerOpen, setRepoManagerOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState("");
@@ -119,7 +126,10 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
       isFetching: fetchingDiscoverable,
       refetch: refetchDiscoverable,
     } = useDiscoverableSkills();
-    const { data: installedSkills } = useInstalledSkills();
+    const { data: installedSkills } = useInstalledSkills(
+      remoteTargetId,
+      remoteContainerId,
+    );
     const { data: repos = [], refetch: refetchRepos } = useSkillRepos();
 
     // skills.sh 搜索
@@ -153,6 +163,10 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
 
     // Mutations
     const installMutation = useInstallSkill();
+    const remoteInstallMutation = useInstallRemoteSkillFromDiscoverable(
+      remoteTargetId,
+      remoteContainerId,
+    );
     const addRepoMutation = useAddSkillRepo();
     const removeRepoMutation = useRemoveSkillRepo();
 
@@ -251,10 +265,15 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
       }
 
       try {
-        await installMutation.mutateAsync({
-          skill,
-          currentApp,
-        });
+        if (remoteTargetId) {
+          // 远端模式：本机下载仓库 → 安装到远端目标
+          await remoteInstallMutation.mutateAsync({ skill });
+        } else {
+          await installMutation.mutateAsync({
+            skill,
+            currentApp,
+          });
+        }
         toast.success(t("skills.installSuccess", { name: skill.name }), {
           closeButton: true,
         });

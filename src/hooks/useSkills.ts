@@ -17,6 +17,7 @@ import type { AppId } from "@/lib/api/types";
 import {
   deleteRemoteSkill,
   installRemoteSkillFromDir,
+  installRemoteSkillFromDiscoverable,
   installRemoteSkillsFromZip,
   listRemoteSkills,
   toggleRemoteSkillApp,
@@ -30,7 +31,7 @@ function remoteToInstalled(entry: {
   directory: string;
   path?: string;
   description?: string;
-  apps?: { claude?: boolean; codex?: boolean; gemini?: boolean; opencode?: boolean; openclaw?: boolean; hermes?: boolean };
+  apps?: { claude?: boolean; codex?: boolean; gemini?: boolean; grokbuild?: boolean; opencode?: boolean; openclaw?: boolean; hermes?: boolean };
   installedAt?: number;
   updatedAt?: number;
   repoOwner?: string;
@@ -48,6 +49,7 @@ function remoteToInstalled(entry: {
       claude: entry.apps?.claude ?? true,
       codex: entry.apps?.codex ?? false,
       gemini: entry.apps?.gemini ?? false,
+      grokbuild: entry.apps?.grokbuild ?? false,
       opencode: entry.apps?.opencode ?? false,
       openclaw: entry.apps?.openclaw ?? false,
       hermes: entry.apps?.hermes ?? false,
@@ -168,6 +170,46 @@ export function useInstallSkill() {
           });
         },
       );
+    },
+  });
+}
+
+/**
+ * 远端：从「发现技能」列表把一个技能安装到远端目标。
+ *
+ * 发现列表仍来自本机仓库；安装时本机下载仓库 zip → 上传远端 SSOT →
+ * 写 skills.json + 建链接。语义与本机 install 对齐。
+ */
+export function useInstallRemoteSkillFromDiscoverable(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
+  const queryClient = useQueryClient();
+  const installedKey = remoteTargetId
+    ? [
+        "skills",
+        "installed",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "installed"];
+  return useMutation({
+    mutationFn: ({ skill }: { skill: DiscoverableSkill }) => {
+      if (!remoteTargetId) {
+        return Promise.reject(new Error("未选择远端目标"));
+      }
+      return installRemoteSkillFromDiscoverable(
+        remoteTargetId,
+        skill,
+        remoteContainerId,
+      ).then((r) => remoteToInstalled({ ...r, path: "" }));
+    },
+    onSuccess: (installedSkill) => {
+      queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) => {
+        if (!oldData) return [installedSkill];
+        return [...oldData, installedSkill];
+      });
     },
   });
 }
@@ -354,7 +396,7 @@ export function useImportSkillsFromApps(
               remoteContainerId,
             );
             installed.push(
-              remoteToInstalled({ name, path: fullPath }),
+              remoteToInstalled({ name, directory: name, path: fullPath }),
             );
           } catch (e) {
             const errMsg = String(e);

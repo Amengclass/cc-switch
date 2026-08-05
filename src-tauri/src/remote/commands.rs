@@ -494,13 +494,13 @@ pub async fn delete_remote_session(
     Ok(true)
 }
 
-/// 读取远端 `~/.claude.json` 的 mcpServers 映射（`{id: spec}`）。
+/// 列出远端 MCP 服务器（完整 McpServer，读 SSOT ~/.cc-switch/mcp.json）。
 #[tauri::command]
 pub async fn read_remote_mcp_servers(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<serde_json::Value, String> {
+) -> Result<Vec<crate::remote::mcp::RemoteMcpServer>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
@@ -509,7 +509,7 @@ pub async fn read_remote_mcp_servers(
         &session.channel,
         container.as_deref(),
     )?;
-    crate::remote::mcp::read_remote_mcp_servers(&target, &host.default_home()).await
+    crate::remote::mcp::list_remote_mcp_servers(&target, &host.default_home()).await
 }
 
 /// 读取远端 `~/.claude.json` 的**完整内容**（供编辑/展示）。
@@ -530,13 +530,12 @@ pub async fn read_remote_mcp_json(
     crate::remote::mcp::read_remote_mcp_json(&target, &host.default_home()).await
 }
 
-/// 在远端 `~/.claude.json` 的 mcpServers 中新增/更新一个服务器。
+/// 新增/更新远端 MCP 服务器：写 SSOT + 同步 apps 启用的各 live 配置。
 #[tauri::command]
 pub async fn upsert_remote_mcp_server(
     state: State<'_, AppState>,
     host_id: String,
-    id: String,
-    spec: serde_json::Value,
+    server: crate::remote::mcp::RemoteMcpServer,
     container: Option<String>,
 ) -> Result<bool, String> {
     let host = load_host(&state, &host_id)?;
@@ -547,12 +546,11 @@ pub async fn upsert_remote_mcp_server(
         &session.channel,
         container.as_deref(),
     )?;
-    crate::remote::mcp::upsert_remote_mcp_server(&target, &host.default_home(), &id, &spec)
-        .await?;
+    crate::remote::mcp::upsert_remote_mcp_server(&target, &host.default_home(), &server).await?;
     Ok(true)
 }
 
-/// 从远端 `~/.claude.json` 的 mcpServers 中删除一个服务器。
+/// 从远端删除一个 MCP 服务器：删 SSOT + 从所有启用的 live 配置移除。
 #[tauri::command]
 pub async fn delete_remote_mcp_server(
     state: State<'_, AppState>,
@@ -569,6 +567,53 @@ pub async fn delete_remote_mcp_server(
         container.as_deref(),
     )?;
     crate::remote::mcp::delete_remote_mcp_server(&target, &host.default_home(), &id).await
+}
+
+/// 切换远端 MCP 服务器在指定 app 的启用状态（改 SSOT + 同步/移除该 app live）。
+#[tauri::command]
+pub async fn toggle_remote_mcp_app(
+    state: State<'_, AppState>,
+    host_id: String,
+    id: String,
+    app: String,
+    enabled: bool,
+    container: Option<String>,
+) -> Result<bool, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::mcp::toggle_remote_mcp_app(
+        &target,
+        &host.default_home(),
+        &id,
+        &app,
+        enabled,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// 从远端各 CLI live 配置导入 MCP 到 SSOT，返回新导入数量。
+#[tauri::command]
+pub async fn import_remote_mcp_from_apps(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<usize, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::mcp::import_remote_mcp_from_apps(&target, &host.default_home()).await
 }
 
 /// 读取远端 `~/.claude/CLAUDE.md` 内容（文件缺失返回空字符串）。
@@ -719,6 +764,7 @@ pub async fn toggle_remote_skill_app(
         "claude" => records[idx].apps.claude = enabled,
         "codex" => records[idx].apps.codex = enabled,
         "gemini" => records[idx].apps.gemini = enabled,
+        "grokbuild" => records[idx].apps.grokbuild = enabled,
         "opencode" => records[idx].apps.opencode = enabled,
         "openclaw" => records[idx].apps.openclaw = enabled,
         "hermes" => records[idx].apps.hermes = enabled,
@@ -739,8 +785,9 @@ pub async fn toggle_remote_skill_app(
             "claude" => ".claude/skills",
             "codex" => ".codex/skills",
             "gemini" => ".gemini/skills",
-            "opencode" => ".opencode/skills",
-            "openclaw" => ".openclaw/skills",
+            "grokbuild" => ".grok/skills",
+            "opencode" => ".config/opencode/skills",
+            "openclaw" => ".openclaw/workspace/skills",
             "hermes" => ".hermes/skills",
             _ => return Err(format!("未知应用: {app}")),
         };
@@ -759,8 +806,9 @@ pub async fn toggle_remote_skill_app(
             "claude" => ".claude/skills",
             "codex" => ".codex/skills",
             "gemini" => ".gemini/skills",
-            "opencode" => ".opencode/skills",
-            "openclaw" => ".openclaw/skills",
+            "grokbuild" => ".grok/skills",
+            "opencode" => ".config/opencode/skills",
+            "openclaw" => ".openclaw/workspace/skills",
             "hermes" => ".hermes/skills",
             _ => return Ok(true),
         };
@@ -816,7 +864,6 @@ pub async fn install_remote_skills_from_zip(
     // 对每个新安装的技能：写 skills.json + 创建 symlink，同时收集完整记录
     let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
     let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
-    let now = chrono::Utc::now().timestamp_millis();
     let apps = crate::remote::skill::RemoteSkillApps { claude: true, ..Default::default() };
     let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     let mut result: Vec<crate::remote::skill::RemoteSkillRecord> = Vec::new();
@@ -824,20 +871,16 @@ pub async fn install_remote_skills_from_zip(
     for name in &installed {
         let skill_dir = format!("{ssot_dir}/{name}");
         let (display_name, description) = crate::remote::skill::read_skill_md_meta_static(&target, &skill_dir).await;
-        let record = crate::remote::skill::RemoteSkillRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: display_name.unwrap_or_else(|| name.clone()),
+        let record = crate::remote::skill::build_remote_skill_record(
+            name,
+            display_name,
             description,
-            directory: name.clone(),
-            apps: apps.clone(),
-            installed_at: now,
-            updated_at: now,
-            repo_owner: None,
-            repo_name: None,
-            repo_branch: None,
-            readme_url: None,
-            content_hash: None,
-        };
+            None,
+            None,
+            None,
+            None,
+            apps.clone(),
+        );
         records.push(record.clone());
         result.push(record);
         crate::remote::skill::sync_remote_skill_links(
@@ -852,6 +895,121 @@ pub async fn install_remote_skills_from_zip(
 
     crate::remote::skill::write_remote_skills_json(&target, &host.default_home(), &records).await?;
     Ok(result)
+}
+
+/// 从「发现技能」列表把一个技能安装到远端。
+///
+/// 对齐本机 `install_skill_unified` 语义：网络动作（从 GitHub 仓库下载 zip）走本机，
+/// 下载后上传到远端 SSOT → 写 skills.json → 建链接。同仓库同名复用，不同仓库同名报错。
+#[tauri::command]
+pub async fn install_remote_skill_from_discoverable(
+    state: State<'_, AppState>,
+    host_id: String,
+    skill: crate::services::skill::DiscoverableSkill,
+    container: Option<String>,
+) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let root = host.default_home();
+    let channel = &session.channel;
+    let container_ref = container.as_deref();
+
+    // 1. 安装目录名 = directory 最后一段（对齐本机 sanitize_install_name）。
+    let install_name = crate::remote::skill::sanitize_name(
+        skill.directory.rsplit(['/', '\\']).next().unwrap_or(&skill.directory),
+    );
+    if install_name.is_empty() {
+        return Err("无效的技能目录名".to_string());
+    }
+
+    // 2. 冲突检测（对齐本机 install 的 DB 检查：同仓库更新启用，不同仓库报错）。
+    let mut records =
+        crate::remote::skill::read_remote_skills_json(&target, &root).await?;
+    let apps =
+        crate::remote::skill::RemoteSkillApps { claude: true, ..Default::default() };
+    if let Some(existing) = records
+        .iter()
+        .find(|r| r.directory.eq_ignore_ascii_case(&install_name))
+    {
+        let same_repo = existing.repo_owner.as_deref() == Some(skill.repo_owner.as_str())
+            && existing.repo_name.as_deref() == Some(skill.repo_name.as_str());
+        if !same_repo {
+            return Err(format!(
+                "远端已存在同名技能目录 {install_name}（来自 {}/{}），请先卸载或选择其他仓库",
+                existing.repo_owner.as_deref().unwrap_or("unknown"),
+                existing.repo_name.as_deref().unwrap_or("unknown")
+            ));
+        }
+        // 复制记录再改，避免可变借用横跨 sync/write 导致借用冲突。
+        let mut updated = existing.clone();
+        updated.apps = apps.clone();
+        updated.updated_at = chrono::Utc::now().timestamp_millis();
+        let use_copy = crate::settings::get_skill_sync_method()
+            == crate::services::skill::SyncMethod::Copy;
+        crate::remote::skill::sync_remote_skill_links(
+            channel,
+            container_ref,
+            &root,
+            &install_name,
+            &updated.apps,
+            use_copy,
+        )
+        .await?;
+        crate::remote::skill::write_remote_skills_json(&target, &root, &records).await?;
+        return Ok(updated);
+    }
+
+    // 3. 本机下载仓库 + 解析技能源目录（与本地 install 同一实现，含路径安全校验）。
+    let service = crate::services::skill::SkillService::new();
+    // _temp_guard 保持存活直到上传完成（作用域末尾才释放），防止下载目录被提前回收。
+    let (_temp_guard, source_dir, _used_branch) = service
+        .download_and_resolve_skill_source(&skill)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 4. 上传远端 SSOT。
+    let ssot_dir = crate::remote::skill::remote_ssot_path(&root);
+    let remote_dir = format!("{ssot_dir}/{install_name}");
+    crate::remote::skill::upload_dir_via_tar(channel, container_ref, &source_dir, &remote_dir)
+        .await?;
+
+    // 5. 写 skills.json 记录 + 建链接。
+    let description = if skill.description.is_empty() {
+        None
+    } else {
+        Some(skill.description.clone())
+    };
+    let record = crate::remote::skill::build_remote_skill_record(
+        &install_name,
+        Some(skill.name.clone()),
+        description,
+        Some(skill.repo_owner.clone()),
+        Some(skill.repo_name.clone()),
+        Some(skill.repo_branch.clone()),
+        skill.readme_url.clone(),
+        apps.clone(),
+    );
+    records.push(record.clone());
+    let use_copy = crate::settings::get_skill_sync_method()
+        == crate::services::skill::SyncMethod::Copy;
+    crate::remote::skill::sync_remote_skill_links(
+        channel,
+        container_ref,
+        &root,
+        &install_name,
+        &apps,
+        use_copy,
+    )
+    .await?;
+    crate::remote::skill::write_remote_skills_json(&target, &root, &records).await?;
+
+    Ok(record)
 }
 
 /// 从本地单个技能目录直接上传到远端 `~/.claude/skills/`（递归）。
@@ -945,13 +1103,14 @@ async fn scan_container_unmanaged_skills(
     };
 
     // 源目录列表
-    let sources: [(&str, &str); 7] = [
+    let sources: [(&str, &str); 8] = [
         ("cc-switch", ".cc-switch/skills"),
         ("claude", ".claude/skills"),
         ("codex", ".codex/skills"),
         ("gemini", ".gemini/skills"),
-        ("opencode", ".opencode/skills"),
-        ("openclaw", ".openclaw/skills"),
+        ("grokbuild", ".grok/skills"),
+        ("opencode", ".config/opencode/skills"),
+        ("openclaw", ".openclaw/workspace/skills"),
         ("hermes", ".hermes/skills"),
     ];
 

@@ -1178,6 +1178,8 @@ function App() {
                 sharedFeatureApp === "openclaw" ? "claude" : sharedFeatureApp
               }
               onSourceChange={setSkillsDiscoverySource}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "mcp":

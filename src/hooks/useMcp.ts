@@ -2,7 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { mcpApi } from "@/lib/api/mcp";
 import {
   deleteRemoteMcpServer,
+  importRemoteMcpFromApps,
   readRemoteMcpServers,
+  toggleRemoteMcpApp,
   upsertRemoteMcpServer,
 } from "@/lib/api/remote";
 import type { McpServer } from "@/types";
@@ -23,10 +25,21 @@ export function useAllMcpServers(
 ) {
   return useQuery({
     queryKey: allMcpKey(remoteTargetId, remoteContainerId),
-    queryFn: () =>
-      remoteTargetId
-        ? readRemoteMcpServers(remoteTargetId, remoteContainerId)
-        : mcpApi.getAllServers(),
+    queryFn: async () => {
+      if (!remoteTargetId) {
+        return mcpApi.getAllServers();
+      }
+      // 远端返回完整 McpServer 数组 → 转 map（id -> McpServer）
+      const list = await readRemoteMcpServers(
+        remoteTargetId,
+        remoteContainerId,
+      );
+      const map: Record<string, McpServer> = {};
+      for (const server of list) {
+        map[server.id] = server;
+      }
+      return map;
+    },
   });
 }
 
@@ -44,8 +57,7 @@ export function useUpsertMcpServer(
       if (remoteTargetId) {
         return upsertRemoteMcpServer(
           remoteTargetId,
-          server.id,
-          server.server,
+          server,
           remoteContainerId,
         );
       }
@@ -80,27 +92,15 @@ export function useToggleMcpApp(
       app: AppId;
       enabled: boolean;
     }) => {
-      // 远端 ~/.claude.json 的 mcpServers 不含 per-app 启用标记，仅 Claude 生效。
       if (remoteTargetId) {
-        if (app !== "claude") {
-          // 远端只管理 Claude Code 的 MCP；切换其他应用无对应目标，忽略。
-          return true;
-        }
-        const spec = (queryClient.getQueryData<
-          Record<string, Record<string, unknown>>
-        >(allMcpKey(remoteTargetId, remoteContainerId)) ?? {})[serverId];
-        if (!spec) {
-          return Promise.reject(new Error("目标未找到该 MCP 服务器"));
-        }
-        // enabled=true 时确保服务器存在；enabled=false 时删除。
-        return enabled
-          ? upsertRemoteMcpServer(
-              remoteTargetId,
-              serverId,
-              spec,
-              remoteContainerId,
-            )
-          : deleteRemoteMcpServer(remoteTargetId, serverId, remoteContainerId);
+        // 远端：改 SSOT apps + 同步/移除该 app 的 live 配置
+        return toggleRemoteMcpApp(
+          remoteTargetId,
+          serverId,
+          app,
+          enabled,
+          remoteContainerId,
+        );
       }
       await mcpApi.toggleApp(serverId, app, enabled);
       return true;
@@ -147,7 +147,7 @@ export function useImportMcpFromApps(
   return useMutation({
     mutationFn: () => {
       if (remoteTargetId) {
-        return Promise.resolve(0);
+        return importRemoteMcpFromApps(remoteTargetId, remoteContainerId);
       }
       return mcpApi.importFromApps();
     },

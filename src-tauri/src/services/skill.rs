@@ -582,7 +582,7 @@ impl SkillService {
             AppType::Gemini => home.join(".gemini").join("skills"),
             AppType::GrokBuild => home.join(".grok").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
-            AppType::OpenClaw => home.join(".openclaw").join("skills"),
+            AppType::OpenClaw => home.join(".openclaw").join("workspace").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
         })
     }
@@ -601,6 +601,82 @@ impl SkillService {
     /// 1. 下载到 SSOT 目录
     /// 2. 保存到数据库
     /// 3. 同步到启用的应用目录
+    /// 下载 `DiscoverableSkill` 对应的仓库并解析出技能源目录（含路径安全检查）。
+    ///
+    /// 返回 `(临时目录守卫, 规范化后的源目录, 实际使用的分支)`。临时目录守卫必须
+    /// 保持存活直到调用方完成复制/上传，防止半成品目录被回收。
+    ///
+    /// 本地 `install` 与远端「发现技能安装」共用这一条下载路径，保证两端的坐标
+    /// 校验、超时、归档预算、路径安全检查完全一致。
+    pub(crate) async fn download_and_resolve_skill_source(
+        &self,
+        skill: &DiscoverableSkill,
+    ) -> Result<(tempfile::TempDir, PathBuf, String)> {
+        let source_rel =
+            Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
+                anyhow!(format_skill_error(
+                    "INVALID_SKILL_DIRECTORY",
+                    &[("directory", &skill.directory)],
+                    Some("checkZipContent"),
+                ))
+            })?;
+
+        let repo = SkillRepo {
+            owner: skill.repo_owner.clone(),
+            name: skill.repo_name.clone(),
+            branch: skill.repo_branch.clone(),
+            enabled: true,
+        };
+
+        let (temp_guard, used_branch) = timeout(
+            std::time::Duration::from_secs(60),
+            self.download_repo(&repo),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(format_skill_error(
+                "DOWNLOAD_TIMEOUT",
+                &[
+                    ("owner", &repo.owner),
+                    ("name", &repo.name),
+                    ("timeout", "60")
+                ],
+                Some("checkNetwork"),
+            ))
+        })??;
+        let temp_dir = temp_guard.path();
+
+        let source =
+            Self::resolve_skill_source_dir(temp_dir, &skill.directory).ok_or_else(|| {
+                let missing = temp_dir.join(&source_rel).display().to_string();
+                anyhow!(format_skill_error(
+                    "SKILL_DIR_NOT_FOUND",
+                    &[("path", &missing)],
+                    Some("checkRepoUrl"),
+                ))
+            })?;
+
+        let canonical_temp = temp_dir
+            .canonicalize()
+            .unwrap_or_else(|_| temp_dir.to_path_buf());
+        let canonical_source = source.canonicalize().map_err(|_| {
+            anyhow!(format_skill_error(
+                "SKILL_DIR_NOT_FOUND",
+                &[("path", &source.display().to_string())],
+                Some("checkRepoUrl"),
+            ))
+        })?;
+        if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
+            return Err(anyhow!(format_skill_error(
+                "INVALID_SKILL_DIRECTORY",
+                &[("directory", &skill.directory)],
+                Some("checkZipContent"),
+            )));
+        }
+
+        Ok((temp_guard, canonical_source, used_branch))
+    }
+
     pub async fn install(
         &self,
         db: &Arc<Database>,
@@ -679,62 +755,11 @@ impl SkillService {
 
         // 如果已存在则跳过下载
         if !dest.exists() {
-            let repo = SkillRepo {
-                owner: skill.repo_owner.clone(),
-                name: skill.repo_name.clone(),
-                branch: skill.repo_branch.clone(),
-                enabled: true,
-            };
-
-            // 下载仓库
-            let (temp_guard, used_branch) = timeout(
-                std::time::Duration::from_secs(60),
-                self.download_repo(&repo),
-            )
-            .await
-            .map_err(|_| {
-                anyhow!(format_skill_error(
-                    "DOWNLOAD_TIMEOUT",
-                    &[
-                        ("owner", &repo.owner),
-                        ("name", &repo.name),
-                        ("timeout", "60")
-                    ],
-                    Some("checkNetwork"),
-                ))
-            })??;
-            let temp_dir = temp_guard.path();
+            let (_temp_guard, canonical_source, used_branch) =
+                self.download_and_resolve_skill_source(skill).await?;
             repo_branch = used_branch;
 
-            // 复制到 SSOT
-            let source =
-                Self::resolve_skill_source_dir(temp_dir, &skill.directory).ok_or_else(|| {
-                    let missing = temp_dir.join(&source_rel).display().to_string();
-                    anyhow!(format_skill_error(
-                        "SKILL_DIR_NOT_FOUND",
-                        &[("path", &missing)],
-                        Some("checkRepoUrl"),
-                    ))
-                })?;
-
-            let canonical_temp = temp_dir
-                .canonicalize()
-                .unwrap_or_else(|_| temp_dir.to_path_buf());
-            let canonical_source = source.canonicalize().map_err(|_| {
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
-                    &[("path", &source.display().to_string())],
-                    Some("checkRepoUrl"),
-                ))
-            })?;
-            if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
-                return Err(anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
-                    &[("directory", &skill.directory)],
-                    Some("checkZipContent"),
-                )));
-            }
-
+            // 复制到 SSOT（_temp_guard 在本块结束时释放，确保源目录存活）
             Self::copy_dir_recursive(&canonical_source, &dest)?;
 
             // 使用实际下载成功的分支，避免 readme_url / repo_branch 与真实分支不一致。

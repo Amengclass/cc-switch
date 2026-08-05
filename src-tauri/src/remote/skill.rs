@@ -60,6 +60,8 @@ pub struct RemoteSkillApps {
     #[serde(default)]
     pub gemini: bool,
     #[serde(default)]
+    pub grokbuild: bool,
+    #[serde(default)]
     pub opencode: bool,
     #[serde(default)]
     pub openclaw: bool,
@@ -210,8 +212,9 @@ const APP_SKILLS_DIRS: &[&str] = &[
     ".claude/skills",
     ".codex/skills",
     ".gemini/skills",
-    ".opencode/skills",
-    ".openclaw/skills",
+    ".grok/skills",
+    ".config/opencode/skills",
+    ".openclaw/workspace/skills",
     ".hermes/skills",
 ];
 
@@ -221,8 +224,9 @@ fn enabled_app_dirs(apps: &RemoteSkillApps) -> Vec<&'static str> {
         (".claude/skills", apps.claude),
         (".codex/skills", apps.codex),
         (".gemini/skills", apps.gemini),
-        (".opencode/skills", apps.opencode),
-        (".openclaw/skills", apps.openclaw),
+        (".grok/skills", apps.grokbuild),
+        (".config/opencode/skills", apps.opencode),
+        (".openclaw/workspace/skills", apps.openclaw),
         (".hermes/skills", apps.hermes),
     ];
     map.iter()
@@ -392,8 +396,9 @@ pub async fn scan_remote_unmanaged_skills<F: FileOps>(
     sources.push((remote_claude_skills_path(root), "claude".to_string()));
     sources.push((format!("{root}/.codex/skills"), "codex".to_string()));
     sources.push((format!("{root}/.gemini/skills"), "gemini".to_string()));
-    sources.push((format!("{root}/.opencode/skills"), "opencode".to_string()));
-    sources.push((format!("{root}/.openclaw/skills"), "openclaw".to_string()));
+    sources.push((format!("{root}/.grok/skills"), "grokbuild".to_string()));
+    sources.push((format!("{root}/.config/opencode/skills"), "opencode".to_string()));
+    sources.push((format!("{root}/.openclaw/workspace/skills"), "openclaw".to_string()));
     sources.push((format!("{root}/.hermes/skills"), "hermes".to_string()));
 
     let mut unmanaged: HashMap<String, RemoteUnmanagedSkill> = HashMap::new();
@@ -543,6 +548,36 @@ pub(crate) async fn upload_dir_via_tar(
 
     crate::remote::connection::exec_command_with_stdin(channel, &cmd, &buf).await?;
     Ok(())
+}
+
+/// 构造一条远端技能记录（纯内存，无 I/O）。
+///
+/// zip 安装与「发现技能」远端安装共用，保证两端记录结构一致。
+pub(crate) fn build_remote_skill_record(
+    name: &str,
+    display_name: Option<String>,
+    description: Option<String>,
+    repo_owner: Option<String>,
+    repo_name: Option<String>,
+    repo_branch: Option<String>,
+    readme_url: Option<String>,
+    apps: RemoteSkillApps,
+) -> RemoteSkillRecord {
+    let now = chrono::Utc::now().timestamp_millis();
+    RemoteSkillRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: display_name.unwrap_or_else(|| name.to_string()),
+        description,
+        directory: name.to_string(),
+        apps,
+        installed_at: now,
+        updated_at: now,
+        repo_owner,
+        repo_name,
+        repo_branch,
+        readme_url,
+        content_hash: None,
+    }
 }
 
 pub async fn install_remote_skills_from_zip_generic(

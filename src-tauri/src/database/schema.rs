@@ -2,7 +2,7 @@
 //!
 //! 负责数据库表结构的创建和版本迁移。
 
-use super::{lock_conn, Database, SCHEMA_VERSION};
+use super::{lock_conn, Database, SCHEMA_VERSION, TOLERATED_MAX_SCHEMA_VERSION};
 use crate::error::AppError;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -96,6 +96,7 @@ impl Database {
             enabled_gemini BOOLEAN NOT NULL DEFAULT 0,
             enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_openclaw BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
             content_hash TEXT,
@@ -104,6 +105,16 @@ impl Database {
             [],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // OpenClaw 支持列：create_tables 阶段幂等补齐，独立于 schema 版本。
+        // 增强版暂时把 SCHEMA_VERSION 标回 v16（兼容原生 app），因此不通过
+        // v17 迁移加列；这里对所有库（新库/原生 v16 库/增强版旧库）统一确保列存在。
+        Self::add_column_if_missing(
+            conn,
+            "skills",
+            "enabled_openclaw",
+            "BOOLEAN NOT NULL DEFAULT 0",
+        )?;
 
         // 6. Skill Repos 表
         conn.execute(
@@ -437,11 +448,22 @@ impl Database {
         let mut version = Self::get_user_version(conn)?;
 
         if version > SCHEMA_VERSION {
-            conn.execute("ROLLBACK TO schema_migration;", []).ok();
-            conn.execute("RELEASE schema_migration;", []).ok();
-            return Err(AppError::Database(format!(
-                "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再尝试。"
-            )));
+            // 增强版暂时把 schema 标回 v16（兼容原生 app）。v17 是增强版自己
+            // 之前写入的版本，属于「我方上溢」——只回写版本号，不迁移任何数据，
+            // 对应的列（enabled_openclaw）已在上一次运行时落在库里。
+            if version <= TOLERATED_MAX_SCHEMA_VERSION {
+                log::warn!(
+                    "检测到我方历史 schema 版本 {version}，回写为 {SCHEMA_VERSION}（不迁移数据）"
+                );
+                Self::set_user_version(conn, SCHEMA_VERSION)?;
+                version = SCHEMA_VERSION;
+            } else {
+                conn.execute("ROLLBACK TO schema_migration;", []).ok();
+                conn.execute("RELEASE schema_migration;", []).ok();
+                return Err(AppError::Database(format!(
+                    "数据库版本过新（{version}），当前应用仅支持 {SCHEMA_VERSION}，请升级应用后再尝试。"
+                )));
+            }
         }
 
         let result = (|| {

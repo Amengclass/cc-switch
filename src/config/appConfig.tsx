@@ -26,17 +26,18 @@ export const APP_IDS: AppId[] = [
   "hermes",
 ];
 
-/** App IDs shown in Skills panels (excludes OpenClaw — it doesn't support Skills) */
+/** App IDs shown in Skills panels */
 export const SKILLS_APP_IDS: AppId[] = [
   "claude",
   "codex",
   "gemini",
   "grokbuild",
   "opencode",
+  "openclaw",
   "hermes",
 ];
 
-/** App IDs shown in MCP panels (excludes OpenClaw) */
+/** App IDs shown in MCP panels */
 export const MCP_APP_IDS: AppId[] = [...SKILLS_APP_IDS];
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SessionMessage, SessionMeta } from "@/types";
+import type { McpServer, SessionMessage, SessionMeta } from "@/types";
 import type {
   EffectReport,
   RemoteConnectionInfo,
@@ -179,12 +179,12 @@ export async function deleteRemoteSession(
   });
 }
 
-/** 读取远端 ~/.claude.json 的 mcpServers 映射（{id: spec}） */
+/** 读取远端 MCP 服务器列表（完整 McpServer，读 SSOT ~/.cc-switch/mcp.json） */
 export async function readRemoteMcpServers(
   hostId: string,
   container?: string,
-): Promise<Record<string, unknown>> {
-  return invoke<Record<string, unknown>>("read_remote_mcp_servers", {
+): Promise<McpServer[]> {
+  return invoke<McpServer[]>("read_remote_mcp_servers", {
     hostId,
     container: container ?? null,
   });
@@ -201,22 +201,20 @@ export async function readRemoteMcpJson(
   });
 }
 
-/** 在远端 ~/.claude.json 的 mcpServers 中新增/更新一个服务器 */
+/** 新增/更新远端 MCP 服务器（写 SSOT + 同步 apps 启用的 live 配置） */
 export async function upsertRemoteMcpServer(
   hostId: string,
-  id: string,
-  spec: Record<string, unknown>,
+  server: McpServer,
   container?: string,
 ): Promise<boolean> {
   return invoke<boolean>("upsert_remote_mcp_server", {
     hostId,
-    id,
-    spec,
+    server,
     container: container ?? null,
   });
 }
 
-/** 从远端 ~/.claude.json 的 mcpServers 中删除一个服务器 */
+/** 从远端删除一个 MCP 服务器（删 SSOT + 从所有 live 配置移除） */
 export async function deleteRemoteMcpServer(
   hostId: string,
   id: string,
@@ -225,6 +223,34 @@ export async function deleteRemoteMcpServer(
   return invoke<boolean>("delete_remote_mcp_server", {
     hostId,
     id,
+    container: container ?? null,
+  });
+}
+
+/** 切换远端 MCP 服务器在指定 app 的启用状态 */
+export async function toggleRemoteMcpApp(
+  hostId: string,
+  id: string,
+  app: string,
+  enabled: boolean,
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("toggle_remote_mcp_app", {
+    hostId,
+    id,
+    app,
+    enabled,
+    container: container ?? null,
+  });
+}
+
+/** 从远端各 CLI live 配置导入 MCP 到 SSOT，返回新导入数量 */
+export async function importRemoteMcpFromApps(
+  hostId: string,
+  container?: string,
+): Promise<number> {
+  return invoke<number>("import_remote_mcp_from_apps", {
+    hostId,
     container: container ?? null,
   });
 }
@@ -359,6 +385,31 @@ export async function installRemoteSkillFromDir(
   });
 }
 
+/** 从「发现技能」列表把一个技能安装到远端（本机下载仓库 → 上传远端 SSOT → 写 skills.json + 建链接） */
+export async function installRemoteSkillFromDiscoverable(
+  hostId: string,
+  skill: {
+    key: string;
+    name: string;
+    description: string;
+    directory: string;
+    readmeUrl?: string;
+    repoOwner: string;
+    repoName: string;
+    repoBranch: string;
+  },
+  container?: string,
+): Promise<RemoteSkillRecord> {
+  return invoke<RemoteSkillRecord>(
+    "install_remote_skill_from_discoverable",
+    {
+      hostId,
+      skill,
+      container: container ?? null,
+    },
+  );
+}
+
 /** 远端未管理技能条目（扫描远端文件系统） */
 export interface RemoteUnmanagedSkill {
   directory: string;
@@ -399,6 +450,7 @@ export interface RemoteSkillApps {
   claude: boolean;
   codex: boolean;
   gemini: boolean;
+  grokbuild: boolean;
   opencode: boolean;
   openclaw: boolean;
   hermes: boolean;

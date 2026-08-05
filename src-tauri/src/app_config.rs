@@ -99,6 +99,8 @@ pub struct SkillApps {
     #[serde(default)]
     pub opencode: bool,
     #[serde(default)]
+    pub openclaw: bool,
+    #[serde(default)]
     pub hermes: bool,
 }
 
@@ -111,8 +113,8 @@ impl SkillApps {
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
+            AppType::OpenClaw => self.openclaw,
             AppType::Hermes => self.hermes,
-            AppType::OpenClaw => false, // OpenClaw doesn't support Skills
             AppType::ClaudeDesktop => false,
         }
     }
@@ -125,8 +127,8 @@ impl SkillApps {
             AppType::Gemini => self.gemini = enabled,
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
+            AppType::OpenClaw => self.openclaw = enabled,
             AppType::Hermes => self.hermes = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support Skills, ignore
             AppType::ClaudeDesktop => {} // Claude Desktop 3P profiles don't use CC Switch skill sync
         }
     }
@@ -149,6 +151,9 @@ impl SkillApps {
         if self.opencode {
             apps.push(AppType::OpenCode);
         }
+        if self.openclaw {
+            apps.push(AppType::OpenClaw);
+        }
         if self.hermes {
             apps.push(AppType::Hermes);
         }
@@ -162,6 +167,7 @@ impl SkillApps {
             && !self.gemini
             && !self.grokbuild
             && !self.opencode
+            && !self.openclaw
             && !self.hermes
     }
 

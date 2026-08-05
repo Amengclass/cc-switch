@@ -63,33 +63,11 @@ const UnifiedMcpPanel = React.forwardRef<
     remoteContainerId,
   );
 
-  // 本地模式 serversMap 是 McpServer 结构（含 apps/description 等）；
-  // 远端模式读到的是裸 `{id: spec}`，适配成 McpServer 供列表/表单统一使用。
+  // 本机与远端统一：serversMap 都是 McpServer 结构（含 apps 多开关 + 元数据）
   const serverEntries = useMemo((): Array<[string, McpServer]> => {
     if (!serversMap) return [];
-    if (!remoteTargetId) {
-      return Object.entries(serversMap as Record<string, McpServer>);
-    }
-    return Object.entries(
-      serversMap as Record<string, Record<string, unknown>>,
-    ).map(([id, spec]) => [
-      id,
-      {
-        id,
-        name: id,
-        server: spec,
-        apps: {
-          claude: true,
-          codex: false,
-          gemini: false,
-          grokbuild: false,
-          opencode: false,
-          openclaw: false,
-          hermes: false,
-        },
-      },
-    ]);
-  }, [serversMap, remoteTargetId]);
+    return Object.entries(serversMap as Record<string, McpServer>);
+  }, [serversMap]);
 
   const enabledCounts = useMemo(() => {
     const counts = {

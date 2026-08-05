@@ -474,7 +474,7 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   React.useImperativeHandle(ref, () => ({
-    openDiscovery: isRemote ? () => undefined : onOpenDiscovery,
+    openDiscovery: onOpenDiscovery,
     openImport: handleOpenImport,
     openInstallFromZip: handleInstallFromZip,
     openRestoreFromBackup: isRemote
