@@ -178,15 +178,25 @@ impl<'a> DockerExecFileOps<'a> {
 
 impl FileOps for DockerExecFileOps<'_> {
     async fn exists(&self, path: &str) -> bool {
-        self.exec(&format!("test -e {}", shell_quote(path)))
-            .await
-            .is_ok()
+        // test -e 靠退出码，但 exec_command 不检查退出码。
+        // 改用 stdout 输出结果：路径存在则打 "yes"。
+        self.exec(&format!(
+            "if test -e {}; then echo yes; else echo no; fi",
+            shell_quote(path)
+        ))
+        .await
+        .map(|s| s.trim() == "yes")
+        .unwrap_or(false)
     }
 
     async fn is_dir(&self, path: &str) -> bool {
-        self.exec(&format!("test -d {}", shell_quote(path)))
-            .await
-            .is_ok()
+        self.exec(&format!(
+            "if test -d {}; then echo yes; else echo no; fi",
+            shell_quote(path)
+        ))
+        .await
+        .map(|s| s.trim() == "yes")
+        .unwrap_or(false)
     }
 
     async fn read_head_tail_lines(
@@ -210,9 +220,9 @@ impl FileOps for DockerExecFileOps<'_> {
     }
 
     async fn read_dir(&self, path: &str) -> Result<Vec<DirEntry>, String> {
-        // ls -A 输出纯名称；再对每项探测是否目录
+        // ls -pA：文件名后加 / 标记目录（如 "dir1/"、"file.jsonl"），一次 exec 区分文件/目录
         let out = self
-            .exec(&format!("ls -A {}", shell_quote(path)))
+            .exec(&format!("ls -pA {}", shell_quote(path)))
             .await
             .map_err(|e| format!("容器内读取目录失败 {path}: {e}"))?;
         let mut entries = Vec::new();
@@ -221,10 +231,15 @@ impl FileOps for DockerExecFileOps<'_> {
             if name.is_empty() {
                 continue;
             }
-            let full = format!("{}/{}", path.trim_end_matches('/'), name);
-            let is_dir = self.exec(&format!("test -d {}", shell_quote(&full))).await.is_ok();
+            let is_dir = name.ends_with('/');
+            let clean_name = if is_dir {
+                name[..name.len() - 1].to_string()
+            } else {
+                name.clone()
+            };
+            let full = format!("{}/{}", path.trim_end_matches('/'), clean_name);
             entries.push(DirEntry {
-                name,
+                name: clean_name,
                 path: full,
                 is_dir,
             });
@@ -272,56 +287,6 @@ fn shell_quote(s: &str) -> String {
     }
 }
 
-/// 将本地目录递归上传到容器内目标目录（`remote_dir` 作为根被创建）。
-///
-/// 逐个文件 base64 编码后通过 `docker exec` 写入容器，只支持小文件
-///（单个文件 base64 需在 shell 命令行长度限制内，多数技能文件满足）。
-pub(crate) async fn upload_dir_to_container(
-    channel: &Handle<RemoteHandler>,
-    container: &str,
-    local_dir: &std::path::Path,
-    remote_dir: &str,
-) -> Result<(), String> {
-    use crate::remote::skill::{collect_dirs_recursive, collect_files_recursive};
-
-    // 创建远端根目录
-    exec_command(
-        channel,
-        &format!(
-            "docker exec {} sh -c {}",
-            container,
-            shell_quote(&format!("mkdir -p {}", shell_quote(remote_dir))),
-        ),
-    )
-    .await?;
-
-    // 第一遍：递归创建所有子目录
-    let mut dirs: Vec<String> = Vec::new();
-    collect_dirs_recursive(local_dir, remote_dir, &mut dirs)?;
-    for dir in dirs.iter().rev() {
-        exec_command(
-            channel,
-            &format!(
-                "docker exec {} sh -c {}",
-                container,
-                shell_quote(&format!("mkdir -p {}", shell_quote(dir))),
-            ),
-        )
-        .await?;
-    }
-
-    // 第二遍：递归写入所有文件
-    let mut files: Vec<(std::path::PathBuf, String)> = Vec::new();
-    collect_files_recursive(local_dir, remote_dir, &mut files)?;
-    let ops = DockerExecFileOps::new(channel, container)?;
-    for (local_path, remote_path) in &files {
-        let data = std::fs::read(local_path)
-            .map_err(|e| format!("读取本地文件失败 {}: {e}", local_path.display()))?;
-        ops.write_bytes_atomic(remote_path, &data).await?;
-    }
-    Ok(())
-}
-
 /// 通过 `docker ps` 列出容器（id + 名称），供前端选择。
 pub async fn list_docker_containers(channel: &Handle<RemoteHandler>) -> Result<Vec<String>, String> {
     // --format 输出 "id\tname"；name 取最后一个（--format '{{.Names}}' 已是逗号分隔，取第一个即可）
@@ -338,23 +303,4 @@ pub async fn list_docker_containers(channel: &Handle<RemoteHandler>) -> Result<V
         }
     }
     Ok(containers)
-}
-
-/// 将宿主机上的目录复制到容器内（`docker cp`）。
-///
-/// 注意：`docker cp` 在宿主机上执行（通过 SSH），源路径必须是宿主机绝对路径。
-pub(crate) async fn copy_dir_to_container(
-    channel: &Handle<RemoteHandler>,
-    container: &str,
-    host_source: &str,
-    container_dest: &str,
-) -> Result<(), String> {
-    let cmd = format!(
-        "docker cp {} {}:{}",
-        shell_quote(host_source),
-        container,
-        shell_quote(container_dest)
-    );
-    exec_command(channel, &cmd).await?;
-    Ok(())
 }

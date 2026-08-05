@@ -198,7 +198,7 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useSessionsQuery(
+  const { data, isLoading, isFetching, refetch } = useSessionsQuery(
     remoteTargetId,
     remoteContainerId,
   );
@@ -1202,7 +1202,7 @@ export function SessionManagerPage({
                               className="size-7"
                               onClick={() => void refetch()}
                             >
-                              <RefreshCw className="size-3.5" />
+                              <RefreshCw className={`size-3.5 ${isFetching ? "animate-spin" : ""}`} />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>{t("common.refresh")}</TooltipContent>

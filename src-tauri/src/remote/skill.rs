@@ -15,8 +15,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::fsops::FileOps;
 
-use super::sftp_io::ensure_remote_dir;
-
 // ========================================================================
 // 路径
 // ========================================================================
@@ -107,9 +105,11 @@ pub struct RemoteSkillRecord {
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSkillEntry {
     pub id: String,
+    /// 显示名称（来自 SKILL.md，无则回退到目录名）
     pub name: String,
+    /// 技能目录名（文件系统用）
+    pub directory: String,
     pub path: String,
-    pub display_name: Option<String>,
     pub description: Option<String>,
     /// 各应用启用状态。
     pub apps: RemoteSkillApps,
@@ -308,11 +308,11 @@ pub async fn list_remote_skills<F: FileOps>(
         );
         out.push(RemoteSkillEntry {
             id: if rec.id.is_empty() { rec.directory.clone() } else { rec.id.clone() },
-            display_name: display_name
+            name: display_name
                 .filter(|n| !n.is_empty())
-                .or_else(|| Some(rec.name.clone())),
+                .unwrap_or_else(|| rec.directory.clone()),
+            directory: rec.directory.clone(),
             description: description.or_else(|| rec.description.clone()),
-            name: rec.directory.clone(),
             path: skill_dir,
             apps: rec.apps.clone(),
             installed_at: rec.installed_at,
@@ -336,11 +336,19 @@ pub async fn delete_remote_skill<F: FileOps>(
     root: &str,
     name: &str,
 ) -> Result<bool, String> {
-    if name.is_empty() || name.contains('/') || name.contains('\\') || name == "." || name == ".." {
+    // name 实际上是 id（UUID），从 JSON 中解析出真正的 directory
+    let records = read_remote_skills_json(fs, root).await?;
+    let resolved = records
+        .iter()
+        .find(|r| r.id == name)
+        .map(|r| r.directory.clone())
+        .ok_or_else(|| format!("技能 {name} 不存在"))?;
+
+    if resolved.contains('/') || resolved.contains('\\') || resolved == "." || resolved == ".." {
         return Err("非法技能名称".to_string());
     }
     let ssot_dir = remote_ssot_path(root);
-    let path = format!("{ssot_dir}/{name}");
+    let path = format!("{ssot_dir}/{resolved}");
 
     // 删 SSOT 目录
     if fs.exists(&path).await && fs.is_dir(&path).await {
@@ -349,12 +357,12 @@ pub async fn delete_remote_skill<F: FileOps>(
 
     // 删链接
     if let Some(ch) = channel {
-        remove_remote_skill_links(ch, container, root, name).await?;
+        remove_remote_skill_links(ch, container, root, &resolved).await?;
     }
 
-    // 更新 JSON
-    let mut records = read_remote_skills_json(fs, root).await?;
-    records.retain(|r| r.directory != name);
+    // 更新 JSON（同时按 id 和 directory 剔除）
+    let mut records = records;
+    records.retain(|r| r.id != name);
     write_remote_skills_json(fs, root, &records).await?;
 
     Ok(true)
@@ -443,9 +451,10 @@ pub async fn import_remote_skill_local<F: FileOps>(
     let dest = format!("{ssot_dir}/{name}");
 
     // cp -r 源到 SSOT
-    if container.is_some() {
-        // 容器：通过 docker cp 或 base64 方式
-        crate::remote::docker::copy_dir_to_container(channel, container.unwrap(), source_path, &dest).await?;
+    if let Some(c) = container {
+        // 容器：源在容器内部，docker exec cp -r 在容器内复制
+        let cp_cmd = format!("docker exec {} cp -r {} {}", c, shell_q(source_path), shell_q(&dest));
+        crate::remote::connection::exec_command(channel, &cp_cmd).await?;
     } else {
         // 宿主机：exec cp -r
         let cp_cmd = format!("cp -r {} {}", shell_q(source_path), shell_q(&dest));
@@ -487,142 +496,53 @@ pub async fn import_remote_skill_local<F: FileOps>(
 // ZIP 安装
 // ========================================================================
 
-/// 将本地目录递归上传到远端目标目录（`remote_dir` 作为根被创建）。
-pub(crate) async fn upload_dir_to_remote(
-    sftp: &SftpSession,
+/// 通过 tar.gz 流将本地目录一次性上传到远端（宿主机或容器）。
+///
+/// 本地内存 tar.gz 打包 → `exec_command_with_stdin` 传二进制流 → 远端 `tar xzf -` 解包。
+/// 一次 SSH 往返完成，不落宿主机磁盘。
+pub(crate) async fn upload_dir_via_tar(
+    channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
+    container: Option<&str>,
     local_dir: &Path,
     remote_dir: &str,
 ) -> Result<(), String> {
-    ensure_remote_dir(sftp, remote_dir).await?;
-
-    let mut remote_dirs: Vec<String> = Vec::new();
-    collect_dirs_recursive(local_dir, remote_dir, &mut remote_dirs)?;
-    for dir in remote_dirs.iter().rev() {
-        ensure_remote_dir(sftp, dir).await?;
-    }
-
-    let mut local_files: Vec<(std::path::PathBuf, String)> = Vec::new();
-    collect_files_recursive(local_dir, remote_dir, &mut local_files)?;
-    for (local_path, remote_path) in local_files {
-        let data = std::fs::read(&local_path)
-            .map_err(|e| format!("读取本地文件失败 {}: {e}", local_path.display()))?;
-        let mut file = sftp
-            .create(&remote_path)
-            .await
-            .map_err(|e| format!("远端创建文件失败 {remote_path}: {e}"))?;
-        use tokio::io::AsyncWriteExt;
-        file.write_all(&data)
-            .await
-            .map_err(|e| format!("远端写入文件失败 {remote_path}: {e}"))?;
-        file.flush()
-            .await
-            .map_err(|e| format!("远端刷新文件失败 {remote_path}: {e}"))?;
-    }
-    Ok(())
-}
-
-pub(crate) fn collect_dirs_recursive(
-    local_dir: &Path,
-    remote_dir: &str,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
-    let entries = std::fs::read_dir(local_dir)
-        .map_err(|e| format!("读取本地目录失败 {}: {e}", local_dir.display()))?;
-    for entry in entries.flatten() {
-        let local_path = entry.path();
-        if local_path.is_dir() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let sub = format!("{remote_dir}/{name}");
-            out.push(sub.clone());
-            collect_dirs_recursive(&local_path, &sub, out)?;
-        }
-    }
-    Ok(())
-}
-
-pub(crate) fn collect_files_recursive(
-    local_dir: &Path,
-    remote_dir: &str,
-    out: &mut Vec<(std::path::PathBuf, String)>,
-) -> Result<(), String> {
-    let entries = std::fs::read_dir(local_dir)
-        .map_err(|e| format!("读取本地目录失败 {}: {e}", local_dir.display()))?;
-    for entry in entries.flatten() {
-        let local_path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if local_path.is_dir() {
-            collect_files_recursive(&local_path, &format!("{remote_dir}/{name}"), out)?;
-        } else {
-            out.push((local_path, format!("{remote_dir}/{name}")));
-        }
-    }
-    Ok(())
-}
-
-pub async fn install_remote_skills_from_zip(
-    sftp: &SftpSession,
-    root: &str,
-    zip_path: &str,
-) -> Result<Vec<String>, String> {
-    use crate::services::skill::SkillService;
-
-    let zip_path = Path::new(zip_path);
-    let temp_guard = SkillService::extract_local_zip(zip_path)
-        .map_err(|e| format!("解压 ZIP 失败: {e}"))?;
-    let temp_dir = temp_guard.path().to_path_buf();
-
-    let skill_dirs = SkillService::scan_skills_in_dir(&temp_dir)
-        .map_err(|e| format!("扫描 ZIP 内技能失败: {e}"))?;
-    if skill_dirs.is_empty() {
-        return Err("ZIP 内未找到含 SKILL.md 的技能目录".to_string());
-    }
-
-    let zip_stem = zip_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_string());
-
-    let ssot_dir = remote_ssot_path(root);
-    let mut installed: Vec<String> = Vec::new();
-    let fs = crate::fsops::RemoteSftpFileOps { sftp };
-    let records = read_remote_skills_json(&fs, root).await?;
-    let existing: std::collections::HashSet<String> =
-        records.iter().map(|r| r.directory.clone()).collect();
-
-    for skill_dir in &skill_dirs {
-        let dir_name = skill_dir
+    // 1. 内存中打包 tar.gz
+    let mut buf = Vec::new();
+    {
+        let gz = flate2::write::GzEncoder::new(&mut buf, flate2::Compression::default());
+        let mut archive = tar::Builder::new(gz);
+        let dir_name = local_dir
             .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let install_name = if skill_dir == &temp_dir
-            || dir_name.is_empty()
-            || dir_name.starts_with('.')
-        {
-            zip_stem
-                .as_deref()
-                .map(|s| sanitize_name(s))
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "skill".to_string())
-        } else {
-            sanitize_name(&dir_name)
-        };
-        if install_name.is_empty() {
-            continue;
-        }
-        if existing.contains(&install_name) {
-            log::warn!("[remote] 远端已存在技能目录 {install_name}，跳过");
-            continue;
-        }
-
-        let remote_dir = format!("{ssot_dir}/{install_name}");
-        upload_dir_to_remote(sftp, skill_dir, &remote_dir).await?;
-        installed.push(install_name);
+            .ok_or_else(|| "local_dir 无文件名".to_string())?;
+        archive
+            .append_dir_all(dir_name, local_dir)
+            .map_err(|e| format!("tar 打包失败: {e}"))?;
+        let gz = archive
+            .into_inner()
+            .map_err(|e| format!("tar 完成失败: {e}"))?;
+        gz.finish()
+            .map_err(|e| format!("gzip 完成失败: {e}"))?;
     }
 
-    if installed.is_empty() {
-        return Err("没有可安装的新技能（可能远端已全部存在）".to_string());
-    }
-    Ok(installed)
+    // 2. 解包目标父目录（remote_dir 的父目录，tar 内已包含 dir_name）
+    let tar_parent = match remote_dir.rsplit_once('/') {
+        Some((parent, _)) if !parent.is_empty() => parent,
+        _ => "/",
+    };
+
+    // 3. 构建命令并执行
+    let cmd = if let Some(c) = container {
+        format!(
+            "docker exec -i {} tar xzf - -C {}",
+            c,
+            shell_q(tar_parent)
+        )
+    } else {
+        format!("tar xzf - -C {}", shell_q(tar_parent))
+    };
+
+    crate::remote::connection::exec_command_with_stdin(channel, &cmd, &buf).await?;
+    Ok(())
 }
 
 pub async fn install_remote_skills_from_zip_generic(
@@ -683,12 +603,7 @@ pub async fn install_remote_skills_from_zip_generic(
         }
 
         let remote_dir = format!("{ssot_dir}/{install_name}");
-        if let Some(c) = container {
-            crate::remote::docker::upload_dir_to_container(channel, c, skill_dir, &remote_dir)
-                .await?;
-        } else {
-            upload_dir_to_remote(sftp, skill_dir, &remote_dir).await?;
-        }
+        upload_dir_via_tar(channel, container, skill_dir, &remote_dir).await?;
         installed.push(install_name);
     }
 

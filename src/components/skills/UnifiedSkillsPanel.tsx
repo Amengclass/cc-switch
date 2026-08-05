@@ -1,5 +1,6 @@
 import React, { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Sparkles,
   Trash2,
@@ -84,6 +85,7 @@ const UnifiedSkillsPanel = React.forwardRef<
     variant?: "destructive" | "info";
     onConfirm: () => void;
   } | null>(null);
+  const queryClient = useQueryClient();
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   /** 远端导入时暂存扫描结果（替代 unmanagedSkills） */
@@ -183,7 +185,11 @@ const UnifiedSkillsPanel = React.forwardRef<
       title: t("skills.uninstall"),
       message: t("skills.uninstallConfirm", { name: skill.name }),
       onConfirm: async () => {
+        let toastId: string | number | undefined;
+        setConfirmDialog(null);
         try {
+          toastId = toast.loading(t("skills.uninstalling"));
+
           // 构建 skillKey 用于更新 discoverable 缓存
           const installName =
             skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
@@ -194,7 +200,7 @@ const UnifiedSkillsPanel = React.forwardRef<
             id: skill.id,
             skillKey,
           });
-          setConfirmDialog(null);
+          toast.dismiss(toastId);
           toast.success(t("skills.uninstallSuccess", { name: skill.name }), {
             description: result.backupPath
               ? t("skills.backup.location", { path: result.backupPath })
@@ -202,6 +208,7 @@ const UnifiedSkillsPanel = React.forwardRef<
             closeButton: true,
           });
         } catch (error) {
+          if (toastId) toast.dismiss(toastId);
           toast.error(t("common.error"), { description: String(error) });
         }
       },
@@ -250,26 +257,52 @@ const UnifiedSkillsPanel = React.forwardRef<
   };
 
   const handleImport = async (imports: ImportSkillSelection[]) => {
+    let toastId: string | number | undefined;
     try {
       if (isRemote && remoteTargetId) {
         // 远端：逐个 cp -r → SSOT → skills.json → symlink
-        let count = 0;
+        setImportDialogOpen(false);
+        toastId = toast.loading(t("skills.importing", { defaultValue: "正在导入 skill..." }));
+        const installed: InstalledSkill[] = [];
         for (const imp of imports) {
           try {
-            await importRemoteSkill(
+            const record = await importRemoteSkill(
               remoteTargetId,
               imp.path || imp.directory,
               imp.directory,
               remoteContainerId || undefined,
             );
-            count++;
+            installed.push({
+              id: record.id,
+              name: record.name,
+              description: record.description,
+              directory: record.directory,
+              apps: {
+                claude: record.apps.claude,
+                codex: record.apps.codex ?? false,
+                gemini: record.apps.gemini ?? false,
+                opencode: record.apps.opencode ?? false,
+                openclaw: record.apps.openclaw ?? false,
+                hermes: record.apps.hermes ?? false,
+              },
+              installedAt: record.installedAt,
+              updatedAt: record.updatedAt,
+            });
           } catch (e) {
             toast.error(`${imp.directory}: ${String(e)}`);
           }
         }
-        setImportDialogOpen(false);
         unmanagedSkillsOverride.current = null;
+        const count = installed.length;
+        toast.dismiss(toastId);
         if (count > 0) {
+          const installedKey = ["skills", "installed", "remote", remoteTargetId, remoteContainerId ?? "__host__"];
+          // 即时更新 UI（本机策略）
+          queryClient.setQueryData<InstalledSkill[]>(installedKey, (old) =>
+            old ? [...old, ...installed] : installed,
+          );
+          // 后台拉取完整元数据
+          queryClient.invalidateQueries({ queryKey: installedKey });
           toast.success(
             t("skills.importSuccessRemote", {
               defaultValue: "已将 {{count}} 个技能导入远端",
@@ -280,27 +313,33 @@ const UnifiedSkillsPanel = React.forwardRef<
         }
       } else {
         // 本机：走 importMutation
-        await importMutation.mutateAsync(imports);
         setImportDialogOpen(false);
+        toastId = toast.loading(t("skills.importing", { defaultValue: "正在导入 skill..." }));
+        await importMutation.mutateAsync(imports);
+        toast.dismiss(toastId);
         toast.success(
           t("skills.importSuccess", { count: imports.length }),
           { closeButton: true },
         );
       }
     } catch (error) {
+      if (toastId) toast.dismiss(toastId);
       toast.error(t("common.error"), { description: String(error) });
     }
   };
 
   const handleInstallFromZip = async () => {
+    let toastId: string | number | undefined;
     try {
       const filePath = await skillsApi.openZipFileDialog();
       if (!filePath) return;
 
+      toastId = toast.loading(t("skills.installing"));
       const installed = await installFromZipMutation.mutateAsync({
         filePath,
         currentApp,
       });
+      toast.dismiss(toastId);
 
       if (installed.length === 0) {
         toast.info(t("skills.installFromZip.noSkillsFound"), {
@@ -320,6 +359,7 @@ const UnifiedSkillsPanel = React.forwardRef<
         );
       }
     } catch (error) {
+      if (toastId) toast.dismiss(toastId);
       toast.error(t("skills.installFailed"), { description: String(error) });
     }
   };

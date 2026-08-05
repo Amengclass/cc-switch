@@ -1911,7 +1911,7 @@ function App() {
             {t("remote.refreshStatus", { defaultValue: "刷新" })}
           </button>
         </div>
-        <div className="pt-2">{renderContent()}</div>
+        <div className="flex-1 min-h-0 flex flex-col pt-2">{renderContent()}</div>
       </main>
 
       <AddProviderDialog

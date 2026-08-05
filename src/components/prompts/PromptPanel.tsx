@@ -114,6 +114,10 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             list.push({ id: newId, ...data, enabled: data.enabled ?? false, createdAt: Date.now(), updatedAt: Date.now() });
           }
           await saveRemotePrompts(remoteTargetId, list, remoteContainerId || undefined);
+          // 同步更新前端状态
+          const map: Record<string, RemotePrompt> = {};
+          list.forEach((p) => { map[p.id] = p; });
+          setRemotePrompts(map);
           toast.success(t("prompts.saveSuccess"), { closeButton: true });
         } catch (e) {
           toast.error(t("prompts.saveFailed"));
@@ -173,6 +177,12 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             if (isRemote && remoteTargetId) {
               const list = Object.values(remotePrompts).filter((p) => p.id !== id);
               await saveRemotePrompts(remoteTargetId, list, remoteContainerId || undefined);
+              // 同步更新前端状态
+              setRemotePrompts((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
               toast.success(t("prompts.deleteSuccess"), { closeButton: true });
             } else {
               await localActions.deletePrompt(id);

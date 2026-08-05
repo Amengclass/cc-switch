@@ -288,13 +288,14 @@ export async function saveRemotePrompts(
   });
 }
 
-/** 远端 ~/.claude/skills 下的技能目录项 */
+/** 远端 ~/.cc-switch/skills 下的技能目录项 */
 export interface RemoteSkillEntry {
   id: string;
+  /** 显示名称（来自 SKILL.md，无则回退到目录名） */
   name: string;
+  /** 技能目录名（文件系统用） */
+  directory: string;
   path: string;
-  /** 从 SKILL.md frontmatter 解析的显示名（无则回退目录名） */
-  displayName?: string;
   /** 从 SKILL.md frontmatter 解析的描述 */
   description?: string;
   /** 各应用启用状态 */
@@ -332,13 +333,13 @@ export async function deleteRemoteSkill(
   });
 }
 
-/** 从本地 ZIP 安装技能到远端 ~/.claude/skills/，返回实际安装的技能目录名 */
+/** 从本地 ZIP 安装技能到远端 SSOT，返回安装的技能完整记录 */
 export async function installRemoteSkillsFromZip(
   hostId: string,
   zipPath: string,
   container?: string,
-): Promise<string[]> {
-  return invoke<string[]>("install_remote_skills_from_zip", {
+): Promise<RemoteSkillRecord[]> {
+  return invoke<RemoteSkillRecord[]>("install_remote_skills_from_zip", {
     hostId,
     zipPath,
     container: container ?? null,
@@ -382,6 +383,7 @@ export async function scanRemoteUnmanagedSkills(
 
 /** skills.json 中的记录 */
 export interface RemoteSkillRecord {
+  id: string;
   name: string;
   description?: string;
   directory: string;

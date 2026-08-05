@@ -707,19 +707,21 @@ pub async fn toggle_remote_skill_app(
     )?;
 
     let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
-    let rec = records
-        .iter_mut()
-        .find(|r| r.directory == name)
+    let idx = records
+        .iter()
+        .position(|r| r.id == name)
         .ok_or_else(|| format!("技能 {name} 不存在"))?;
+    // 解析出真正的目录名（前端可能传 id UUID 或 directory）
+    let dir = records[idx].directory.clone();
 
     // 更新 apps 字段
     match app.as_str() {
-        "claude" => rec.apps.claude = enabled,
-        "codex" => rec.apps.codex = enabled,
-        "gemini" => rec.apps.gemini = enabled,
-        "opencode" => rec.apps.opencode = enabled,
-        "openclaw" => rec.apps.openclaw = enabled,
-        "hermes" => rec.apps.hermes = enabled,
+        "claude" => records[idx].apps.claude = enabled,
+        "codex" => records[idx].apps.codex = enabled,
+        "gemini" => records[idx].apps.gemini = enabled,
+        "opencode" => records[idx].apps.opencode = enabled,
+        "openclaw" => records[idx].apps.openclaw = enabled,
+        "hermes" => records[idx].apps.hermes = enabled,
         _ => return Err(format!("未知应用: {app}")),
     }
 
@@ -742,9 +744,9 @@ pub async fn toggle_remote_skill_app(
             "hermes" => ".hermes/skills",
             _ => return Err(format!("未知应用: {app}")),
         };
-        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, name);
+        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, dir);
         let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
-        let target_path = format!("{ssot_dir}/{name}");
+        let target_path = format!("{ssot_dir}/{dir}");
         let app_dir = format!("{}/{}", host.default_home(), app_rel);
         let sync_op = if use_copy {
             format!("cp -r {} {}", shell_q_rs(&target_path), shell_q_rs(&link_path))
@@ -762,7 +764,7 @@ pub async fn toggle_remote_skill_app(
             "hermes" => ".hermes/skills",
             _ => return Ok(true),
         };
-        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, name);
+        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, dir);
         format!("rm -rf {}", shell_q_rs(&link_path))
     };
 
@@ -791,7 +793,7 @@ pub async fn install_remote_skills_from_zip(
     host_id: String,
     zip_path: String,
     container: Option<String>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<crate::remote::skill::RemoteSkillRecord>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
@@ -811,17 +813,18 @@ pub async fn install_remote_skills_from_zip(
     )
     .await?;
 
-    // 对每个新安装的技能：写 skills.json + 创建 symlink
+    // 对每个新安装的技能：写 skills.json + 创建 symlink，同时收集完整记录
     let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
     let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
     let now = chrono::Utc::now().timestamp_millis();
     let apps = crate::remote::skill::RemoteSkillApps { claude: true, ..Default::default() };
     let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
+    let mut result: Vec<crate::remote::skill::RemoteSkillRecord> = Vec::new();
 
     for name in &installed {
         let skill_dir = format!("{ssot_dir}/{name}");
         let (display_name, description) = crate::remote::skill::read_skill_md_meta_static(&target, &skill_dir).await;
-        records.push(crate::remote::skill::RemoteSkillRecord {
+        let record = crate::remote::skill::RemoteSkillRecord {
             id: uuid::Uuid::new_v4().to_string(),
             name: display_name.unwrap_or_else(|| name.clone()),
             description,
@@ -834,7 +837,9 @@ pub async fn install_remote_skills_from_zip(
             repo_branch: None,
             readme_url: None,
             content_hash: None,
-        });
+        };
+        records.push(record.clone());
+        result.push(record);
         crate::remote::skill::sync_remote_skill_links(
             &session.channel,
             container.as_deref(),
@@ -846,7 +851,7 @@ pub async fn install_remote_skills_from_zip(
     }
 
     crate::remote::skill::write_remote_skills_json(&target, &host.default_home(), &records).await?;
-    Ok(installed)
+    Ok(result)
 }
 
 /// 从本地单个技能目录直接上传到远端 `~/.claude/skills/`（递归）。
@@ -883,17 +888,13 @@ pub async fn install_remote_skill_from_dir(
         return Err(format!("远端已存在技能 {install_name}，请先删除再导入"));
     }
 
-    if let Some(ref c) = container {
-        crate::remote::docker::upload_dir_to_container(
-            &session.channel,
-            c,
-            local_path,
-            &remote_dir,
-        )
-        .await?;
-    } else {
-        crate::remote::skill::upload_dir_to_remote(&session.sftp, local_path, &remote_dir).await?;
-    }
+    crate::remote::skill::upload_dir_via_tar(
+        &session.channel,
+        container.as_deref(),
+        local_path,
+        &remote_dir,
+    )
+    .await?;
     Ok(install_name)
 }
 

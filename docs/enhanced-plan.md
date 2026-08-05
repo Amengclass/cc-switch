@@ -130,17 +130,38 @@
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
 
+### 前端 UI 刷新策略一致性
+
+| 事项 | 说明 |
+|---|---|
+| `handleImport` 远端导入改用 `mergeImportedSkills` | 当前用 `[...old, ...installed]` 简单展开，本机用 `mergeImportedSkills` 按 id 去重；策略不一致 |
+| `useImportSkillsFromApps` 远端路径返回完整数据 | 当前只有 `{ name, path }`，缺少 description/directory 等；导致额外多了一次 `invalidateQueries`，本机不用 |
+| 远端「从市场安装」Skills | 功能缺失，本机有 `useInstallSkill` + `setQueryData` 即时更新 |
+| 远端「更新」Skill | 功能缺失，本机有 `useUpdateSkill` + `setQueryData` replace by id |
+| 技能安装/卸载 loading 提示多语言适配 | 当前硬编码中文 `"正在安装 skill..."` / `"正在卸载 skill..."`，英文/日文/繁中下也显示中文 |
+
 ### 基座裁剪
 
 | 事项 | 说明 |
 |---|---|
-| 移除 Codex / Gemini / Claude Desktop 模块 | 相关路由、UI 入口、依赖;需确认是否仍要做 |
+| ~~移除 Codex / Gemini / Claude Desktop 模块~~ | **不做**。保留完整多应用支持,不裁剪任何模块 |
 
 ### 构建与发布
 
 | 事项 | 说明 |
 |---|---|
 | 打包测试 | 独立 exe 测试(Win/macOS),README 更新 |
+
+**构建注意事项：**
+
+- **前端修改后必须先 `pnpm run build:renderer`**：Tauri 配置 `frontendDist: "../dist"`，`cargo build` 不会自动编译前端。只跑 `cargo build` 会让 exe 加载 `dist/` 里的旧前端，导致 TypeScript 修改不生效。
+- 完整构建流程：
+  1. `pnpm run build:renderer`（Vite 打包前端到 `dist/`）
+  2. `cargo build --features tauri/custom-protocol`（编译 Rust）
+  3. 产物在 `src-tauri/target/debug/cc-switch.exe`
+- Windows 构建脚本：`C:\build\build-exe.ps1`（仅 cargo build，重试 12 次应对 LNK1105；**不含前端构建**）
+- 构建前需 `Stop-Process -Name cc-switch -Force` 避免 exe 被占用导致 `os error 5`
+- `CARGO_BUILD_JOBS = "2"` 控制并行度（避免 LNK1105 防火墙锁定）
 
 ---
 

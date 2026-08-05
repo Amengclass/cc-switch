@@ -27,8 +27,8 @@ import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
 function remoteToInstalled(entry: {
   id?: string;
   name: string;
+  directory: string;
   path?: string;
-  displayName?: string;
   description?: string;
   apps?: { claude?: boolean; codex?: boolean; gemini?: boolean; opencode?: boolean; openclaw?: boolean; hermes?: boolean };
   installedAt?: number;
@@ -41,9 +41,9 @@ function remoteToInstalled(entry: {
 }): InstalledSkill {
   return {
     id: entry.id || entry.name,
-    name: entry.displayName || entry.name,
+    name: entry.name,
     description: entry.description,
-    directory: entry.name,
+    directory: entry.directory,
     apps: {
       claude: entry.apps?.claude ?? true,
       codex: entry.apps?.codex ?? false,
@@ -441,37 +441,25 @@ export function useInstallSkillsFromZip(
       currentApp: AppId;
     }) => {
       if (remoteTargetId) {
-        const names = await installRemoteSkillsFromZip(
+        const records = await installRemoteSkillsFromZip(
           remoteTargetId,
           filePath,
           remoteContainerId,
         );
-        return names.map((name) => remoteToInstalled({ name, path: "" }));
+        // 返回完整数据（含 description），与本机行为一致
+        return records.map((r) => remoteToInstalled({ ...r, path: "" }));
       }
       return skillsApi.installFromZip(filePath, currentApp);
     },
     onSuccess: (installedSkills) => {
-      if (remoteTargetId) {
-        // 远端：安装后重新拉取完整列表（含 SKILL.md 描述）
-        queryClient.invalidateQueries({
-          queryKey: [
-            "skills",
-            "installed",
-            "remote",
-            remoteTargetId,
-            remoteContainerId ?? "__host__",
-          ],
-        });
-        return;
-      }
-      // 本机：直接更新缓存
-      queryClient.setQueryData<InstalledSkill[]>(
-        ["skills", "installed"],
-        (oldData) => {
-          if (!oldData) return installedSkills;
-          return [...oldData, ...installedSkills];
-        },
-      );
+      const key = remoteTargetId
+        ? ["skills", "installed", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
+        : ["skills", "installed"];
+      // 即时更新 UI（本地 + 远端统一策略，数据已完整含 description）
+      queryClient.setQueryData<InstalledSkill[]>(key, (oldData) => {
+        if (!oldData) return installedSkills;
+        return [...oldData, ...installedSkills];
+      });
     },
   });
 }
