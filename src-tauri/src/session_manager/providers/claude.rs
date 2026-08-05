@@ -284,13 +284,27 @@ fn infer_session_id_from_filename_str(path: &str) -> Option<String> {
 }
 
 /// 通过 FileOps 扫描会话（本机 LocalFileOps / 远端 RemoteSftpFileOps 共用）。
-pub async fn scan_sessions_fs<F: crate::fsops::FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(fs: &F, root: &str) -> Vec<SessionMeta> {
+    use futures::{stream, StreamExt};
     let mut files = Vec::new();
     collect_jsonl_files_fs(fs, root, &mut files).await;
 
+    // 并发读每个文件的头尾：远端(宿主机 SFTP / 容器 exec)每次 read 都走一次网络往返，
+    // 串行扫描 N 个文件 = N×往返/文件，公网 RTT 下几十秒；并发后降到约 N/24×往返。
+    // SFTP 多请求复用同一条连接、容器 exec 每次独立 channel，并发安全。
+    const PARALLEL: usize = 24;
+    let head_tails: Vec<(String, Option<(Vec<String>, Vec<String>)>)> = stream::iter(files)
+        .map(|path| async move {
+            let ht = fs.read_head_tail_lines(&path, 10, 30).await.ok();
+            (path, ht)
+        })
+        .buffer_unordered(PARALLEL)
+        .collect()
+        .await;
+
     let mut sessions = Vec::new();
-    for path in files {
-        if let Ok((head, tail)) = fs.read_head_tail_lines(&path, 10, 30).await {
+    for (path, ht) in head_tails {
+        if let Some((head, tail)) = ht {
             if let Some(meta) = parse_session_meta_from_lines(&path, &head, &tail) {
                 sessions.push(meta);
             }
@@ -299,7 +313,7 @@ pub async fn scan_sessions_fs<F: crate::fsops::FileOps>(fs: &F, root: &str) -> V
     sessions
 }
 
-async fn collect_jsonl_files_fs<F: crate::fsops::FileOps>(
+async fn collect_jsonl_files_fs<F: crate::fsops::FileOps + Sync>(
     fs: &F,
     root: &str,
     files: &mut Vec<String>,
@@ -310,12 +324,31 @@ async fn collect_jsonl_files_fs<F: crate::fsops::FileOps>(
     let Ok(entries) = fs.read_dir(root).await else {
         return;
     };
+    let mut dirs = Vec::new();
     for entry in entries {
         if entry.is_dir {
-            Box::pin(collect_jsonl_files_fs(fs, &entry.path, files)).await;
+            dirs.push(entry.path);
         } else if entry.name.ends_with(".jsonl") {
             files.push(entry.path);
         }
+    }
+    if dirs.is_empty() {
+        return;
+    }
+    // 一次性并发遍历所有子目录：远端每次 read_dir 都走网络往返，
+    // 串行 N 个目录 = N×RTT；并发后目录往返从 N 降到约 2（顶层 + 一层子目录）。
+    // Claude 会话结构仅两层（project-slug / *.jsonl），并发安全。
+    let sub_files: Vec<Vec<String>> = futures::future::join_all(dirs.into_iter().map(|dir| {
+        let fs = fs;
+        async move {
+            let mut sub = Vec::new();
+            collect_jsonl_files_fs(fs, &dir, &mut sub).await;
+            sub
+        }
+    }))
+    .await;
+    for sub in sub_files {
+        files.extend(sub);
     }
 }
 

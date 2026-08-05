@@ -8,7 +8,7 @@
 use russh::client::Handle;
 use russh_sftp::client::SftpSession;
 
-use crate::fsops::{DirEntry, FileOps};
+use crate::fsops::{split_head_tail, DirEntry, FileOps};
 
 use super::connection::{exec_command, RemoteHandler};
 
@@ -205,17 +205,51 @@ impl FileOps for DockerExecFileOps<'_> {
         head_n: usize,
         tail_n: usize,
     ) -> Result<(Vec<String>, Vec<String>), String> {
-        // 会话文件可能很大，只取头尾：用 awk/sed 分别截取
-        let head = self
-            .exec(&format!("head -n {} {}", head_n, shell_quote(path)))
+        // 与本机 utils::read_head_tail_lines 分档一致：
+        // 小文件(<16KB)整文件读回、Rust 侧 split；大文件「头 head_n 行 + seek 末尾 ~16KB 取尾」。
+        // 容器端等价实现：head -n 恰好取 head_n 行；tail -c 16384 服务端 seek 到末尾读 ~16KB 字节。
+        // 一次 exec 完成分档判定 + 读取，首行标记 F/H 区分两种输出。
+        const HEAD_TAIL_BUFFER: usize = 16 * 1024;
+        const SEP: &str = "__CCSWITCH_HEADTAIL_SEP_7f3a2b__";
+        let script = format!(
+            "s=$(stat -c %s {p}); if [ \"$s\" -lt {buf} ]; then echo F; cat {p}; else echo H; {{ head -n {hn}; echo {sep}; tail -c {buf} {p}; }} < {p}; fi",
+            p = shell_quote(path),
+            hn = head_n,
+            buf = HEAD_TAIL_BUFFER,
+            sep = SEP,
+        );
+        let out = self
+            .exec(&script)
             .await
-            .map(|s| s.lines().map(|l| l.to_string()).collect())
-            .unwrap_or_default();
-        let tail = self
-            .exec(&format!("tail -n {} {}", tail_n, shell_quote(path)))
-            .await
-            .map(|s| s.lines().map(|l| l.to_string()).collect())
-            .unwrap_or_default();
+            .map_err(|e| format!("容器内读取失败 {path}: {e}"))?;
+
+        // 首行是 F/H 标记，去掉后为数据
+        let (marker, rest) = match out.split_once('\n') {
+            Some((m, r)) => (m.trim(), r),
+            None => (out.as_str(), ""),
+        };
+
+        if marker == "F" {
+            // 小文件：整文件内容直接 split 头尾（与本机 < 16KB 分支一致）
+            return Ok(split_head_tail(rest, head_n, tail_n));
+        }
+
+        // 大文件：head 的 head_n 行 + SEP + 末尾 ~16KB 字节
+        let mut parts = rest.splitn(2, SEP);
+        let head: Vec<String> = parts
+            .next()
+            .unwrap_or("")
+            .lines()
+            .map(|l| l.to_string())
+            .collect();
+        // 末尾字节可能从行中间开始（seek 进入行内），前半行/空行不影响取最后 tail_n 行
+        let tail_all: Vec<&str> = parts.next().unwrap_or("").lines().collect();
+        let skip = tail_all.len().saturating_sub(tail_n);
+        let tail: Vec<String> = tail_all
+            .into_iter()
+            .skip(skip)
+            .map(|s| s.to_string())
+            .collect();
         Ok((head, tail))
     }
 

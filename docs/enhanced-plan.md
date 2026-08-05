@@ -277,8 +277,21 @@ cc-switch/                     # fork 自 farion1231/cc-switch
 | 链接调试符号 | `RUSTFLAGS=-C link-arg=/DEBUG:NONE` |
 | 符号生成 | `CARGO_PROFILE_DEV_DEBUG=0` |
 | 并行度 | `CARGO_BUILD_JOBS=2` |
-| 重试 | 最多 12 次;`build.log` 出现 `error[`(真实编译错误)才停,仅 LNK1105 则继续 |
+| 重试 | 最多 12 次;`build.log` 出现 `error[` / `error:`(排除 LNK,即真实编译错误)才停,仅 LNK1105 则继续 |
+| 失败反馈 | 真实编译错误时**立即打印错误上下文**(错误行附近 ±6 行),不依赖翻 build.log |
+| 耗时 | 每次构建打印 `elapsed Ns`,一眼看出是增量还是全量 |
 | 产物 | `src-tauri\target\debug\cc-switch.exe`(约 67 MB) |
+
+**为什么有时快有时慢**
+
+| 场景 | 编译量 | 时长 |
+|---|---|---|
+| 增量(只改 1~2 个 Rust 文件) | 只重编译改的 crate + 链接 | 1~2 分钟 |
+| 改了依赖/公共 crate | 连带重编译一批 crate | 5~10 分钟 |
+| 全量(首次 / target 被清 / 换了编译模式) | 几百个 crate | 10 分钟+ |
+| 撞火绒 LNK1105 | 链接失败 + 重试 + sleep 2s | 每次失败额外 +2s |
+
+> ⚠️ **不要在构建流程里跑 `cargo check`**：`check` 与 `build` 产物格式不同，来回切换会互相触发大面积重编译。要验语法就在**单独一次**里做完，别和 `build-exe.ps1` 交叉使用。
 
 ---
 
