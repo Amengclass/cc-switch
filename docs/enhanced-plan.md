@@ -103,6 +103,17 @@
 - **目标选择器可滚动**:主机/容器下拉框 `max-h-[50vh]` + 可见细滚动条
 - **目标选择器聚焦样式**:与全局 `*:focus-visible` 保持一致,不下拉特殊处理
 
+### 悬浮窗(加速球)
+- 桌面常驻透明小球 + 悬停展开面板:列出每个 app(Claude Code / Codex / Gemini / Grok Build / OpenCode / OpenClaw / Hermes)的当前供应商 / 模型 / 余量
+- 窗口:透明 + 置顶 + 无边框 + 跳过任务栏,`floating.html` 独立 Vite 入口,与主 App 完全分离(`floating-main.tsx` 按窗口 label 分派渲染球/面板)
+- 拖动:**Rust 端 `GetCursorPos` 全局光标轮询 + `GetAsyncKeyState` 左键检测**,绕开 WebView 事件;球上任意位置可拖,左键按住拖动画板收起
+- 单击(无位移)打开主窗口;松手边缘吸附(阈值可调),吸附速度设置:快/中/慢/关闭(关闭 = 不自动吸附)
+- 主题:跟随主应用外观(light/dark/system),`storage` 事件同步 + `set_window_theme`
+- 设置:「悬浮组件」独立区块(开关 + 吸附速度)+ 托盘右键「悬浮窗」开关,两处联动
+- 余量数据:**只读 `UsageCache` 缓存,绝不主动查 API**;查询全部由主窗口(useUsageQuery / 手动刷新)和托盘悬停发起,面板 3s 轮询 + `usage-cache-updated` / `floating-data-refresh` 事件同步
+- 余量样式对齐主窗口:标签灰、数值状态色(绿/橙/红,阈值与主窗口一致)+ 等宽数字、刷新时间(时钟图标 + 「刚刚/x分钟前」);供应商/模型名已设置时用主窗口链接蓝(`--primary`)高亮,未设置保持灰
+- 多套餐:主行显示第一条,其余套餐逐条补行
+
 ### 图像拦截钩子(纯文本模型保护)
 - 三道闸,防止纯文本模型(deepseek/glm 经火山引擎)因上下文含有图片块触发 `400 Model only support text input`
   - **PreToolUse `Read`**:拦截图片/PDF 文件读取
@@ -129,6 +140,7 @@
 | 远端「从备份恢复」Skills | 本地备份 → 恢复到远端 SSOT |
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
+| 悬浮窗样式与右键菜单 | 继续打磨悬浮窗样式细节(尺寸/间距/动效);悬浮球右键菜单(快捷切换、打开主界面等) |
 
 ### 前端 UI 刷新策略一致性
 
@@ -190,6 +202,8 @@
 | ✅ | toggle 合并 | 容器 toggle 合并 exec | 读 JSON → 修改 → 写 JSON + 操作链接合并为一次 exec_with_stdin |
 | ✅ | Docker 容器 | Docker 容器目标(方案 B) | FileOps + RemoteTarget + 全部面板泛型 + ZIP/导入支持容器 |
 | ✅ | 推送 | 推送到 GitHub fork | `https://github.com/Amengclass/cc-switch` |
+| 🔄 | 悬浮窗(加速球) | 桌面小球 + 悬停面板 | 透明窗口/拖动/吸附/单击开主窗/余量复用主窗口缓存/托盘开关/主题跟随 |
+| 🔄 | 悬浮窗样式与右键菜单 | 样式打磨 + 小球右键菜单 | 待做 |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |
 
 ---

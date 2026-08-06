@@ -334,6 +334,14 @@ pub struct CodexOfficialHistoryUnifyMigration {
     pub codex_config_dir: Option<String>,
 }
 
+/// 悬浮窗（加速球）位置（逻辑像素坐标）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FloatingWindowPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// 应用设置结构
 ///
 /// 存储设备级别设置，保存在本地 `~/.cc-switch/settings.json`，不随数据库同步。
@@ -406,6 +414,17 @@ pub struct AppSettings {
     // ===== 主页面显示的应用 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_apps: Option<VisibleApps>,
+
+    // ===== 悬浮窗（加速球）设置 =====
+    /// 是否启用桌面悬浮球（默认关闭）
+    #[serde(default)]
+    pub enable_floating_window: bool,
+    /// 悬浮球位置（逻辑像素坐标）；None 表示使用默认位置（主显示器右下角）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_window_position: Option<FloatingWindowPosition>,
+    /// 吸附动画时长（毫秒）；0 = 立即吸附，None = 默认 160
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_snap_speed_ms: Option<u32>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -526,6 +545,9 @@ impl Default for AppSettings {
             common_config_confirmed: None,
             language: None,
             visible_apps: None,
+            enable_floating_window: false,
+            floating_window_position: None,
+            floating_snap_speed_ms: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,
@@ -1024,6 +1046,15 @@ pub fn get_effective_current_provider(
 
     // Fallback 到数据库的 is_current
     db.get_current_provider(app_type.as_str())
+}
+
+// ===== 悬浮窗设置管理函数 =====
+
+/// 保存悬浮球位置；传 `None` 清除（回到默认位置）
+pub fn set_floating_window_position(position: Option<FloatingWindowPosition>) -> Result<(), AppError> {
+    mutate_settings(|settings| {
+        settings.floating_window_position = position;
+    })
 }
 
 // ===== Skill 同步方式管理函数 =====

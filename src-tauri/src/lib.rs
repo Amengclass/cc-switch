@@ -12,6 +12,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod floating;
 mod fsops;
 mod gemini_config;
 mod gemini_mcp;
@@ -375,6 +376,18 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         // 拦截窗口关闭：根据设置决定是否最小化到托盘
         .on_window_event(|window, event| {
+            // 悬浮球被拖动时记录新位置（防抖落盘到 settings）
+            if let tauri::WindowEvent::Moved(position) = event {
+                if window.label() == crate::floating::BALL_LABEL {
+                    if let Ok(scale) = window.scale_factor() {
+                        crate::floating::schedule_position_save(
+                            position.x as f64 / scale,
+                            position.y as f64 / scale,
+                        );
+                    }
+                }
+            }
+
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 数据库版本过新的恢复模式下没有托盘可唤回，关闭即退出，避免应用隐身后台
                 let in_db_recovery = crate::init_status::get_init_error()
@@ -1314,6 +1327,11 @@ pub fn run() {
                 }
             }
 
+            // 悬浮窗：开启时创建悬浮球窗口。独立于主窗口，轻量模式销毁主窗口后仍可工作。
+            if settings.enable_floating_window {
+                crate::floating::ensure_floating_window(app.handle());
+            }
+
 
             Ok(())
         })
@@ -1640,6 +1658,16 @@ pub fn run() {
             commands::scan_local_proxies,
             // Window theme control
             commands::set_window_theme,
+            // Floating window (加速球)
+            floating::get_floating_window_data,
+            floating::show_floating_panel,
+            floating::hide_floating_panel,
+            floating::floating_set_hover,
+            floating::set_floating_ball_position,
+            floating::open_main_window,
+            floating::disable_floating_window,
+            floating::floating_drag_begin,
+            floating::floating_drag_end,
             // Generic managed auth commands
             commands::auth_start_login,
             commands::auth_poll_for_account,
@@ -1853,6 +1881,9 @@ pub fn run() {
 /// 确保 Claude Code/Codex/Gemini 的配置不会处于损坏状态。
 /// 使用 stop_with_restore_keep_state 保留 settings 表中的代理状态，下次启动时自动恢复。
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
+    // 悬浮球位置最后落盘一次（防抖任务可能还没跑完）
+    crate::floating::save_ball_position_now(app_handle);
+
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         let proxy_service = &state.proxy_service;
 

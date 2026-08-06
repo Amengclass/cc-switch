@@ -14,6 +14,16 @@ use crate::services::subscription::SubscriptionQuota;
 pub struct UsageCache {
     subscription: RwLock<HashMap<AppType, SubscriptionQuota>>,
     script: RwLock<HashMap<(AppType, String), UsageResult>>,
+    /// 脚本型用量结果的写入时间戳（毫秒），供悬浮窗显示「刚刚 / x分钟前」。
+    /// SubscriptionQuota 自带 queried_at，脚本型 UsageResult 没有，故单独记录。
+    script_ts: RwLock<HashMap<(AppType, String), i64>>,
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 impl UsageCache {
@@ -28,8 +38,12 @@ impl UsageCache {
     }
 
     pub fn put_script(&self, app_type: AppType, provider_id: String, result: UsageResult) {
+        let ts = now_millis();
         if let Ok(mut w) = self.script.write() {
-            w.insert((app_type, provider_id), result);
+            w.insert((app_type.clone(), provider_id.clone()), result);
+        }
+        if let Ok(mut w) = self.script_ts.write() {
+            w.insert((app_type, provider_id), ts);
         }
     }
 
@@ -58,6 +72,15 @@ impl UsageCache {
             .and_then(|r| r.get(&(app_type.clone(), provider_id.to_string())).map(f))
     }
 
+    /// 脚本型用量结果的查询时间戳（毫秒）。配合 SubscriptionQuota.queried_at，
+    /// 供悬浮窗显示「刚刚 / x分钟前」。
+    pub fn script_queried_at(&self, app_type: &AppType, provider_id: &str) -> Option<i64> {
+        self.script_ts
+            .read()
+            .ok()
+            .and_then(|r| r.get(&(app_type.clone(), provider_id.to_string())).copied())
+    }
+
     pub fn invalidate_script(&self, app_type: &AppType, provider_id: &str) {
         // 热路径会对每个禁用脚本的 provider 在托盘重建时调用一次：先走读锁
         // `contains_key` 快速放行"本来就不在缓存里"的常见情况，避免无谓的写锁升级。
@@ -66,6 +89,9 @@ impl UsageCache {
             return;
         }
         if let Ok(mut w) = self.script.write() {
+            w.remove(&key);
+        }
+        if let Ok(mut w) = self.script_ts.write() {
             w.remove(&key);
         }
     }

@@ -60,6 +60,7 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
 /// 保存设置
 #[tauri::command]
 pub async fn save_settings(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
@@ -68,7 +69,15 @@ pub async fn save_settings(
     let unify_codex_changed =
         merged.unify_codex_session_history != existing.unify_codex_session_history;
     let unify_codex_enabled = merged.unify_codex_session_history;
+    let floating_changed =
+        merged.enable_floating_window != existing.enable_floating_window;
+    let floating_enabled = merged.enable_floating_window;
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+
+    // 悬浮窗开关变更时创建/销毁悬浮球窗口（仅当用户显式切换才动作）
+    if floating_changed {
+        crate::floating::apply_floating_window_setting(&app, floating_enabled);
+    }
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。

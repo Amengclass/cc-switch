@@ -107,14 +107,28 @@ pub async fn switch_provider(
     id: String,
 ) -> Result<SwitchResult, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app_handle
+    let app_type_log = app_type.as_str().to_string();
+    let id_log = id.clone();
+    let handle = app_handle.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = handle
             .try_state::<AppState>()
             .ok_or_else(|| "应用状态不可用".to_string())?;
         switch_provider_internal(state.inner(), app_type, &id).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| format!("供应商切换任务执行失败: {e}"))?
+    .map_err(|e| format!("供应商切换任务执行失败: {e}"))?;
+
+    // 主窗口手动切换不经过 failover / profile / 托盘路径（那些各有
+    // provider-switched 事件），悬浮窗面板/小球靠事件驱动刷新，这里补一个
+    // 悬浮窗专用事件让面板重新读缓存。用量查询由主窗口自身
+    // （useUsageQuery 因 providerId 变化自动发起）完成，悬浮窗不查 API。
+    log::info!(
+        "[Provider] 手动切换成功 {app_type_log} -> {id_log}，emit floating-data-refresh"
+    );
+    let _ = app_handle.emit("floating-data-refresh", ());
+
+    Ok(result?)
 }
 
 fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result<bool, AppError> {

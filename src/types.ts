@@ -352,6 +352,12 @@ export interface Settings {
   enableClaudePluginIntegration?: boolean;
   // 跳过 Claude Code 初次安装确认（写入 ~/.claude.json 的 hasCompletedOnboarding）
   skipClaudeOnboarding?: boolean;
+  // 是否启用桌面悬浮球（加速球）
+  enableFloatingWindow?: boolean;
+  // 悬浮球位置（逻辑像素坐标）
+  floatingWindowPosition?: { x: number; y: number };
+  // 吸附动画时长（毫秒）；0 = 立即吸附
+  floatingSnapSpeedMs?: number;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）
