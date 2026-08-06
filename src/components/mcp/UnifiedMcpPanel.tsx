@@ -98,7 +98,10 @@ const UnifiedMcpPanel = React.forwardRef<
       remoteTargetId,
       remoteContainerId,
     );
-    const bulkToggleAppMutation = useBulkToggleMcpApp();
+    const bulkToggleAppMutation = useBulkToggleMcpApp(
+      remoteTargetId,
+      remoteContainerId,
+    );
     const deleteServerMutation = useDeleteMcpServer(
       remoteTargetId,
       remoteContainerId,

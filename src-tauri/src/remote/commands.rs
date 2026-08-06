@@ -598,6 +598,34 @@ pub async fn toggle_remote_mcp_app(
     Ok(true)
 }
 
+/// 批量切换多个 MCP 服务器在某应用：一次连接内改完 SSOT 与 live。
+#[tauri::command]
+pub async fn bulk_toggle_remote_mcp_app(
+    state: State<'_, AppState>,
+    host_id: String,
+    ids: Vec<String>,
+    app: String,
+    enabled: bool,
+    container: Option<String>,
+) -> Result<crate::remote::RemoteBulkToggleResult, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::mcp::bulk_toggle_remote_mcp_app(
+        &target,
+        &host.default_home(),
+        &ids,
+        &app,
+        enabled,
+    )
+    .await
+}
+
 /// 从远端各 CLI live 配置导入 MCP 到 SSOT，返回新导入数量。
 #[tauri::command]
 pub async fn import_remote_mcp_from_apps(
@@ -750,80 +778,56 @@ pub async fn toggle_remote_skill_app(
         &session.channel,
         container.as_deref(),
     )?;
-
-    let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
-    let idx = records
-        .iter()
-        .position(|r| r.id == name)
-        .ok_or_else(|| format!("技能 {name} 不存在"))?;
-    // 解析出真正的目录名（前端可能传 id UUID 或 directory）
-    let dir = records[idx].directory.clone();
-
-    // 更新 apps 字段
-    match app.as_str() {
-        "claude" => records[idx].apps.claude = enabled,
-        "codex" => records[idx].apps.codex = enabled,
-        "gemini" => records[idx].apps.gemini = enabled,
-        "grokbuild" => records[idx].apps.grokbuild = enabled,
-        "opencode" => records[idx].apps.opencode = enabled,
-        "openclaw" => records[idx].apps.openclaw = enabled,
-        "hermes" => records[idx].apps.hermes = enabled,
-        _ => return Err(format!("未知应用: {app}")),
+    let use_copy = crate::settings::get_skill_sync_method()
+        == crate::services::skill::SyncMethod::Copy;
+    let result = crate::remote::skill::bulk_toggle_remote_skill_app(
+        &target,
+        &session.channel,
+        container.as_deref(),
+        &host.default_home(),
+        std::slice::from_ref(&name),
+        &app,
+        enabled,
+        use_copy,
+    )
+    .await?;
+    match result.failed.into_iter().next() {
+        Some(failure) => Err(failure.error),
+        None => Ok(true),
     }
+}
 
-    // 序列化 JSON + base64 编码，准备通过 stdin 管道发送
-    let json_path = crate::remote::skill::remote_skills_json_path(&host.default_home());
-    let json_str = serde_json::to_string_pretty(&records)
-        .map_err(|e| format!("序列化 skills.json 失败: {e}"))?;
-    use base64::Engine as _;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(json_str.as_bytes());
-
-    // 构建合并命令：写 JSON + 操作链接（同一次 SSH round-trip）
-    let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    let link_script = if enabled {
-        let app_rel = match app.as_str() {
-            "claude" => ".claude/skills",
-            "codex" => ".codex/skills",
-            "gemini" => ".gemini/skills",
-            "grokbuild" => ".grok/skills",
-            "opencode" => ".config/opencode/skills",
-            "openclaw" => ".openclaw/workspace/skills",
-            "hermes" => ".hermes/skills",
-            _ => return Err(format!("未知应用: {app}")),
-        };
-        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, dir);
-        let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
-        let target_path = format!("{ssot_dir}/{dir}");
-        let app_dir = format!("{}/{}", host.default_home(), app_rel);
-        let sync_op = if use_copy {
-            format!("cp -r {} {}", shell_q_rs(&target_path), shell_q_rs(&link_path))
-        } else {
-            format!("ln -s {} {}", shell_q_rs(&target_path), shell_q_rs(&link_path))
-        };
-        format!("mkdir -p {} && rm -rf {} && {}", shell_q_rs(&app_dir), shell_q_rs(&link_path), sync_op)
-    } else {
-        let app_rel = match app.as_str() {
-            "claude" => ".claude/skills",
-            "codex" => ".codex/skills",
-            "gemini" => ".gemini/skills",
-            "grokbuild" => ".grok/skills",
-            "opencode" => ".config/opencode/skills",
-            "openclaw" => ".openclaw/workspace/skills",
-            "hermes" => ".hermes/skills",
-            _ => return Ok(true),
-        };
-        let link_path = format!("{}/{}/{}", host.default_home(), app_rel, dir);
-        format!("rm -rf {}", shell_q_rs(&link_path))
-    };
-
-    let combined = format!("base64 -d > {} && {}", shell_q_rs(&json_path), link_script);
-    let full_cmd = match container.as_deref() {
-        Some(c) => format!("docker exec -i {} sh -c {}", c, shell_q_rs(&combined)),
-        None => combined,
-    };
-    crate::remote::connection::exec_command_with_stdin(&session.channel, &full_cmd, b64.as_bytes()).await?;
-
-    Ok(true)
+/// 批量切换多个远端技能在某应用的启用状态（一次连接 + 一次 exec）。
+#[tauri::command]
+pub async fn bulk_toggle_remote_skill_app(
+    state: State<'_, AppState>,
+    host_id: String,
+    ids: Vec<String>,
+    app: String,
+    enabled: bool,
+    container: Option<String>,
+) -> Result<crate::remote::RemoteBulkToggleResult, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let use_copy = crate::settings::get_skill_sync_method()
+        == crate::services::skill::SyncMethod::Copy;
+    crate::remote::skill::bulk_toggle_remote_skill_app(
+        &target,
+        &session.channel,
+        container.as_deref(),
+        &host.default_home(),
+        &ids,
+        &app,
+        enabled,
+        use_copy,
+    )
+    .await
 }
 
 fn shell_q_rs(s: &str) -> String {

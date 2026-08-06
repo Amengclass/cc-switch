@@ -244,6 +244,29 @@ export async function toggleRemoteMcpApp(
   });
 }
 
+/** 批量开关返回结构，与本地 runSequentialBulkAction 形状一致。 */
+export interface RemoteBulkToggleResult {
+  succeeded: string[];
+  failed: Array<{ item: string; error: string }>;
+}
+
+/** 一次连接内批量切换多个 MCP 服务器在某应用的启用状态 */
+export async function bulkToggleRemoteMcpApp(
+  hostId: string,
+  ids: string[],
+  app: string,
+  enabled: boolean,
+  container?: string,
+): Promise<RemoteBulkToggleResult> {
+  return invoke<RemoteBulkToggleResult>("bulk_toggle_remote_mcp_app", {
+    hostId,
+    ids,
+    app,
+    enabled,
+    container: container ?? null,
+  });
+}
+
 /** 从远端各 CLI live 配置导入 MCP 到 SSOT，返回新导入数量 */
 export async function importRemoteMcpFromApps(
   hostId: string,
@@ -464,6 +487,23 @@ export async function toggleRemoteSkillApp(
   return invoke<boolean>("toggle_remote_skill_app", {
     hostId,
     name,
+    app,
+    enabled,
+    container: container ?? null,
+  });
+}
+
+/** 一次连接内批量切换多个远端技能在某应用的启用状态 */
+export async function bulkToggleRemoteSkillApp(
+  hostId: string,
+  ids: string[],
+  app: string,
+  enabled: boolean,
+  container?: string,
+): Promise<RemoteBulkToggleResult> {
+  return invoke<RemoteBulkToggleResult>("bulk_toggle_remote_skill_app", {
+    hostId,
+    ids,
     app,
     enabled,
     container: container ?? null,

@@ -69,6 +69,21 @@ pub struct RemoteSkillApps {
     pub hermes: bool,
 }
 
+impl RemoteSkillApps {
+    pub fn set_enabled(&mut self, app: &str, enabled: bool) {
+        match app {
+            "claude" => self.claude = enabled,
+            "codex" => self.codex = enabled,
+            "gemini" => self.gemini = enabled,
+            "grokbuild" => self.grokbuild = enabled,
+            "opencode" => self.opencode = enabled,
+            "openclaw" => self.openclaw = enabled,
+            "hermes" => self.hermes = enabled,
+            _ => {}
+        }
+    }
+}
+
 /// skills.json 中的一条记录。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,6 +294,142 @@ pub async fn remove_remote_skill_links(
         exec_cmd(channel, container, &format!("rm -rf {}", shell_q(&link_path))).await?;
     }
     Ok(())
+}
+
+// ========================================================================
+// 批量 toggle（纯函数 + 一次 exec）
+// ========================================================================
+
+/// app 字符串 → 该应用的 skills 目录相对路径。
+pub(crate) fn app_skills_rel(app: &str) -> Option<&'static str> {
+    match app {
+        "claude" => Some(".claude/skills"),
+        "codex" => Some(".codex/skills"),
+        "gemini" => Some(".gemini/skills"),
+        "grokbuild" => Some(".grok/skills"),
+        "opencode" => Some(".config/opencode/skills"),
+        "openclaw" => Some(".openclaw/workspace/skills"),
+        "hermes" => Some(".hermes/skills"),
+        _ => None,
+    }
+}
+
+/// 生成单个技能在某应用目录的链接/删除脚本（纯函数，便于单测）。
+///
+/// - 启用:`mkdir -p <app_dir> && rm -rf <link> && {ln -s|cp -r} <ssot/dir> <link>`
+/// - 禁用:`rm -rf <link>`
+pub(crate) fn build_skill_link_script(
+    root: &str,
+    ssot_path: &str,
+    app_rel: &str,
+    dir: &str,
+    enabled: bool,
+    use_copy: bool,
+) -> String {
+    let link_path = format!("{root}/{app_rel}/{dir}");
+    if !enabled {
+        return format!("rm -rf {}", shell_q(&link_path));
+    }
+    let target_path = format!("{ssot_path}/{dir}");
+    let app_dir = format!("{root}/{app_rel}");
+    let sync_op = if use_copy {
+        format!("cp -r {} {}", shell_q(&target_path), shell_q(&link_path))
+    } else {
+        format!("ln -s {} {}", shell_q(&target_path), shell_q(&link_path))
+    };
+    format!(
+        "mkdir -p {} && rm -rf {} && {}",
+        shell_q(&app_dir),
+        shell_q(&link_path),
+        sync_op
+    )
+}
+
+/// 对 skills.json 记录应用批量 toggle:逐 id 定位、改 apps、收集结果与链接脚本。
+pub(crate) fn apply_skill_toggles(
+    records: &mut [RemoteSkillRecord],
+    ids: &[String],
+    app: &str,
+    enabled: bool,
+    root: &str,
+    ssot_path: &str,
+    use_copy: bool,
+) -> Result<(crate::remote::RemoteBulkToggleResult, Vec<String>), String> {
+    use crate::remote::{RemoteBulkToggleFailure, RemoteBulkToggleResult};
+
+    let Some(app_rel) = app_skills_rel(app) else {
+        return Err(format!("未知应用: {app}"));
+    };
+
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut failed: Vec<RemoteBulkToggleFailure> = Vec::new();
+    let mut scripts: Vec<String> = Vec::new();
+
+    for id in ids {
+        match records.iter_mut().find(|r| r.id == *id) {
+            Some(rec) => {
+                rec.apps.set_enabled(app, enabled);
+                let dir = rec.directory.clone();
+                scripts.push(build_skill_link_script(
+                    root,
+                    ssot_path,
+                    app_rel,
+                    &dir,
+                    enabled,
+                    use_copy,
+                ));
+                succeeded.push(id.clone());
+            }
+            None => failed.push(RemoteBulkToggleFailure {
+                item: id.clone(),
+                error: format!("技能 {id} 不存在"),
+            }),
+        }
+    }
+
+    Ok((RemoteBulkToggleResult { succeeded, failed }, scripts))
+}
+
+/// 批量切换多个远端技能在某应用的启用状态。
+///
+/// 单次连接内完成:skills.json 读一次 → 内存改全部 → base64 一次 → 把每条
+/// 链接脚本拼进同一个 `&&` 链,最终一次 `exec_command_with_stdin` 写盘 + 操作链接。
+pub async fn bulk_toggle_remote_skill_app<F: FileOps>(
+    fs: &F,
+    channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
+    container: Option<&str>,
+    root: &str,
+    ids: &[String],
+    app: &str,
+    enabled: bool,
+    use_copy: bool,
+) -> Result<crate::remote::RemoteBulkToggleResult, String> {
+    let mut records = read_remote_skills_json(fs, root).await?;
+    let ssot_path = remote_ssot_path(root);
+    let (result, scripts) =
+        apply_skill_toggles(&mut records, ids, app, enabled, root, &ssot_path, use_copy)?;
+
+    if !result.succeeded.is_empty() {
+        let json_path = remote_skills_json_path(root);
+        let json_str = serde_json::to_string_pretty(&records)
+            .map_err(|e| format!("序列化 skills.json 失败: {e}"))?;
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(json_str.as_bytes());
+
+        let combined = format!(
+            "base64 -d > {} && {}",
+            shell_q(&json_path),
+            scripts.join(" && ")
+        );
+        let full_cmd = match container {
+            Some(c) => format!("docker exec -i {} sh -c {}", c, shell_q(&combined)),
+            None => combined,
+        };
+        crate::remote::connection::exec_command_with_stdin(channel, &full_cmd, b64.as_bytes())
+            .await?;
+    }
+
+    Ok(result)
 }
 
 // ========================================================================
@@ -725,4 +876,103 @@ async fn exec_cmd(
         None => cmd.to_string(),
     };
     crate::remote::connection::exec_command(channel, &full).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ROOT: &str = "/home/u";
+    const SSOT: &str = "/home/u/.cc-switch/skills";
+
+    fn record(id: &str, directory: &str) -> RemoteSkillRecord {
+        RemoteSkillRecord {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: None,
+            directory: directory.to_string(),
+            apps: RemoteSkillApps::default(),
+            installed_at: 0,
+            updated_at: 0,
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            content_hash: None,
+        }
+    }
+
+    #[test]
+    fn set_enabled_toggles_known_apps_only() {
+        let mut apps = RemoteSkillApps::default();
+        apps.set_enabled("claude", true);
+        apps.set_enabled("grokbuild", true);
+        apps.set_enabled("unknown", true); // 未知应用 no-op
+        assert!(apps.claude);
+        assert!(apps.grokbuild);
+        assert!(!apps.codex);
+        apps.set_enabled("claude", false);
+        assert!(!apps.claude);
+    }
+
+    #[test]
+    fn app_skills_rel_maps_known_apps() {
+        assert_eq!(app_skills_rel("claude"), Some(".claude/skills"));
+        assert_eq!(app_skills_rel("openclaw"), Some(".openclaw/workspace/skills"));
+        assert_eq!(app_skills_rel("hermes"), Some(".hermes/skills"));
+        assert_eq!(app_skills_rel("nope"), None);
+    }
+
+    #[test]
+    fn build_link_script_enable_symlink() {
+        let script = build_skill_link_script(ROOT, SSOT, ".claude/skills", "foo", true, false);
+        assert_eq!(
+            script,
+            "mkdir -p '/home/u/.claude/skills' && rm -rf '/home/u/.claude/skills/foo' && ln -s '/home/u/.cc-switch/skills/foo' '/home/u/.claude/skills/foo'"
+        );
+    }
+
+    #[test]
+    fn build_link_script_enable_copy() {
+        let script = build_skill_link_script(ROOT, SSOT, ".codex/skills", "foo", true, true);
+        assert_eq!(
+            script,
+            "mkdir -p '/home/u/.codex/skills' && rm -rf '/home/u/.codex/skills/foo' && cp -r '/home/u/.cc-switch/skills/foo' '/home/u/.codex/skills/foo'"
+        );
+    }
+
+    #[test]
+    fn build_link_script_disable() {
+        let script = build_skill_link_script(ROOT, SSOT, ".hermes/skills", "foo", false, false);
+        assert_eq!(script, "rm -rf '/home/u/.hermes/skills/foo'");
+    }
+
+    #[test]
+    fn apply_skill_toggles_collects_success_and_failure() {
+        let mut records = vec![record("id-a", "dir-a"), record("id-b", "dir-b")];
+        let ids = vec!["id-a".to_string(), "missing".to_string()];
+        let (result, scripts) = apply_skill_toggles(
+            &mut records, &ids, "claude", true, ROOT, SSOT, false,
+        )
+        .expect("apply");
+
+        assert_eq!(result.succeeded, vec!["id-a"]);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].item, "missing");
+        assert!(result.failed[0].error.contains("不存在"));
+        assert_eq!(scripts.len(), 1);
+        assert!(scripts[0].contains("dir-a"));
+
+        assert!(records[0].apps.claude);
+        assert!(!records[1].apps.claude); // id-b 未在本次 ids 中
+    }
+
+    #[test]
+    fn apply_skill_toggles_unknown_app_fails() {
+        let mut records = vec![record("id-a", "dir-a")];
+        let ids = vec!["id-a".to_string()];
+        let err = apply_skill_toggles(&mut records, &ids, "nope", true, ROOT, SSOT, false)
+            .expect_err("unknown app should error");
+        assert!(err.contains("未知应用"));
+    }
 }

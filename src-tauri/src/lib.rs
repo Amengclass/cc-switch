@@ -1602,6 +1602,7 @@ pub fn run() {
             remote::commands::upsert_remote_mcp_server,
             remote::commands::delete_remote_mcp_server,
             remote::commands::toggle_remote_mcp_app,
+            remote::commands::bulk_toggle_remote_mcp_app,
             remote::commands::import_remote_mcp_from_apps,
             remote::commands::read_remote_prompt,
             remote::commands::write_remote_prompt,
@@ -1615,6 +1616,7 @@ pub fn run() {
             remote::commands::scan_remote_unmanaged_skills,
             remote::commands::import_remote_skill,
             remote::commands::toggle_remote_skill_app,
+            remote::commands::bulk_toggle_remote_skill_app,
             remote::commands::list_docker_containers,
             // Universal Provider management
             commands::get_universal_providers,

@@ -254,22 +254,59 @@ pub async fn toggle_remote_mcp_app<F: FileOps>(
     app: &str,
     enabled: bool,
 ) -> Result<(), String> {
-    let mut map = read_remote_mcp_ssot(fs, root).await?;
-    let spec = {
-        let server = map
-            .get_mut(id)
-            .ok_or_else(|| format!("MCP 服务器 {id} 不存在"))?;
-        server.apps.set_enabled(app, enabled);
-        server.server.clone()
-    };
-    write_remote_mcp_ssot(fs, root, &map).await?;
-
-    if enabled {
-        sync_mcp_to_app(fs, root, app, id, &spec).await?;
-    } else {
-        remove_mcp_from_app(fs, root, app, id).await?;
+    let ids = [id.to_string()];
+    let result = bulk_toggle_remote_mcp_app(fs, root, &ids, app, enabled).await?;
+    match result.failed.into_iter().next() {
+        Some(failure) => Err(failure.error),
+        None => Ok(()),
     }
-    Ok(())
+}
+
+/// 批量切换多个 MCP 服务器在指定 app 的启用状态。
+///
+/// 单次连接内完成:SSOT 读一次、改全部、写一次;同一 app 的 live 文件也
+/// 只读一次、写一次(由 `sync_mcp_to_app_many` / `remove_mcp_from_app_many`
+/// 保证)。逐条失败(如 id 不存在)聚合进 `failed`,不中断其余条目。
+pub async fn bulk_toggle_remote_mcp_app<F: FileOps>(
+    fs: &F,
+    root: &str,
+    ids: &[String],
+    app: &str,
+    enabled: bool,
+) -> Result<crate::remote::RemoteBulkToggleResult, String> {
+    use crate::remote::{RemoteBulkToggleFailure, RemoteBulkToggleResult};
+
+    let mut map = read_remote_mcp_ssot(fs, root).await?;
+    let mut succeeded: Vec<String> = Vec::new();
+    let mut failed: Vec<RemoteBulkToggleFailure> = Vec::new();
+    let mut enabled_specs: Vec<(String, Value)> = Vec::new();
+
+    for id in ids {
+        match map.get_mut(id) {
+            Some(server) => {
+                server.apps.set_enabled(app, enabled);
+                succeeded.push(id.clone());
+                if enabled {
+                    enabled_specs.push((id.clone(), server.server.clone()));
+                }
+            }
+            None => failed.push(RemoteBulkToggleFailure {
+                item: id.clone(),
+                error: format!("MCP 服务器 {id} 不存在"),
+            }),
+        }
+    }
+
+    if !succeeded.is_empty() {
+        write_remote_mcp_ssot(fs, root, &map).await?;
+        if enabled {
+            sync_mcp_to_app_many(fs, root, app, &enabled_specs).await?;
+        } else {
+            remove_mcp_from_app_many(fs, root, app, &succeeded).await?;
+        }
+    }
+
+    Ok(RemoteBulkToggleResult { succeeded, failed })
 }
 
 // ========================================================================
@@ -340,25 +377,51 @@ async fn sync_mcp_to_app<F: FileOps>(
     id: &str,
     spec: &Value,
 ) -> Result<(), String> {
+    let items = [(id.to_string(), spec.clone())];
+    sync_mcp_to_app_many(fs, root, app, &items).await
+}
+
+/// 同步多个 MCP 服务器到指定 app 的远端 live 配置。
+///
+/// 同一 app 只碰一个 live 文件:整文件读一次、内存改全部、写一次。
+async fn sync_mcp_to_app_many<F: FileOps>(
+    fs: &F,
+    root: &str,
+    app: &str,
+    items: &[(String, Value)],
+) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
     if !app_installed(fs, root, app).await {
         // CLI 未安装：跳过，不创建配置文件（与本机 should_sync_* 语义一致）
         return Ok(());
     }
     match app {
-        "claude" => json_upsert(fs, &remote_claude_json_path(root), "mcpServers", id, spec).await,
-        "codex" => toml_upsert(fs, &codex_config_path(root), id, spec).await,
-        "gemini" => json_upsert(fs, &gemini_settings_path(root), "mcpServers", id, spec).await,
-        "grokbuild" => toml_upsert(fs, &grok_config_path(root), id, spec).await,
-        "opencode" => {
-            let opencode_spec =
-                crate::mcp::convert_to_opencode_format(spec).map_err(|e| e.to_string())?;
-            json_upsert(fs, &opencode_config_path(root), "mcp", id, &opencode_spec).await
+        "claude" => {
+            json_upsert_many(fs, &remote_claude_json_path(root), "mcpServers", items).await
         }
-        "hermes" => hermes_upsert(fs, &hermes_config_path(root), id, spec).await,
+        "codex" => toml_upsert_many(fs, &codex_config_path(root), items).await,
+        "gemini" => json_upsert_many(fs, &gemini_settings_path(root), "mcpServers", items).await,
+        "grokbuild" => toml_upsert_many(fs, &grok_config_path(root), items).await,
+        "opencode" => {
+            let mut converted = Vec::with_capacity(items.len());
+            for (id, spec) in items {
+                let opencode_spec =
+                    crate::mcp::convert_to_opencode_format(spec).map_err(|e| e.to_string())?;
+                converted.push((id.clone(), opencode_spec));
+            }
+            json_upsert_many(fs, &opencode_config_path(root), "mcp", &converted).await
+        }
+        "hermes" => hermes_upsert_many(fs, &hermes_config_path(root), items).await,
         "openclaw" => {
-            let openclaw_spec =
-                crate::mcp::convert_to_openclaw_format(spec).map_err(|e| e.to_string())?;
-            openclaw_json_upsert(fs, &openclaw_config_path(root), id, &openclaw_spec).await
+            let mut converted = Vec::with_capacity(items.len());
+            for (id, spec) in items {
+                let openclaw_spec =
+                    crate::mcp::convert_to_openclaw_format(spec).map_err(|e| e.to_string())?;
+                converted.push((id.clone(), openclaw_spec));
+            }
+            openclaw_json_upsert_many(fs, &openclaw_config_path(root), &converted).await
         }
         _ => Ok(()),
     }
@@ -371,17 +434,31 @@ async fn remove_mcp_from_app<F: FileOps>(
     app: &str,
     id: &str,
 ) -> Result<(), String> {
+    let ids = [id.to_string()];
+    remove_mcp_from_app_many(fs, root, app, &ids).await
+}
+
+/// 从指定 app 的远端 live 配置移除多个 MCP 服务器。
+async fn remove_mcp_from_app_many<F: FileOps>(
+    fs: &F,
+    root: &str,
+    app: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     if !app_installed(fs, root, app).await {
         return Ok(());
     }
     match app {
-        "claude" => json_remove(fs, &remote_claude_json_path(root), "mcpServers", id).await,
-        "codex" => toml_remove(fs, &codex_config_path(root), id).await,
-        "gemini" => json_remove(fs, &gemini_settings_path(root), "mcpServers", id).await,
-        "grokbuild" => toml_remove(fs, &grok_config_path(root), id).await,
-        "opencode" => json_remove(fs, &opencode_config_path(root), "mcp", id).await,
-        "hermes" => hermes_remove(fs, &hermes_config_path(root), id).await,
-        "openclaw" => openclaw_json_remove(fs, &openclaw_config_path(root), id).await,
+        "claude" => json_remove_many(fs, &remote_claude_json_path(root), "mcpServers", ids).await,
+        "codex" => toml_remove_many(fs, &codex_config_path(root), ids).await,
+        "gemini" => json_remove_many(fs, &gemini_settings_path(root), "mcpServers", ids).await,
+        "grokbuild" => toml_remove_many(fs, &grok_config_path(root), ids).await,
+        "opencode" => json_remove_many(fs, &opencode_config_path(root), "mcp", ids).await,
+        "hermes" => hermes_remove_many(fs, &hermes_config_path(root), ids).await,
+        "openclaw" => openclaw_json_remove_many(fs, &openclaw_config_path(root), ids).await,
         _ => Ok(()),
     }
 }
@@ -402,13 +479,15 @@ async fn app_installed<F: FileOps>(fs: &F, root: &str, app: &str) -> bool {
 // JSON 类 live 配置（Claude / Gemini / OpenCode）
 // ------------------------------------------------------------------------
 
-async fn json_upsert<F: FileOps>(
+async fn json_upsert_many<F: FileOps>(
     fs: &F,
     path: &str,
     field: &str,
-    id: &str,
-    spec: &Value,
+    items: &[(String, Value)],
 ) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
     // app_installed 已确保 app 配置目录存在；live 文件不存在时直接创建（对齐本机语义）
     let mut root: Value = match fs.read_text_optional(path).await? {
         Some(t) if !t.trim().is_empty() => {
@@ -423,16 +502,27 @@ async fn json_upsert<F: FileOps>(
         if !obj.contains_key(field) {
             obj.insert(field.to_string(), json!({}));
         }
-        obj.get_mut(field)
+        let servers = obj
+            .get_mut(field)
             .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| format!("{path} 的 {field} 必须是 JSON 对象"))?
-            .insert(id.to_string(), spec.clone());
+            .ok_or_else(|| format!("{path} 的 {field} 必须是 JSON 对象"))?;
+        for (id, spec) in items {
+            servers.insert(id.clone(), spec.clone());
+        }
     }
     let text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
     fs.write_text_atomic(path, &text).await
 }
 
-async fn json_remove<F: FileOps>(fs: &F, path: &str, field: &str, id: &str) -> Result<(), String> {
+async fn json_remove_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    field: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let Some(t) = fs.read_text_optional(path).await? else {
         return Ok(());
     };
@@ -441,12 +531,13 @@ async fn json_remove<F: FileOps>(fs: &F, path: &str, field: &str, id: &str) -> R
     }
     let mut root: Value =
         serde_json::from_str(&t).map_err(|e| format!("解析远端配置失败 {path}: {e}"))?;
-    let removed = root
-        .get_mut(field)
-        .and_then(|v| v.as_object_mut())
-        .map(|o| o.remove(id).is_some())
-        .unwrap_or(false);
-    if removed {
+    let mut removed_any = false;
+    if let Some(servers) = root.get_mut(field).and_then(|v| v.as_object_mut()) {
+        for id in ids {
+            removed_any |= servers.remove(id).is_some();
+        }
+    }
+    if removed_any {
         let text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
         fs.write_text_atomic(path, &text).await?;
     }
@@ -476,13 +567,15 @@ async fn write_openclaw_json<F: FileOps>(fs: &F, path: &str, root: &Value) -> Re
     fs.write_text_atomic(path, &text).await
 }
 
-/// 在远端 openclaw.json 的 mcp.servers 中 upsert 一个服务器。
-async fn openclaw_json_upsert<F: FileOps>(
+/// 在远端 openclaw.json 的 mcp.servers 中 upsert 多个服务器（一次读写）。
+async fn openclaw_json_upsert_many<F: FileOps>(
     fs: &F,
     path: &str,
-    id: &str,
-    spec: &Value,
+    items: &[(String, Value)],
 ) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
     let mut root = read_openclaw_json(fs, path).await?;
     {
         let obj = root
@@ -498,25 +591,39 @@ async fn openclaw_json_upsert<F: FileOps>(
         if !mcp.contains_key("servers") {
             mcp.insert("servers".to_string(), json!({}));
         }
-        mcp.get_mut("servers")
+        let servers = mcp
+            .get_mut("servers")
             .and_then(|v| v.as_object_mut())
-            .ok_or_else(|| format!("{path} 的 mcp.servers 必须是对象"))?
-            .insert(id.to_string(), spec.clone());
+            .ok_or_else(|| format!("{path} 的 mcp.servers 必须是对象"))?;
+        for (id, spec) in items {
+            servers.insert(id.clone(), spec.clone());
+        }
     }
     write_openclaw_json(fs, path, &root).await
 }
 
-/// 从远端 openclaw.json 的 mcp.servers 移除一个服务器。
-async fn openclaw_json_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), String> {
+/// 从远端 openclaw.json 的 mcp.servers 移除多个服务器（一次读写）。
+async fn openclaw_json_remove_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let mut root = read_openclaw_json(fs, path).await?;
-    let removed = root
+    let mut removed_any = false;
+    if let Some(servers) = root
         .get_mut("mcp")
         .and_then(|v| v.as_object_mut())
         .and_then(|m| m.get_mut("servers"))
         .and_then(|v| v.as_object_mut())
-        .map(|o| o.remove(id).is_some())
-        .unwrap_or(false);
-    if removed {
+    {
+        for id in ids {
+            removed_any |= servers.remove(id).is_some();
+        }
+    }
+    if removed_any {
         write_openclaw_json(fs, path, &root).await?;
     }
     Ok(())
@@ -526,13 +633,22 @@ async fn openclaw_json_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Resul
 // TOML 类 live 配置（Codex / GrokBuild）
 // ------------------------------------------------------------------------
 
-async fn toml_upsert<F: FileOps>(fs: &F, path: &str, id: &str, spec: &Value) -> Result<(), String> {
+async fn toml_upsert_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    items: &[(String, Value)],
+) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
     let text = fs.read_text_optional(path).await?.unwrap_or_default();
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("解析远端 TOML 失败 {path}: {e}"))?;
-    let table = crate::mcp::json_server_to_toml_table(spec).map_err(|e| e.to_string())?;
-    upsert_toml_table(&mut doc, id, table)?;
+    for (id, spec) in items {
+        let table = crate::mcp::json_server_to_toml_table(spec).map_err(|e| e.to_string())?;
+        upsert_toml_table(&mut doc, id, table)?;
+    }
     fs.write_text_atomic(path, &doc.to_string()).await
 }
 
@@ -559,7 +675,14 @@ fn upsert_toml_table(
     Ok(())
 }
 
-async fn toml_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), String> {
+async fn toml_remove_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let Some(t) = fs.read_text_optional(path).await? else {
         return Ok(());
     };
@@ -570,12 +693,14 @@ async fn toml_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), Str
         Ok(d) => d,
         Err(_) => return Ok(()), // 解析失败，无法删除不存在内容
     };
-    let removed = doc
-        .get_mut("mcp_servers")
-        .and_then(toml_edit::Item::as_table_like_mut)
-        .map(|s| s.remove(id).is_some())
-        .unwrap_or(false);
-    if removed {
+    let mut removed_any = false;
+    if let Some(servers) = doc.get_mut("mcp_servers").and_then(toml_edit::Item::as_table_like_mut)
+    {
+        for id in ids {
+            removed_any |= servers.remove(id).is_some();
+        }
+    }
+    if removed_any {
         fs.write_text_atomic(path, &doc.to_string()).await?;
     }
     Ok(())
@@ -585,9 +710,14 @@ async fn toml_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), Str
 // Hermes live 配置（YAML）
 // ------------------------------------------------------------------------
 
-async fn hermes_upsert<F: FileOps>(fs: &F, path: &str, id: &str, spec: &Value) -> Result<(), String> {
-    let hermes_spec = crate::mcp::convert_to_hermes_format(spec).map_err(|e| e.to_string())?;
-
+async fn hermes_upsert_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    items: &[(String, Value)],
+) -> Result<(), String> {
+    if items.is_empty() {
+        return Ok(());
+    }
     let text = fs.read_text_optional(path).await?.unwrap_or_default();
     let mut y: serde_yaml::Value = if text.trim().is_empty() {
         serde_yaml::Value::Mapping(Default::default())
@@ -607,20 +737,30 @@ async fn hermes_upsert<F: FileOps>(fs: &F, path: &str, id: &str, spec: &Value) -
         .and_then(|v| v.as_mapping_mut())
         .ok_or_else(|| "Hermes config.yaml 的 mcp_servers 不是映射".to_string())?;
 
-    let id_key = serde_yaml::Value::String(id.to_string());
-    let merged = if let Some(existing) = servers.get(&id_key) {
-        let existing_json = yaml_to_json(existing)?;
-        crate::mcp::merge_hermes_spec(&existing_json, &hermes_spec)
-    } else {
-        hermes_spec.clone()
-    };
-    servers.insert(id_key, json_to_yaml(&merged)?);
+    for (id, spec) in items {
+        let hermes_spec = crate::mcp::convert_to_hermes_format(spec).map_err(|e| e.to_string())?;
+        let id_key = serde_yaml::Value::String(id.clone());
+        let merged = if let Some(existing) = servers.get(&id_key) {
+            let existing_json = yaml_to_json(existing)?;
+            crate::mcp::merge_hermes_spec(&existing_json, &hermes_spec)
+        } else {
+            hermes_spec
+        };
+        servers.insert(id_key, json_to_yaml(&merged)?);
+    }
 
     let new_text = serde_yaml::to_string(&y).map_err(|e| format!("序列化 Hermes config.yaml 失败: {e}"))?;
     fs.write_text_atomic(path, &new_text).await
 }
 
-async fn hermes_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), String> {
+async fn hermes_remove_many<F: FileOps>(
+    fs: &F,
+    path: &str,
+    ids: &[String],
+) -> Result<(), String> {
+    if ids.is_empty() {
+        return Ok(());
+    }
     let Some(t) = fs.read_text_optional(path).await? else {
         return Ok(());
     };
@@ -632,12 +772,18 @@ async fn hermes_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), S
     let Some(map) = y.as_mapping_mut() else {
         return Ok(());
     };
-    let removed = map
+    let mut removed_any = false;
+    if let Some(servers) = map
         .get_mut(&serde_yaml::Value::String("mcp_servers".to_string()))
         .and_then(|v| v.as_mapping_mut())
-        .map(|s| s.remove(&serde_yaml::Value::String(id.to_string())).is_some())
-        .unwrap_or(false);
-    if removed {
+    {
+        for id in ids {
+            removed_any |= servers
+                .remove(&serde_yaml::Value::String(id.clone()))
+                .is_some();
+        }
+    }
+    if removed_any {
         let new_text = serde_yaml::to_string(&y).map_err(|e| e.to_string())?;
         fs.write_text_atomic(path, &new_text).await?;
     }
@@ -786,4 +932,157 @@ async fn read_openclaw_mcp_map<F: FileOps>(
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fsops::LocalFileOps;
+
+    fn seed_server(id: &str) -> RemoteMcpServer {
+        RemoteMcpServer {
+            id: id.to_string(),
+            name: id.to_string(),
+            server: json!({ "type": "stdio", "command": "npx", "args": ["-y", id] }),
+            apps: RemoteMcpApps::default(),
+            description: None,
+            homepage: None,
+            docs: None,
+            tags: Vec::new(),
+        }
+    }
+
+    /// 预置 SSOT(a/b/c) + claude live 文件,返回 root 字符串。
+    async fn seed(tmp: &tempfile::TempDir) -> String {
+        let root = tmp.path().to_string_lossy().to_string();
+        let fs = LocalFileOps;
+
+        let mut map = IndexMap::new();
+        for id in ["a", "b", "c"] {
+            map.insert(id.to_string(), seed_server(id));
+        }
+        write_remote_mcp_ssot(&fs, &root, &map).await.expect("seed ssot");
+        // claude 的 app_installed 依赖 ~/.claude.json 或 ~/.claude 目录存在
+        fs.write_text_atomic(&remote_claude_json_path(&root), "{}")
+            .await
+            .expect("seed claude.json");
+        root
+    }
+
+    async fn live_claude_servers(root: &str) -> serde_json::Map<String, Value> {
+        let fs = LocalFileOps;
+        let t = fs
+            .read_text_optional(&remote_claude_json_path(root))
+            .await
+            .expect("read claude.json")
+            .expect("claude.json exists");
+        serde_json::from_str::<Value>(&t)
+            .expect("parse claude.json")
+            .get("mcpServers")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn bulk_enable_writes_ssot_and_live_once_with_per_item_failures() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = seed(&tmp).await;
+        let fs = LocalFileOps;
+
+        let result = bulk_toggle_remote_mcp_app(
+            &fs,
+            &root,
+            &["a".to_string(), "b".to_string(), "missing".to_string()],
+            "claude",
+            true,
+        )
+        .await
+        .expect("bulk toggle");
+
+        assert_eq!(result.succeeded, vec!["a", "b"]);
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].item, "missing");
+        assert!(result.failed[0].error.contains("不存在"));
+
+        // SSOT: a/b claude 已启用,c 未动
+        let map = read_remote_mcp_ssot(&fs, &root).await.expect("read ssot");
+        assert!(map["a"].apps.claude);
+        assert!(map["b"].apps.claude);
+        assert!(!map["c"].apps.claude);
+
+        // claude live: 含 a/b,不含 missing
+        let live = live_claude_servers(&root).await;
+        assert!(live.contains_key("a"));
+        assert!(live.contains_key("b"));
+        assert!(!live.contains_key("missing"));
+    }
+
+    #[tokio::test]
+    async fn bulk_disable_removes_from_live() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = seed(&tmp).await;
+        let fs = LocalFileOps;
+
+        bulk_toggle_remote_mcp_app(
+            &fs,
+            &root,
+            &["a".to_string(), "b".to_string()],
+            "claude",
+            true,
+        )
+        .await
+        .expect("enable");
+
+        bulk_toggle_remote_mcp_app(
+            &fs,
+            &root,
+            &["a".to_string(), "b".to_string()],
+            "claude",
+            false,
+        )
+        .await
+        .expect("disable");
+
+        let map = read_remote_mcp_ssot(&fs, &root).await.expect("read ssot");
+        assert!(!map["a"].apps.claude);
+        assert!(!map["b"].apps.claude);
+
+        let live = live_claude_servers(&root).await;
+        assert!(!live.contains_key("a"));
+        assert!(!live.contains_key("b"));
+    }
+
+    #[tokio::test]
+    async fn single_toggle_matches_bulk_of_one() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = seed(&tmp).await;
+        let fs = LocalFileOps;
+
+        toggle_remote_mcp_app(&fs, &root, "a", "claude", true)
+            .await
+            .expect("single toggle");
+
+        let map = read_remote_mcp_ssot(&fs, &root).await.expect("read ssot");
+        assert!(map["a"].apps.claude);
+        let live = live_claude_servers(&root).await;
+        assert!(live.contains_key("a"));
+    }
+
+    #[tokio::test]
+    async fn empty_ids_is_noop() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = seed(&tmp).await;
+        let fs = LocalFileOps;
+
+        let result =
+            bulk_toggle_remote_mcp_app(&fs, &root, &[], "claude", true)
+                .await
+                .expect("bulk empty");
+        assert!(result.succeeded.is_empty());
+        assert!(result.failed.is_empty());
+
+        let map = read_remote_mcp_ssot(&fs, &root).await.expect("read ssot");
+        assert!(!map["a"].apps.claude);
+    }
 }

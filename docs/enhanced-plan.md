@@ -132,6 +132,14 @@
   - vitest 693/695 —— 2 个 `App.test.tsx` 集成测试全量并行时超时/隔离 flaky,单独跑全过(测试环境问题,非功能 bug)
   - clippy 16 个 warning 均在官方 v3.19.2 / fork 遗留代码(不在 merge 改动里),未处理
 
+### 远端批量开关优化(C + A)
+- **背景**:远端场景批量开关(MCP/Skills)此前前端 `runSequentialBulkAction` 逐条调 `toggle_remote_*`——每条都新建 SSH 连接 + 重复读写同一份 SSOT/live 文件,且点击后要等 SSH 往返图标才有反馈
+- **C(真实提速)**:新增后端 `bulk_toggle_remote_mcp_app` / `bulk_toggle_remote_skill_app` 命令,一次连接内改完 N 个开关(SSOT 读一次写一次;同一 app 的 live 文件读一次写一次);skills 把每条链接脚本拼进同一个 `&&` 链,仍是一次 `exec_command_with_stdin`。MCP per-format helper 全部改成 `*_many` 版,单条委托 many。前端批量从 N 次 invoke 变 1 次
+- **A(感知提速)**:前端批量 hook 加 `onMutate`/`onError` 乐观更新(照 `failover.ts` 范式),点击瞬间翻转缓存图标,失败回滚,settle 后权威校准
+- **返回值**:后端 `RemoteBulkToggleResult{succeeded, failed}` 与前端 `SequentialBulkActionResult` 形状一致,面板零改动;逐条失败(id 不存在)聚合上报
+- **测试**:新增 `remote::mcp` 4 个 + `remote::skill` 7 个单元测试(`LocalFileOps` + `tempfile`);前端批量 hook 测试改断言单次 bulk 调用 + 新增部分失败用例
+- 验证全过:`pnpm typecheck` / `format:check` / vitest 48 个相关测试 / `cargo test` 全绿 / `cargo clippy` 无新增 warning / 打包启动正常
+
 ### 构建与基础设施
 - 构建脚本 `C:\build\build-exe.ps1`(规避火绒 `sysdiag` 文件锁 LNK1105)
 - 推送到 GitHub fork `https://github.com/Amengclass/cc-switch`
@@ -186,6 +194,20 @@
 - 构建前需 `Stop-Process -Name cc-switch -Force` 避免 exe 被占用导致 `os error 5`
 - `CARGO_BUILD_JOBS = "2"` 控制并行度（避免 LNK1105 防火墙锁定）
 
+**开发验证流程（改动→检查的最小化路径）：**
+
+原则：**先把整批改动做完，再统一检查一次**，不「编辑→全量检查→编辑→全量检查」地频繁打断（Windows 上 `cargo test` 2~3 分钟、`build-exe.ps1` 链接 1 分钟，太慢）。
+
+| 阶段 | 命令 | 作用 | 成本 |
+|---|---|---|---|
+| 快路径（每次改动后） | `pnpm typecheck` + `pnpm format:check` + 受影响的 `pnpm vitest run <file>` | 前端类型/格式/相关逻辑 | 秒~十几秒 |
+| Rust 编译验证（开发期） | `cargo check`（只编译不链接） | 抓编译错误，比 `cargo test` 快 | ~1min |
+| 慢路径（整批交付前，跑一次） | 完整 `cargo test` + `cargo clippy` + `pnpm build:renderer` + `build-exe.ps1` + 启动 | 功能回归 + lint + 产出可运行 exe | 几分钟 |
+
+- 只改前端/注释/文档时，可完全跳过 cargo 系列。
+- 例外：Rust 改动是跨模块签名变更时，提前跑一次 `cargo check` 定位级联编译错误值得。
+- 完整 `cargo test` / `build-exe.ps1` 前先 `Stop-Process -Name cc-switch -Force`。
+
 ---
 
 ## 里程碑记录(M0 起)
@@ -214,6 +236,7 @@
 | ✅ | Docker 容器 | Docker 容器目标(方案 B) | FileOps + RemoteTarget + 全部面板泛型 + ZIP/导入支持容器 |
 | ✅ | 推送 | 推送到 GitHub fork | `https://github.com/Amengclass/cc-switch` |
 | ✅ | 基座升级 v3.19.2 | merge 官方 v3.19.2 进 fork(14 commit) | 编译/测试/clippy 全过;悬浮窗/远端/OpenClaw 保留;修好 3 个遗留 OpenClaw 测试 |
+| ✅ | 远端批量开关优化(C+A) | 远端 bulk 命令(单次 SSH round-trip)+ 前端乐观更新 | MCP/Skills 批量一次连接改完;点击瞬间反馈;新增 11 个后端单测 + 前端部分失败用例;全检查通过 |
 | 🔄 | 悬浮窗(加速球) | 桌面小球 + 悬停面板 | 透明窗口/拖动/吸附/单击开主窗/余量复用主窗口缓存/托盘开关/主题跟随 |
 | 🔄 | 悬浮窗样式与右键菜单 | 样式打磨 + 小球右键菜单 | 待做 |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |

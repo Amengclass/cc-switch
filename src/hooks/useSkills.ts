@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/skills";
 import type { AppId } from "@/lib/api/types";
 import {
+  bulkToggleRemoteSkillApp,
   deleteRemoteSkill,
   installRemoteSkillFromDir,
   installRemoteSkillFromDiscoverable,
@@ -306,9 +307,27 @@ export function useToggleSkillApp() {
   });
 }
 
-/** Toggle multiple Skills serially because each operation writes app files. */
-export function useBulkToggleSkillApp() {
+/**
+ * Toggle multiple Skills for one app.
+ *
+ * - 本机:串行写整文件 live 配置(`runSequentialBulkAction`)避免互相覆盖。
+ * - 远端:单次 invoke 后端 bulk 命令(一次连接内改 skills.json + 全部链接)。
+ * - 乐观更新:点击瞬间翻转缓存,失败回滚,settle 后权威校准。
+ */
+export function useBulkToggleSkillApp(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
+  const installedKey = remoteTargetId
+    ? [
+        "skills",
+        "installed",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "installed"];
   return useMutation({
     mutationFn: ({
       ids,
@@ -319,11 +338,38 @@ export function useBulkToggleSkillApp() {
       app: AppId;
       enabled: boolean;
     }) =>
-      runSequentialBulkAction(ids, (id) =>
-        skillsApi.toggleApp(id, app, enabled),
-      ),
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+      remoteTargetId
+        ? bulkToggleRemoteSkillApp(
+            remoteTargetId,
+            ids,
+            app,
+            enabled,
+            remoteContainerId,
+          )
+        : runSequentialBulkAction(ids, (id) =>
+            skillsApi.toggleApp(id, app, enabled),
+          ),
+    // 乐观更新
+    onMutate: async ({ ids, app, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: installedKey });
+      const previous = queryClient.getQueryData<InstalledSkill[]>(installedKey);
+      queryClient.setQueryData<InstalledSkill[]>(installedKey, (old) => {
+        if (!old) return old;
+        const target = new Set(ids);
+        return old.map((skill) =>
+          target.has(skill.id)
+            ? { ...skill, apps: { ...skill.apps, [app]: enabled } }
+            : skill,
+        );
+      });
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(installedKey, context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: installedKey }),
   });
 }
 

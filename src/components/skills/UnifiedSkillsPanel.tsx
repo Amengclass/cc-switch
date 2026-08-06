@@ -15,6 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   type ImportSkillSelection,
   type SkillBackupEntry,
+  type DiscoverableSkill,
   useDeleteSkillBackup,
   useInstalledSkills,
   useSkillBackups,
@@ -141,7 +142,10 @@ const UnifiedSkillsPanel = React.forwardRef<
       remoteTargetId,
       remoteContainerId,
     );
-    const bulkToggleAppMutation = useBulkToggleSkillApp();
+    const bulkToggleAppMutation = useBulkToggleSkillApp(
+      remoteTargetId,
+      remoteContainerId,
+    );
     const uninstallMutation = useUninstallSkill(
       remoteTargetId,
       remoteContainerId,

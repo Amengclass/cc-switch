@@ -21,6 +21,22 @@ pub mod skill;
 
 use serde::{Deserialize, Serialize};
 
+/// 批量 toggle 的逐条结果,形状对齐前端 `SequentialBulkActionResult`。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteBulkToggleResult {
+    pub succeeded: Vec<String>,
+    pub failed: Vec<RemoteBulkToggleFailure>,
+}
+
+/// 批量 toggle 中单条失败项。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RemoteBulkToggleFailure {
+    pub item: String,
+    pub error: String,
+}
+
 /// 认证方式(M1 仅支持密码,密钥在二期实现)。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

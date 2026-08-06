@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { mcpApi } from "@/lib/api/mcp";
 import {
+  bulkToggleRemoteMcpApp,
   deleteRemoteMcpServer,
   importRemoteMcpFromApps,
   readRemoteMcpServers,
@@ -44,9 +45,19 @@ export function useAllMcpServers(
   });
 }
 
-/** Toggle multiple MCP servers serially to avoid lost whole-file writes. */
-export function useBulkToggleMcpApp() {
+/**
+ * Toggle multiple MCP servers for one app.
+ *
+ * - 本机:串行写整文件 live 配置(`runSequentialBulkAction`)避免互相覆盖。
+ * - 远端:单次 invoke 后端 bulk 命令(一次 SSH 连接内改完 SSOT + live)。
+ * - 乐观更新:点击瞬间翻转缓存,失败回滚,settle 后权威校准。
+ */
+export function useBulkToggleMcpApp(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
+  const queryKey = allMcpKey(remoteTargetId, remoteContainerId);
   return useMutation({
     mutationFn: ({
       serverIds,
@@ -57,11 +68,41 @@ export function useBulkToggleMcpApp() {
       app: AppId;
       enabled: boolean;
     }) =>
-      runSequentialBulkAction(serverIds, (serverId) =>
-        mcpApi.toggleApp(serverId, app, enabled),
-      ),
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] }),
+      remoteTargetId
+        ? bulkToggleRemoteMcpApp(
+            remoteTargetId,
+            serverIds,
+            app,
+            enabled,
+            remoteContainerId,
+          )
+        : runSequentialBulkAction(serverIds, (serverId) =>
+            mcpApi.toggleApp(serverId, app, enabled),
+          ),
+    // 乐观更新
+    onMutate: async ({ serverIds, app, enabled }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previous =
+        queryClient.getQueryData<Record<string, McpServer>>(queryKey);
+      queryClient.setQueryData<Record<string, McpServer>>(queryKey, (old) => {
+        if (!old) return old;
+        const target = new Set(serverIds);
+        const next: Record<string, McpServer> = {};
+        for (const [id, server] of Object.entries(old)) {
+          next[id] = target.has(id)
+            ? { ...server, apps: { ...server.apps, [app]: enabled } }
+            : server;
+        }
+        return next;
+      });
+      return { previous };
+    },
+    onError: (_error, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKey, context.previous);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey }),
   });
 }
 
