@@ -611,6 +611,22 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
 
                 <div className="flex items-center gap-2">
                   <Checkbox
+                    id="enable-openclaw"
+                    checked={enabledApps.openclaw}
+                    onCheckedChange={(checked: boolean) =>
+                      setEnabledApps({ ...enabledApps, openclaw: checked })
+                    }
+                  />
+                  <label
+                    htmlFor="enable-openclaw"
+                    className="text-sm text-foreground cursor-pointer select-none"
+                  >
+                    {t("mcp.unifiedPanel.apps.openclaw")}
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Checkbox
                     id="enable-hermes"
                     checked={enabledApps.hermes}
                     onCheckedChange={(checked: boolean) =>

@@ -67,6 +67,7 @@ impl Database {
             enabled_claude BOOLEAN NOT NULL DEFAULT 0, enabled_codex BOOLEAN NOT NULL DEFAULT 0,
             enabled_gemini BOOLEAN NOT NULL DEFAULT 0, enabled_grokbuild BOOLEAN NOT NULL DEFAULT 0,
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
+            enabled_openclaw BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0
         )",
             [],
@@ -112,6 +113,13 @@ impl Database {
         Self::add_column_if_missing(
             conn,
             "skills",
+            "enabled_openclaw",
+            "BOOLEAN NOT NULL DEFAULT 0",
+        )?;
+        // mcp_servers 同款幂等补齐（OpenClaw MCP 支持）。
+        Self::add_column_if_missing(
+            conn,
+            "mcp_servers",
             "enabled_openclaw",
             "BOOLEAN NOT NULL DEFAULT 0",
         )?;

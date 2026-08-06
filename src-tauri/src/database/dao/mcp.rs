@@ -13,7 +13,7 @@ impl Database {
     pub fn get_all_mcp_servers(&self) -> Result<IndexMap<String, McpServer>, AppError> {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn.prepare(
-            "SELECT id, name, server_config, description, homepage, docs, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes
+            "SELECT id, name, server_config, description, homepage, docs, tags, enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_openclaw, enabled_hermes
              FROM mcp_servers
              ORDER BY name ASC, id ASC"
         ).map_err(|e| AppError::Database(e.to_string()))?;
@@ -32,7 +32,8 @@ impl Database {
                 let enabled_gemini: bool = row.get(9)?;
                 let enabled_grokbuild: bool = row.get(10)?;
                 let enabled_opencode: bool = row.get(11)?;
-                let enabled_hermes: bool = row.get(12)?;
+                let enabled_openclaw: bool = row.get(12)?;
+                let enabled_hermes: bool = row.get(13)?;
 
                 let server = serde_json::from_str(&server_config_str).unwrap_or_default();
                 let tags = serde_json::from_str(&tags_str).unwrap_or_default();
@@ -49,6 +50,7 @@ impl Database {
                             gemini: enabled_gemini,
                             grokbuild: enabled_grokbuild,
                             opencode: enabled_opencode,
+                            openclaw: enabled_openclaw,
                             hermes: enabled_hermes,
                         },
                         description,
@@ -74,8 +76,8 @@ impl Database {
         conn.execute(
             "INSERT OR REPLACE INTO mcp_servers (
                 id, name, server_config, description, homepage, docs, tags,
-                enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_hermes
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                enabled_claude, enabled_codex, enabled_gemini, enabled_grokbuild, enabled_opencode, enabled_openclaw, enabled_hermes
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 server.id,
                 server.name,
@@ -92,6 +94,7 @@ impl Database {
                 server.apps.gemini,
                 server.apps.grokbuild,
                 server.apps.opencode,
+                server.apps.openclaw,
                 server.apps.hermes,
             ],
         )

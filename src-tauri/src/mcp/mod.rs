@@ -10,12 +10,14 @@
 //! - `gemini` - Gemini MCP 同步和导入
 //! - `opencode` - OpenCode MCP 同步和导入（含 local/remote 格式转换）
 //! - `hermes` - Hermes MCP 同步和导入
+//! - `openclaw` - OpenClaw MCP 同步和导入（openclaw.json 顶层 mcp.servers）
 
 mod claude;
 mod codex;
 mod gemini;
 mod grokbuild;
 mod hermes;
+mod openclaw;
 mod opencode;
 mod validation;
 
@@ -38,6 +40,10 @@ pub use grokbuild::{
 pub use hermes::{
     convert_to_hermes_format, import_from_hermes, merge_hermes_spec, remove_server_from_hermes,
     sync_single_server_to_hermes,
+};
+pub use openclaw::{
+    convert_from_openclaw_format, convert_to_openclaw_format, import_from_openclaw,
+    remove_server_from_openclaw, sync_single_server_to_openclaw,
 };
 pub use opencode::{
     convert_to_opencode_format, import_from_opencode, remove_server_from_opencode,

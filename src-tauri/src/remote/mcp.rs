@@ -38,6 +38,8 @@ pub struct RemoteMcpApps {
     #[serde(default)]
     pub opencode: bool,
     #[serde(default)]
+    pub openclaw: bool,
+    #[serde(default)]
     pub hermes: bool,
 }
 
@@ -60,6 +62,9 @@ impl RemoteMcpApps {
         if self.opencode {
             out.push("opencode");
         }
+        if self.openclaw {
+            out.push("openclaw");
+        }
         if self.hermes {
             out.push("hermes");
         }
@@ -73,6 +78,7 @@ impl RemoteMcpApps {
             "gemini" => self.gemini = enabled,
             "grokbuild" => self.grokbuild = enabled,
             "opencode" => self.opencode = enabled,
+            "openclaw" => self.openclaw = enabled,
             "hermes" => self.hermes = enabled,
             _ => {}
         }
@@ -127,6 +133,9 @@ fn opencode_config_path(root: &str) -> String {
 fn hermes_config_path(root: &str) -> String {
     format!("{root}/.hermes/config.yaml")
 }
+fn openclaw_config_path(root: &str) -> String {
+    format!("{root}/.openclaw/openclaw.json")
+}
 
 /// 该 app 的配置目录（判断 CLI 是否安装，与 live 配置文件不一定同名）。
 fn app_dir(root: &str, app: &str) -> Option<String> {
@@ -137,6 +146,7 @@ fn app_dir(root: &str, app: &str) -> Option<String> {
         "grokbuild" => Some(format!("{root}/.grok")),
         "opencode" => Some(format!("{root}/.config/opencode")),
         "hermes" => Some(format!("{root}/.hermes")),
+        "openclaw" => Some(format!("{root}/.openclaw")),
         _ => None,
     }
 }
@@ -273,7 +283,15 @@ pub async fn import_remote_mcp_from_apps<F: FileOps>(
     let mut map = read_remote_mcp_ssot(fs, root).await?;
     let mut new_count = 0;
 
-    for app in ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes"] {
+    for app in [
+        "claude",
+        "codex",
+        "gemini",
+        "grokbuild",
+        "opencode",
+        "openclaw",
+        "hermes",
+    ] {
         let servers = read_live_servers(fs, root, app).await?;
         for (id, spec) in servers {
             if id.trim().is_empty() || !spec.is_object() {
@@ -337,6 +355,11 @@ async fn sync_mcp_to_app<F: FileOps>(
             json_upsert(fs, &opencode_config_path(root), "mcp", id, &opencode_spec).await
         }
         "hermes" => hermes_upsert(fs, &hermes_config_path(root), id, spec).await,
+        "openclaw" => {
+            let openclaw_spec =
+                crate::mcp::convert_to_openclaw_format(spec).map_err(|e| e.to_string())?;
+            openclaw_json_upsert(fs, &openclaw_config_path(root), id, &openclaw_spec).await
+        }
         _ => Ok(()),
     }
 }
@@ -358,6 +381,7 @@ async fn remove_mcp_from_app<F: FileOps>(
         "grokbuild" => toml_remove(fs, &grok_config_path(root), id).await,
         "opencode" => json_remove(fs, &opencode_config_path(root), "mcp", id).await,
         "hermes" => hermes_remove(fs, &hermes_config_path(root), id).await,
+        "openclaw" => openclaw_json_remove(fs, &openclaw_config_path(root), id).await,
         _ => Ok(()),
     }
 }
@@ -425,6 +449,75 @@ async fn json_remove<F: FileOps>(fs: &F, path: &str, field: &str, id: &str) -> R
     if removed {
         let text = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
         fs.write_text_atomic(path, &text).await?;
+    }
+    Ok(())
+}
+
+// ------------------------------------------------------------------------
+// OpenClaw live 配置（JSON5, openclaw.json 顶层 mcp.servers）
+// ------------------------------------------------------------------------
+
+/// 读取远端 openclaw.json 为 Value。用 JSON5 解析以兼容注释/尾逗号，
+/// 缺失或为空时返回空对象。
+async fn read_openclaw_json<F: FileOps>(fs: &F, path: &str) -> Result<Value, String> {
+    let Some(t) = fs.read_text_optional(path).await? else {
+        return Ok(json!({}));
+    };
+    if t.trim().is_empty() {
+        return Ok(json!({}));
+    }
+    json5::from_str(&t).map_err(|e| format!("解析远端 OpenClaw 配置失败 {path}: {e}"))
+}
+
+/// 写回远端 openclaw.json。OpenClaw 官方接受纯 JSON（JSON 是 JSON5 子集），
+/// 因此用 serde_json 序列化即可被 OpenClaw 读取。
+async fn write_openclaw_json<F: FileOps>(fs: &F, path: &str, root: &Value) -> Result<(), String> {
+    let text = serde_json::to_string_pretty(root).map_err(|e| e.to_string())?;
+    fs.write_text_atomic(path, &text).await
+}
+
+/// 在远端 openclaw.json 的 mcp.servers 中 upsert 一个服务器。
+async fn openclaw_json_upsert<F: FileOps>(
+    fs: &F,
+    path: &str,
+    id: &str,
+    spec: &Value,
+) -> Result<(), String> {
+    let mut root = read_openclaw_json(fs, path).await?;
+    {
+        let obj = root
+            .as_object_mut()
+            .ok_or_else(|| format!("{path} 根必须是对象"))?;
+        if !obj.contains_key("mcp") {
+            obj.insert("mcp".to_string(), json!({}));
+        }
+        let mcp = obj
+            .get_mut("mcp")
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| format!("{path} 的 mcp 必须是对象"))?;
+        if !mcp.contains_key("servers") {
+            mcp.insert("servers".to_string(), json!({}));
+        }
+        mcp.get_mut("servers")
+            .and_then(|v| v.as_object_mut())
+            .ok_or_else(|| format!("{path} 的 mcp.servers 必须是对象"))?
+            .insert(id.to_string(), spec.clone());
+    }
+    write_openclaw_json(fs, path, &root).await
+}
+
+/// 从远端 openclaw.json 的 mcp.servers 移除一个服务器。
+async fn openclaw_json_remove<F: FileOps>(fs: &F, path: &str, id: &str) -> Result<(), String> {
+    let mut root = read_openclaw_json(fs, path).await?;
+    let removed = root
+        .get_mut("mcp")
+        .and_then(|v| v.as_object_mut())
+        .and_then(|m| m.get_mut("servers"))
+        .and_then(|v| v.as_object_mut())
+        .map(|o| o.remove(id).is_some())
+        .unwrap_or(false);
+    if removed {
+        write_openclaw_json(fs, path, &root).await?;
     }
     Ok(())
 }
@@ -577,6 +670,7 @@ async fn read_live_servers<F: FileOps>(
         "grokbuild" => read_toml_mcp_map(fs, &grok_config_path(root)).await,
         "opencode" => read_json_field_map(fs, &opencode_config_path(root), "mcp").await,
         "hermes" => read_yaml_mcp_map(fs, &hermes_config_path(root)).await,
+        "openclaw" => read_openclaw_mcp_map(fs, &openclaw_config_path(root)).await,
         _ => Ok(IndexMap::new()),
     }
 }
@@ -664,6 +758,30 @@ async fn read_yaml_mcp_map<F: FileOps>(
                 if let Ok(spec) = yaml_to_json(v) {
                     out.insert(key.to_string(), spec);
                 }
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn read_openclaw_mcp_map<F: FileOps>(
+    fs: &F,
+    path: &str,
+) -> Result<IndexMap<String, Value>, String> {
+    let root = read_openclaw_json(fs, path).await?;
+    let mut out = IndexMap::new();
+    if let Some(servers) = root
+        .get("mcp")
+        .and_then(|v| v.as_object())
+        .and_then(|m| m.get("servers"))
+        .and_then(|v| v.as_object())
+    {
+        for (id, spec) in servers {
+            // OpenClaw 条目格式 → 统一格式（与远端同步时相反）
+            if let Ok(unified) = crate::mcp::convert_from_openclaw_format(id, spec) {
+                out.insert(id.clone(), unified);
+            } else {
+                log::warn!("跳过无效的远端 OpenClaw MCP 服务器 '{id}'");
             }
         }
     }

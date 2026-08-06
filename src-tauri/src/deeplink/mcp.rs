@@ -158,6 +158,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
         gemini: false,
         grokbuild: false,
         opencode: false,
+        openclaw: false,
         hermes: false,
     };
 
@@ -168,10 +169,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
             "gemini" => apps.gemini = true,
             "grokbuild" | "grok" => apps.grokbuild = true,
             "opencode" => apps.opencode = true,
-            "openclaw" => {
-                // OpenClaw doesn't support MCP, ignore silently
-                log::debug!("OpenClaw doesn't support MCP, ignoring in apps parameter");
-            }
+            "openclaw" => apps.openclaw = true,
             "hermes" => apps.hermes = true,
             other => {
                 return Err(AppError::InvalidInput(format!(
@@ -213,6 +211,7 @@ mod tests {
             gemini: true,
             grokbuild: true,
             opencode: true,
+            openclaw: true,
             hermes: true,
             ..McpApps::default()
         };
@@ -223,6 +222,7 @@ mod tests {
         assert!(merged.gemini);
         assert!(merged.grokbuild);
         assert!(merged.opencode);
+        assert!(merged.openclaw);
         assert!(merged.hermes);
     }
 }

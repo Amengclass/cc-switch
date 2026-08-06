@@ -90,7 +90,7 @@ const WorkspaceFilesPanel: React.FC = () => {
         title={t("workspace.openDirectory")}
       >
         ~/.openclaw/workspace/
-        <FolderOpen className="w-3.5 h-3.5" />
+        <FolderOpen className="w-3.5 h-3.5 translate-y-[1px]" />
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

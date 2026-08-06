@@ -18,6 +18,8 @@ pub struct McpApps {
     #[serde(default)]
     pub opencode: bool,
     #[serde(default)]
+    pub openclaw: bool,
+    #[serde(default)]
     pub hermes: bool,
 }
 
@@ -30,7 +32,7 @@ impl McpApps {
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
-            AppType::OpenClaw => false, // OpenClaw doesn't support MCP
+            AppType::OpenClaw => self.openclaw,
             AppType::Hermes => self.hermes,
             AppType::ClaudeDesktop => false,
         }
@@ -44,7 +46,7 @@ impl McpApps {
             AppType::Gemini => self.gemini = enabled,
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support MCP, ignore
+            AppType::OpenClaw => self.openclaw = enabled,
             AppType::Hermes => self.hermes = enabled,
             AppType::ClaudeDesktop => {} // Claude Desktop 3P provider config doesn't support MCP here
         }
@@ -68,6 +70,9 @@ impl McpApps {
         if self.opencode {
             apps.push(AppType::OpenCode);
         }
+        if self.openclaw {
+            apps.push(AppType::OpenClaw);
+        }
         if self.hermes {
             apps.push(AppType::Hermes);
         }
@@ -81,6 +86,7 @@ impl McpApps {
             && !self.gemini
             && !self.grokbuild
             && !self.opencode
+            && !self.openclaw
             && !self.hermes
     }
 }
@@ -893,7 +899,7 @@ impl MultiAppConfig {
                 AppType::Gemini => &self.mcp.gemini.servers,
                 AppType::GrokBuild => continue,
                 AppType::OpenCode => &self.mcp.opencode.servers,
-                AppType::OpenClaw => continue, // OpenClaw MCP is still in development, skip
+                AppType::OpenClaw => continue, // OpenClaw didn't exist in v3.6.x, skip
                 AppType::Hermes => continue,   // Hermes didn't exist in v3.6.x, skip
             };
 

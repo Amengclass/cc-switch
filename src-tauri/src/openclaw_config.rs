@@ -911,6 +911,82 @@ pub fn set_tools_config(tools: &OpenClawToolsConfig) -> Result<OpenClawWriteOutc
     write_root_section("tools", &value)
 }
 
+// ============================================================================
+// MCP Configuration（OpenClaw 4.x 原生 MCP 支持：openclaw.json 顶层 mcp.servers）
+// ============================================================================
+
+/// OpenClaw 是否安装了 MCP 配置（openclaw.json 存在即视为可用）。
+fn should_sync_openclaw_mcp() -> bool {
+    get_openclaw_dir().exists()
+}
+
+/// 读取 `mcp.servers` 映射（id -> spec）。文件缺失或无 mcp 块时返回空映射。
+pub fn get_mcp_servers() -> Result<Map<String, Value>, AppError> {
+    let config = read_openclaw_config()?;
+    Ok(config
+        .get("mcp")
+        .and_then(|m| m.get("servers"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 写入 `mcp` 顶层块。仅替换 `servers`，保留 mcp 下其它字段（如 gateway 等）。
+fn write_mcp_servers(servers: &Map<String, Value>) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut config = read_openclaw_config()?;
+    let root = ensure_object(&mut config);
+    let mcp = root
+        .entry("mcp".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let mcp_obj = ensure_object(mcp);
+    mcp_obj.insert("servers".to_string(), Value::Object(servers.clone()));
+    let mcp_value = root.get("mcp").cloned().unwrap_or_else(|| Value::Object(Map::new()));
+    write_root_section("mcp", &mcp_value)
+}
+
+/// 新增/更新一个 MCP 服务器（merge-on-write，保留该条目已有但本次未提供的字段）。
+pub fn upsert_mcp_server(id: &str, spec: &Value) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut servers = get_mcp_servers()?;
+    let merged = if let Some(existing) = servers.get(id) {
+        merge_mcp_server_spec(existing, spec)
+    } else {
+        spec.clone()
+    };
+    servers.insert(id.to_string(), merged);
+    write_mcp_servers(&servers)
+}
+
+/// 从 `mcp.servers` 移除一个 MCP 服务器。
+pub fn remove_mcp_server(id: &str) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut servers = get_mcp_servers()?;
+    if servers.remove(id).is_none() {
+        return Ok(OpenClawWriteOutcome::default());
+    }
+    write_mcp_servers(&servers)
+}
+
+/// 合并：新 spec 的核心字段覆盖，保留 existing 中 openclaw 特有的扩展字段
+/// （transport / enabled / description 等，避免往返编辑丢失用户自定义）。
+fn merge_mcp_server_spec(existing: &Value, new_spec: &Value) -> Value {
+    let mut result = serde_json::Map::new();
+    if let Some(obj) = existing.as_object() {
+        for (k, v) in obj {
+            result.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(obj) = new_spec.as_object() {
+        for (k, v) in obj {
+            result.insert(k.clone(), v.clone());
+        }
+    }
+    Value::Object(result)
+}
+
+/// OpenClaw MCP 是否可用（openclaw.json 目录存在）。
+pub fn is_openclaw_mcp_available() -> bool {
+    should_sync_openclaw_mcp()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

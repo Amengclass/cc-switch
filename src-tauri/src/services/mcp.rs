@@ -43,6 +43,9 @@ impl McpService {
         if prev_apps.opencode && !server.apps.opencode {
             Self::remove_server_from_app(state, &server.id, &AppType::OpenCode)?;
         }
+        if prev_apps.openclaw && !server.apps.openclaw {
+            Self::remove_server_from_app(state, &server.id, &AppType::OpenClaw)?;
+        }
         if prev_apps.hermes && !server.apps.hermes {
             Self::remove_server_from_app(state, &server.id, &AppType::Hermes)?;
         }
@@ -140,9 +143,11 @@ impl McpService {
                 )?;
             }
             AppType::OpenClaw => {
-                // OpenClaw MCP support is still in development (Issue #4834)
-                // Skip for now
-                log::debug!("OpenClaw MCP support is still in development, skipping sync");
+                mcp::sync_single_server_to_openclaw(
+                    &Default::default(),
+                    &server.id,
+                    &server.server,
+                )?;
             }
             AppType::Hermes => {
                 mcp::sync_single_server_to_hermes(&Default::default(), &server.id, &server.server)?;
@@ -177,8 +182,7 @@ impl McpService {
                 mcp::remove_server_from_opencode(id)?;
             }
             AppType::OpenClaw => {
-                // OpenClaw MCP support is still in development
-                log::debug!("OpenClaw MCP support is still in development, skipping remove");
+                mcp::remove_server_from_openclaw(id)?;
             }
             AppType::Hermes => {
                 mcp::remove_server_from_hermes(id)?;
@@ -227,7 +231,7 @@ impl McpService {
         servers: &IndexMap<String, McpServer>,
         app: &AppType,
     ) -> Result<(), AppError> {
-        if matches!(app, AppType::OpenClaw | AppType::ClaudeDesktop) {
+        if matches!(app, AppType::ClaudeDesktop) {
             return Ok(());
         }
 
@@ -506,6 +510,44 @@ impl McpService {
         Ok(new_count)
     }
 
+    /// 从 OpenClaw 导入 MCP
+    pub fn import_from_openclaw(state: &AppState) -> Result<usize, AppError> {
+        // 创建临时 MultiAppConfig 用于导入
+        let mut temp_config = crate::app_config::MultiAppConfig::default();
+
+        // 调用导入逻辑（从 mcp/openclaw.rs）
+        let count = crate::mcp::import_from_openclaw(&mut temp_config)?;
+
+        let mut new_count = 0;
+
+        // 如果有导入的服务器，保存到数据库
+        if count > 0 {
+            if let Some(servers) = &temp_config.mcp.servers {
+                let mut existing = state.db.get_all_mcp_servers()?;
+                for server in servers.values() {
+                    // 已存在：仅启用 OpenClaw，不覆盖其他字段（与导入模块语义保持一致）
+                    let to_save = if let Some(existing_server) = existing.get(&server.id) {
+                        let mut merged = existing_server.clone();
+                        merged.apps.openclaw = true;
+                        merged
+                    } else {
+                        // 真正的新服务器
+                        new_count += 1;
+                        server.clone()
+                    };
+
+                    state.db.save_mcp_server(&to_save)?;
+                    existing.insert(to_save.id.clone(), to_save.clone());
+
+                    // 导入是读取已有配置，不应反向写回任何应用的 live 配置。
+                    // 显式编辑、启用/禁用或手动同步时再执行写回。
+                }
+            }
+        }
+
+        Ok(new_count)
+    }
+
     /// 从所有支持 MCP 的应用导入服务器，返回新导入的数量。
     ///
     /// Best-effort：单个应用导入失败（如坏 config.toml）不阻断其余应用；
@@ -516,12 +558,13 @@ impl McpService {
         let mut total = 0;
         let mut failures: Vec<String> = Vec::new();
 
-        let results: [(&str, Result<usize, AppError>); 6] = [
+        let results: [(&str, Result<usize, AppError>); 7] = [
             ("claude", Self::import_from_claude(state)),
             ("codex", Self::import_from_codex(state)),
             ("gemini", Self::import_from_gemini(state)),
             ("grokbuild", Self::import_from_grokbuild(state)),
             ("opencode", Self::import_from_opencode(state)),
+            ("openclaw", Self::import_from_openclaw(state)),
             ("hermes", Self::import_from_hermes(state)),
         ];
         for (app, result) in results {
