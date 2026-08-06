@@ -433,12 +433,15 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
-                // 悬浮窗（球/面板/菜单）尺寸和位置由本模块自己管理：
-                // 跳过 window-state 的初始恢复，否则会把它恢复成历史保存的错误尺寸
-                //（例如菜单窗口被恢复成 133px 宽，导致右缘与球不对齐、溢出屏幕）
-                .skip_initial_state(crate::floating::BALL_LABEL)
-                .skip_initial_state(crate::floating::PANEL_LABEL)
-                .skip_initial_state(crate::floating::MENU_LABEL)
+                // 悬浮窗（球/面板/菜单）尺寸和位置完全由 floating 模块自己管理：
+                // 必须用 denylist 完全排除，否则 window-state 插件会把它恢复成
+                // 历史保存的错误尺寸（例如球/菜单被恢复成 133px 宽，导致右缘与
+                // 球不对齐、菜单溢出屏幕）。skip_initial_state 实测拦不住。
+                .with_denylist(&[
+                    crate::floating::BALL_LABEL,
+                    crate::floating::PANEL_LABEL,
+                    crate::floating::MENU_LABEL,
+                ])
                 .build(),
         )
         .setup(|app| {

@@ -373,11 +373,19 @@ fn build_floating_window(
         .resizable(false)
         .inner_size(width, height)
         .visible(false)
+        // WebView2 加载内容后会把悬浮窗窗口 resize 成异常宽度（实测球/菜单
+        // 被拉宽成 133 逻辑），这里在页面加载完成时强制设回逻辑尺寸。
+        .on_page_load(move |window, _| {
+            let _ = window.set_size(tauri::LogicalSize::new(width, height));
+            // 再延迟一次，兜底 WebView 加载后的异步 resize
+            let w = window.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let _ = w.set_size(tauri::LogicalSize::new(width, height));
+            });
+        })
         .build()
         .map_err(|e| AppError::Message(format!("创建悬浮窗 {label} 失败: {e}")))?;
-    // 保险：显式把尺寸设回逻辑值。悬浮窗尺寸完全由本模块控制，
-    // 避免 window-state 插件或其他路径把窗口恢复成错误尺寸。
-    let _ = window.set_size(tauri::LogicalSize::new(width, height));
     Ok(window)
 }
 
@@ -934,31 +942,6 @@ pub async fn show_floating_panel(app: tauri::AppHandle) -> Result<(), String> {
     let _ = panel.set_position(tauri::LogicalPosition::new(px, py));
     // 不 set_focus：面板纯展示，不抢焦点；Windows 下无焦点窗口仍可接收鼠标事件
     let _ = panel.show();
-    log::info!(
-        "[Floating][diag] 面板: 计算逻辑=({:.1},{:.1}) 面板outer_phys=({},{}) {}x{} 球outer_phys=({},{}) {}x{}",
-        px,
-        py,
-        panel.outer_position().map(|p| p.x).unwrap_or(0),
-        panel.outer_position().map(|p| p.y).unwrap_or(0),
-        panel.outer_size().map(|s| s.width).unwrap_or(0),
-        panel.outer_size().map(|s| s.height).unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_position().ok())
-            .map(|p| p.x)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_position().ok())
-            .map(|p| p.y)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_size().ok())
-            .map(|s| s.width)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_size().ok())
-            .map(|s| s.height)
-            .unwrap_or(0),
-    );
 
     let _ = app.emit("floating-data-refresh", ());
 
@@ -1087,31 +1070,6 @@ pub async fn show_floating_context_menu(app: tauri::AppHandle) -> Result<(), Str
     let _ = menu.set_position(tauri::LogicalPosition::new(px, py));
     MENU_OPEN.store(true, Ordering::Release);
     let _ = menu.show();
-    log::info!(
-        "[Floating][diag] 菜单: 计算逻辑=({:.1},{:.1}) 菜单outer_phys=({},{}) {}x{} 球outer_phys=({},{}) {}x{}",
-        px,
-        py,
-        menu.outer_position().map(|p| p.x).unwrap_or(0),
-        menu.outer_position().map(|p| p.y).unwrap_or(0),
-        menu.outer_size().map(|s| s.width).unwrap_or(0),
-        menu.outer_size().map(|s| s.height).unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_position().ok())
-            .map(|p| p.x)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_position().ok())
-            .map(|p| p.y)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_size().ok())
-            .map(|s| s.width)
-            .unwrap_or(0),
-        app.get_webview_window(BALL_LABEL)
-            .and_then(|w| w.outer_size().ok())
-            .map(|s| s.height)
-            .unwrap_or(0),
-    );
     // 菜单是模态的，必须抢焦点，否则无法靠「失焦」感知点击别处
     let _ = menu.set_focus();
     log::debug!("[Floating] 右键菜单已显示");
