@@ -76,6 +76,12 @@ export function FloatingBall() {
       onMouseLeave={() =>
         void invoke("floating_set_hover", { source: "ball", active: false })
       }
+      onContextMenu={(e) => {
+        e.preventDefault();
+        void invoke("show_floating_context_menu").catch((err) =>
+          console.error("[Floating] 打开右键菜单失败", err),
+        );
+      }}
     >
       <div className="ball-inner" style={{ borderColor: color }}>
         <span className="ball-glyph">{glyph}</span>

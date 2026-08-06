@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SettingsFormState } from "@/hooks/useSettings";
-import { AppWindow, CircleDot } from "lucide-react";
+import { AppWindow, CircleDot, Lock } from "lucide-react";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { AnimatePresence, motion } from "framer-motion";
 
@@ -37,12 +37,19 @@ export function FloatingWindowSettings({
         <AnimatePresence initial={false}>
           {settings.enableFloatingWindow && (
             <motion.div
-              key="floating-snap-speed"
+              key="floating-extra"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 10 }}
               transition={{ duration: 0.3 }}
             >
+              <ToggleRow
+                icon={<Lock className="h-4 w-4 text-rose-500" />}
+                title="固定当前位置"
+                description="固定后悬浮球不可拖动、不自动吸附（单击仍可打开主窗口）"
+                checked={!!settings.floatingLocked}
+                onCheckedChange={(value) => onChange({ floatingLocked: value })}
+              />
               <div className="flex items-center justify-between gap-3 py-2 pl-4">
                 <div className="space-y-1">
                   <div className="text-sm font-medium leading-none">

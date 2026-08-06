@@ -48,6 +48,11 @@ fn merge_settings_for_save(
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
     // 重新开启时被"复活"的标记挡住而漏迁。
     incoming.local_migrations = existing.local_migrations.clone();
+    // floating_locked 由设置页「固定当前位置」开关管理；若某些保存路径未携带该字段
+    // （None，如旧版前端），保留现有值避免被清掉。
+    if incoming.floating_locked.is_none() {
+        incoming.floating_locked = existing.floating_locked.clone();
+    }
     incoming
 }
 

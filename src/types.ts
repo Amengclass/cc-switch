@@ -358,6 +358,8 @@ export interface Settings {
   floatingWindowPosition?: { x: number; y: number };
   // 吸附动画时长（毫秒）；0 = 立即吸附
   floatingSnapSpeedMs?: number;
+  // 悬浮球是否固定当前位置（固定后不可拖动/不吸附）
+  floatingLocked?: boolean;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）

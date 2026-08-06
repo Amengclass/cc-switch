@@ -425,6 +425,9 @@ pub struct AppSettings {
     /// 吸附动画时长（毫秒）；0 = 立即吸附，None = 默认 160
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_snap_speed_ms: Option<u32>,
+    /// 悬浮球是否固定当前位置（设置页「固定当前位置」开关；固定后不可拖动/不吸附）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_locked: Option<bool>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -548,6 +551,7 @@ impl Default for AppSettings {
             enable_floating_window: false,
             floating_window_position: None,
             floating_snap_speed_ms: None,
+            floating_locked: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,

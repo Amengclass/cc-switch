@@ -376,6 +376,14 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         // 拦截窗口关闭：根据设置决定是否最小化到托盘
         .on_window_event(|window, event| {
+            // 右键菜单失去焦点 = 点击了菜单外部（小球/桌面/其他应用）→ 收起菜单。
+            // 菜单打开时会 set_focus，失焦即“点击别处关闭”。
+            if let tauri::WindowEvent::Focused(false) = event {
+                if window.label() == crate::floating::MENU_LABEL {
+                    crate::floating::hide_floating_menu_sync(window.app_handle());
+                }
+            }
+
             // 悬浮球被拖动时记录新位置（防抖落盘到 settings）
             if let tauri::WindowEvent::Moved(position) = event {
                 if window.label() == crate::floating::BALL_LABEL {
@@ -425,6 +433,12 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
+                // 悬浮窗（球/面板/菜单）尺寸和位置由本模块自己管理：
+                // 跳过 window-state 的初始恢复，否则会把它恢复成历史保存的错误尺寸
+                //（例如菜单窗口被恢复成 133px 宽，导致右缘与球不对齐、溢出屏幕）
+                .skip_initial_state(crate::floating::BALL_LABEL)
+                .skip_initial_state(crate::floating::PANEL_LABEL)
+                .skip_initial_state(crate::floating::MENU_LABEL)
                 .build(),
         )
         .setup(|app| {
@@ -1671,6 +1685,9 @@ pub fn run() {
             floating::disable_floating_window,
             floating::floating_drag_begin,
             floating::floating_drag_end,
+            floating::show_floating_context_menu,
+            floating::hide_floating_menu,
+            floating::floating_open_settings,
             // Generic managed auth commands
             commands::auth_start_login,
             commands::auth_poll_for_account,

@@ -843,6 +843,12 @@ function App() {
     };
   }, []);
 
+  // 悬浮球右键菜单「设置」：打开主窗口后切到设置页（与 Ctrl+, 同一入口）
+  useTauriEvent("open-settings", () => {
+    if (managementBusyRef.current) return;
+    setCurrentView("settings");
+  });
+
   const [launchDashboardOpen, setLaunchDashboardOpen] = useState(false);
   const openHermesWebUI = useOpenHermesWebUI(() =>
     setLaunchDashboardOpen(true),

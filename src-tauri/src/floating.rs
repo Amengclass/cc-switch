@@ -17,13 +17,27 @@ use crate::store::AppState;
 
 pub const BALL_LABEL: &str = "floating-ball";
 pub const PANEL_LABEL: &str = "floating-panel";
+/// 右键菜单窗口（与面板同款透明样式，自定义 HTML 菜单）
+pub const MENU_LABEL: &str = "floating-menu";
 const BALL_SIZE: f64 = 64.0;
 const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;
-/// 面板与小球之间的间距（逻辑像素）
+/// 右键菜单窗口尺寸（瘦高样式，与 .floating-menu CSS 保持一致：
+/// padding 2+2、2×28 项、2×2 gap、1 分隔线、1 边框；带图标列。
+/// 项内容最小宽 53（图标12+gap5+2字24+内边距12）+ padding 4 + 边框 2 = 59，取 60）
+const MENU_WIDTH: f64 = 60.0;
+const MENU_HEIGHT: f64 = 68.0;
+/// 面板/菜单与小球之间的间距（逻辑像素）
 const PANEL_GAP: f64 = 8.0;
 /// 小球→面板跨窗移动时的隐藏宽限期
 const HOVER_GRACE_MS: u64 = 300;
+
+/// 悬浮球是否固定当前位置（设置页「固定当前位置」；固定后不可拖动/不吸附）
+fn is_floating_locked() -> bool {
+    crate::settings::get_settings()
+        .floating_locked
+        .unwrap_or(false)
+}
 
 /// 悬停状态：小球 / 面板任一处于悬停时面板保持显示
 struct FloatingHoverState {
@@ -40,6 +54,12 @@ static HOVER_STATE: std::sync::Mutex<FloatingHoverState> =
 /// 球位置落盘防抖门控（镜像 tray::schedule_tray_refresh 的做法）
 static POSITION_SAVE_SCHEDULED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+/// 右键菜单是否打开：打开期间悬停球不展开面板、面板互斥不收起菜单
+static MENU_OPEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// 右键菜单最近一次收起的时刻（区分「点击球关菜单」与正常单击球）
+static MENU_CLOSED_AT: std::sync::Mutex<Option<std::time::Instant>> =
+    std::sync::Mutex::new(None);
 
 // ============================================================
 // 拖动（Rust 端全局光标轮询，绕开 WebView 事件）
@@ -108,9 +128,16 @@ fn is_left_button_down() -> bool {
 pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
-    // 左键按下进入拖动：先收起面板，避免移动时面板一直展开
+    // 左键按下进入拖动：先收起面板；若右键菜单开着也一并收起（点击球视为点击外部）
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.hide();
+    }
+    if app
+        .get_webview_window(MENU_LABEL)
+        .map(|m| m.is_visible().unwrap_or(false))
+        .unwrap_or(false)
+    {
+        hide_floating_menu_sync(&app);
     }
     // 取消可能正在进行的吸附动画（用户又按下了）
     SNAP_ANIMATION_CANCEL.store(true, Ordering::Release);
@@ -132,6 +159,9 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
     log::info!("[Floating] 开始拖动");
 
     let app2 = app.clone();
+    // 固定状态在按下瞬间读取一次：拖拽期间不可达设置页，状态不会变。
+    // 固定时（locked=true）不移动窗口也不标记「已拖动」，松手按单击处理（仍打开主窗口）。
+    let locked = is_floating_locked();
     tauri::async_runtime::spawn(async move {
         loop {
             if !FLOATING_DRAGGING.load(Ordering::Acquire) {
@@ -142,6 +172,9 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
                 FLOATING_DRAGGING.store(false, Ordering::Release);
                 finish_drag(&app2);
                 break;
+            }
+            if locked {
+                continue;
             }
             let moved = {
                 let guard = FLOATING_DRAG_START.lock().unwrap_or_else(|p| p.into_inner());
@@ -178,10 +211,15 @@ pub async fn floating_drag_end(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 拖动结束统一收尾：窗口基本没动视为单击（打开主窗口），随后做边缘吸附
+/// 拖动结束统一收尾：窗口基本没动视为单击（打开主窗口），随后做边缘吸附。
+/// 若右键菜单刚收起（点击球关菜单），本次单击只关菜单、不打开主窗口。
 fn finish_drag(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
-    if !FLOATING_DRAG_MOVED.load(Ordering::Acquire) {
+    let menu_just_closed = MENU_CLOSED_AT
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+    if !FLOATING_DRAG_MOVED.load(Ordering::Acquire) && !menu_just_closed {
         log::info!("[Floating] 单击悬浮球，打开主窗口");
         open_main_window_impl(app);
     }
@@ -228,6 +266,11 @@ fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
 /// 松手吸附：按设置的动画速度平滑吸附到边缘。
 /// 速度为 0（关闭）= 不自动吸附，只保存当前位置。
 fn snap_and_save_ball_position(app: &tauri::AppHandle) {
+    if is_floating_locked() {
+        // 固定当前位置：不吸附、不保存
+        log::debug!("[Floating] 已固定位置，跳过吸附");
+        return;
+    }
     let Some(ball) = app.get_webview_window(BALL_LABEL) else {
         return;
     };
@@ -332,6 +375,9 @@ fn build_floating_window(
         .visible(false)
         .build()
         .map_err(|e| AppError::Message(format!("创建悬浮窗 {label} 失败: {e}")))?;
+    // 保险：显式把尺寸设回逻辑值。悬浮窗尺寸完全由本模块控制，
+    // 避免 window-state 插件或其他路径把窗口恢复成错误尺寸。
+    let _ = window.set_size(tauri::LogicalSize::new(width, height));
     Ok(window)
 }
 
@@ -356,6 +402,14 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
         if let Ok(panel) = build_floating_window(app, PANEL_LABEL, PANEL_WIDTH, PANEL_HEIGHT) {
             let _ = panel.set_position(tauri::LogicalPosition::new(-20000.0, -20000.0));
             log::info!("[Floating] 面板窗口已创建");
+        }
+    }
+
+    // 创建右键菜单窗口（保持隐藏，右键时才显示）
+    if app.get_webview_window(MENU_LABEL).is_none() {
+        if let Ok(menu) = build_floating_window(app, MENU_LABEL, MENU_WIDTH, MENU_HEIGHT) {
+            let _ = menu.set_position(tauri::LogicalPosition::new(-20000.0, -20000.0));
+            log::info!("[Floating] 右键菜单窗口已创建");
         }
     }
 }
@@ -392,11 +446,16 @@ fn default_ball_position(ball: &WebviewWindow) -> tauri::LogicalPosition<f64> {
 
 /// 销毁悬浮球与面板窗口（开关关闭时）
 pub(crate) fn destroy_floating_window(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    MENU_OPEN.store(false, Ordering::Release);
     if let Some(ball) = app.get_webview_window(BALL_LABEL) {
         let _ = ball.destroy();
     }
     if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.destroy();
+    }
+    if let Some(menu) = app.get_webview_window(MENU_LABEL) {
+        let _ = menu.destroy();
     }
     *HOVER_STATE.lock().unwrap_or_else(|p| p.into_inner()) = FloatingHoverState {
         ball: false,
@@ -445,9 +504,10 @@ pub(crate) fn save_ball_position_now(app: &tauri::AppHandle) {
     }
 }
 
-/// 读取当前球位置（逻辑坐标），用于面板定位。
-/// `outer_position` 返回物理像素，必须除以 scale_factor 转成逻辑像素，
-/// 否则高 DPI 下 `set_position(LogicalPosition)` 会偏移。
+/// 读取当前球位置（逻辑坐标），用于面板/菜单定位。
+/// `outer_position` 返回物理像素，除以 scale_factor 转成逻辑像素；
+/// 面板/菜单用 `set_position(LogicalPosition)` 落位时由 Tauri 按各自
+/// 窗口的 scale 换算回物理，同一显示器下往返一致，保证右缘/底缘精确对齐。
 fn current_ball_position(app: &tauri::AppHandle) -> Option<(f64, f64)> {
     let ball = app.get_webview_window(BALL_LABEL)?;
     let scale = ball.scale_factor().ok()?;
@@ -767,33 +827,84 @@ pub async fn get_floating_window_data(
 // 面板显示/隐藏与悬停协调
 // ============================================================
 
-/// 计算面板位置：默认在球右侧；贴近右/下边缘时翻转
-fn panel_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64, f64) {
+/// 计算弹窗位置：**朝屏幕中央方向展开**，球贴在弹窗靠屏幕边缘侧的角上（角对齐，不居中）。
+/// - 水平：球偏左 → 弹窗向右展开，弹窗左缘 = 球左缘（球在弹窗左上/下角）；
+///   球偏右 → 弹窗向左展开，弹窗右缘 = 球右缘（球在弹窗右上/下角）。
+/// - 垂直：球偏上 → 弹窗向下展开，弹窗顶缘 = 球底缘 + 间隙；
+///   球偏下 → 弹窗向上展开，弹窗底缘 = 球顶缘 - 间隙。
+/// 两轴组合即「球在弹窗四角之一、弹窗朝屏幕中央展开」；某方向放不下翻转该轴。
+/// 面板与菜单共用同一个函数 → 弹出位置始终一致。
+fn position_for_ball(
+    app: &tauri::AppHandle,
+    ball_pos: (f64, f64),
+    width: f64,
+    height: f64,
+) -> (f64, f64) {
     let monitor = app
         .get_webview_window(BALL_LABEL)
         .and_then(|w| w.current_monitor().ok().flatten());
-    let (screen_w, screen_h) = match monitor {
+    // 球所在显示器的逻辑原点与逻辑尺寸。
+    // 注意：ball_pos 来自 outer_position，相对主屏左上角为原点；多显示器时
+    // 必须减去当前显示器的原点偏移，否则「球偏左/偏右」判断会错乱
+    // （例如副屏在主屏左侧时球坐标为负，明明吸附在右缘却走了左分支 → 菜单左侧对齐）。
+    let (origin_x, origin_y, screen_w, screen_h) = match monitor {
         Some(m) => {
+            let pos = m.position();
             let size = m.size();
             let scale = m.scale_factor();
-            (size.width as f64 / scale, size.height as f64 / scale)
+            (
+                pos.x as f64 / scale,
+                pos.y as f64 / scale,
+                size.width as f64 / scale,
+                size.height as f64 / scale,
+            )
         }
-        None => (1920.0, 1080.0),
+        None => (0.0, 0.0, 1920.0, 1080.0),
     };
 
-    let (bx, by) = ball_pos;
-    let mut px = bx + BALL_SIZE + PANEL_GAP;
-    let mut py = by;
+    // 球相对所在显示器左上角的逻辑坐标
+    let (bx, by) = (ball_pos.0 - origin_x, ball_pos.1 - origin_y);
+    let ball_cx = bx + BALL_SIZE / 2.0;
+    let ball_cy = by + BALL_SIZE / 2.0;
 
-    // 右侧放不下 → 放到左侧
-    if px + PANEL_WIDTH > screen_w {
-        px = (bx - PANEL_GAP - PANEL_WIDTH).max(0.0);
+    // 水平：球偏左 → 弹窗左缘=球左缘（向右展开）；球偏右 → 弹窗右缘=球右缘（向左展开）
+    let mut px = if ball_cx < screen_w / 2.0 {
+        bx
+    } else {
+        bx + BALL_SIZE - width
+    };
+    // 该方向放不下 → 翻到反方向对齐
+    if px + width > screen_w {
+        px = bx + BALL_SIZE - width;
+    } else if px < 0.0 {
+        px = bx;
     }
-    // 底部放不下 → 上移
-    if py + PANEL_HEIGHT > screen_h {
-        py = (screen_h - PANEL_HEIGHT).max(0.0);
+    px = px.clamp(0.0, (screen_w - width).max(0.0)) + origin_x;
+
+    // 垂直：球偏上 → 弹窗顶缘=球底缘+间隙（向下展开）；球偏下 → 弹窗底缘=球顶缘-间隙（向上展开）
+    let mut py = if ball_cy < screen_h / 2.0 {
+        by + BALL_SIZE + PANEL_GAP
+    } else {
+        by - PANEL_GAP - height
+    };
+    if py + height > screen_h {
+        py = by - PANEL_GAP - height;
+    } else if py < 0.0 {
+        py = by + BALL_SIZE + PANEL_GAP;
     }
-    (px.max(0.0), py.max(0.0))
+    py = py.clamp(0.0, (screen_h - height).max(0.0)) + origin_y;
+
+    (px, py)
+}
+
+/// 面板位置
+fn panel_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64, f64) {
+    position_for_ball(app, ball_pos, PANEL_WIDTH, PANEL_HEIGHT)
+}
+
+/// 右键菜单位置
+fn menu_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64, f64) {
+    position_for_ball(app, ball_pos, MENU_WIDTH, MENU_HEIGHT)
 }
 
 /// 悬停小球：定位并显示面板，通知面板拉取数据
@@ -803,6 +914,14 @@ pub async fn show_floating_panel(app: tauri::AppHandle) -> Result<(), String> {
     // 拖动中不展开面板（左键按住时鼠标进出小球会重复触发 mouseenter）
     if FLOATING_DRAGGING.load(Ordering::Acquire) {
         return Ok(());
+    }
+    // 右键菜单打开时：面板不展开、菜单不收起（菜单保持到点击外部才关闭）
+    if MENU_OPEN.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    // 互斥兜底：面板展开时收起菜单（正常流程菜单不会开着）
+    if let Some(menu) = app.get_webview_window(MENU_LABEL) {
+        let _ = menu.hide();
     }
     let Some(ball_pos) = current_ball_position(&app) else {
         return Ok(());
@@ -815,6 +934,31 @@ pub async fn show_floating_panel(app: tauri::AppHandle) -> Result<(), String> {
     let _ = panel.set_position(tauri::LogicalPosition::new(px, py));
     // 不 set_focus：面板纯展示，不抢焦点；Windows 下无焦点窗口仍可接收鼠标事件
     let _ = panel.show();
+    log::info!(
+        "[Floating][diag] 面板: 计算逻辑=({:.1},{:.1}) 面板outer_phys=({},{}) {}x{} 球outer_phys=({},{}) {}x{}",
+        px,
+        py,
+        panel.outer_position().map(|p| p.x).unwrap_or(0),
+        panel.outer_position().map(|p| p.y).unwrap_or(0),
+        panel.outer_size().map(|s| s.width).unwrap_or(0),
+        panel.outer_size().map(|s| s.height).unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| p.x)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| p.y)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_size().ok())
+            .map(|s| s.width)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_size().ok())
+            .map(|s| s.height)
+            .unwrap_or(0),
+    );
 
     let _ = app.emit("floating-data-refresh", ());
 
@@ -900,15 +1044,105 @@ pub async fn open_main_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// 关闭悬浮窗：销毁窗口并把设置开关写回关闭
-#[tauri::command]
-pub async fn disable_floating_window(app: tauri::AppHandle) -> Result<(), String> {
-    destroy_floating_window(&app);
+/// 关闭悬浮窗的同步实现（命令与右键菜单共用）
+fn disable_floating_window_impl(app: &tauri::AppHandle) -> Result<(), String> {
+    destroy_floating_window(app);
 
     let mut settings = crate::settings::get_settings();
     settings.enable_floating_window = false;
     crate::settings::update_settings(settings).map_err(|e| e.to_string())?;
     log::info!("[Floating] 悬浮窗已关闭");
+    Ok(())
+}
+
+/// 关闭悬浮窗：销毁窗口并把设置开关写回关闭
+#[tauri::command]
+pub async fn disable_floating_window(app: tauri::AppHandle) -> Result<(), String> {
+    disable_floating_window_impl(&app)
+}
+
+/// 显示悬浮球右键菜单（自定义 HTML 菜单窗口，与面板同款样式）。
+/// 由前端 `onContextMenu` 调起；与面板互斥（先收起面板）。
+/// 菜单打开即抢焦点：点击菜单外部任意处（小球/桌面/其他应用）会触发
+/// 菜单窗口失焦 → lib.rs 里 `Focused(false)` 统一收起（“点击别处关闭”）。
+#[tauri::command]
+pub async fn show_floating_context_menu(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+    // 拖动中不弹菜单（左键按住时鼠标进出小球会重复触发）
+    if FLOATING_DRAGGING.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    // 互斥：收起面板
+    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+        let _ = panel.hide();
+    }
+    let Some(ball_pos) = current_ball_position(&app) else {
+        return Ok(());
+    };
+    let Some(menu) = app.get_webview_window(MENU_LABEL) else {
+        return Ok(());
+    };
+
+    let (px, py) = menu_position_for_ball(&app, ball_pos);
+    let _ = menu.set_position(tauri::LogicalPosition::new(px, py));
+    MENU_OPEN.store(true, Ordering::Release);
+    let _ = menu.show();
+    log::info!(
+        "[Floating][diag] 菜单: 计算逻辑=({:.1},{:.1}) 菜单outer_phys=({},{}) {}x{} 球outer_phys=({},{}) {}x{}",
+        px,
+        py,
+        menu.outer_position().map(|p| p.x).unwrap_or(0),
+        menu.outer_position().map(|p| p.y).unwrap_or(0),
+        menu.outer_size().map(|s| s.width).unwrap_or(0),
+        menu.outer_size().map(|s| s.height).unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| p.x)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_position().ok())
+            .map(|p| p.y)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_size().ok())
+            .map(|s| s.width)
+            .unwrap_or(0),
+        app.get_webview_window(BALL_LABEL)
+            .and_then(|w| w.outer_size().ok())
+            .map(|s| s.height)
+            .unwrap_or(0),
+    );
+    // 菜单是模态的，必须抢焦点，否则无法靠「失焦」感知点击别处
+    let _ = menu.set_focus();
+    log::debug!("[Floating] 右键菜单已显示");
+    Ok(())
+}
+
+/// 收起右键菜单的同步实现（命令与失焦事件共用）。
+/// 记录收起时刻，供「点击球关菜单」区分正常单击。
+pub fn hide_floating_menu_sync(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+    if MENU_OPEN.swap(false, Ordering::AcqRel) {
+        *MENU_CLOSED_AT.lock().unwrap_or_else(|p| p.into_inner()) =
+            Some(std::time::Instant::now());
+    }
+    if let Some(menu) = app.get_webview_window(MENU_LABEL) {
+        let _ = menu.hide();
+    }
+}
+
+/// 隐藏右键菜单
+#[tauri::command]
+pub async fn hide_floating_menu(app: tauri::AppHandle) -> Result<(), String> {
+    hide_floating_menu_sync(&app);
+    Ok(())
+}
+
+/// 菜单「设置」：打开主窗口（轻量模式先退出）并切到设置页
+#[tauri::command]
+pub async fn floating_open_settings(app: tauri::AppHandle) -> Result<(), String> {
+    open_main_window_impl(&app);
+    let _ = app.emit("open-settings", ());
     Ok(())
 }
 

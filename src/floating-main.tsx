@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { FloatingBall } from "./floating/FloatingBall";
 import { FloatingPanel } from "./floating/FloatingPanel";
+import { FloatingContextMenu } from "./floating/FloatingContextMenu";
 import "./floating/floating.css";
 
 const THEME_STORAGE_KEY = "cc-switch-theme";
@@ -71,6 +72,8 @@ function FloatingApp() {
         <FloatingBall />
       ) : label === "floating-panel" ? (
         <FloatingPanel />
+      ) : label === "floating-menu" ? (
+        <FloatingContextMenu />
       ) : (
         <div style={{ color: "#fff", padding: 8 }}>unknown window: {label}</div>
       )}
