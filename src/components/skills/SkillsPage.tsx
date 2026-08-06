@@ -96,7 +96,12 @@ const SKILLSSH_PAGE_SIZE = 20;
  */
 export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
   (
-    { initialApp = "claude", onSourceChange, remoteTargetId, remoteContainerId },
+    {
+      initialApp = "claude",
+      onSourceChange,
+      remoteTargetId,
+      remoteContainerId,
+    },
     ref,
   ) => {
     const { t } = useTranslation();

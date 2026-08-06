@@ -968,7 +968,7 @@ pub async fn install_remote_skill_from_discoverable(
     // 3. 本机下载仓库 + 解析技能源目录（与本地 install 同一实现，含路径安全校验）。
     let service = crate::services::skill::SkillService::new();
     // _temp_guard 保持存活直到上传完成（作用域末尾才释放），防止下载目录被提前回收。
-    let (_temp_guard, source_dir, _used_branch) = service
+    let (_temp_guard, _canonical_temp, source_dir, _used_branch) = service
         .download_and_resolve_skill_source(&skill)
         .await
         .map_err(|e| e.to_string())?;

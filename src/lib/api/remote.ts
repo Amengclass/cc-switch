@@ -400,14 +400,11 @@ export async function installRemoteSkillFromDiscoverable(
   },
   container?: string,
 ): Promise<RemoteSkillRecord> {
-  return invoke<RemoteSkillRecord>(
-    "install_remote_skill_from_discoverable",
-    {
-      hostId,
-      skill,
-      container: container ?? null,
-    },
-  );
+  return invoke<RemoteSkillRecord>("install_remote_skill_from_discoverable", {
+    hostId,
+    skill,
+    container: container ?? null,
+  });
 }
 
 /** 远端未管理技能条目（扫描远端文件系统） */
@@ -489,8 +486,6 @@ export async function importRemoteSkill(
 }
 
 /** 列出远端主机上的 Docker 容器（供「目标 = 容器」选择） */
-export async function listDockerContainers(
-  hostId: string,
-): Promise<string[]> {
+export async function listDockerContainers(hostId: string): Promise<string[]> {
   return invoke<string[]>("list_docker_containers", { hostId });
 }

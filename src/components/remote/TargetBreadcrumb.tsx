@@ -43,8 +43,7 @@ export function TargetBreadcrumb({
     ? t("remote.targetLocal", { defaultValue: "本机" })
     : (activeHost?.name ?? remoteTargetId);
   const containerLabel =
-    remoteContainerId ||
-    t("remote.targetHost", { defaultValue: "宿主机" });
+    remoteContainerId || t("remote.targetHost", { defaultValue: "宿主机" });
 
   // 切换主机时同步清空容器（父级变更，子级重置回「宿主机」）
   const handleSelectHost = (value: string) => {
@@ -104,9 +103,7 @@ export function TargetBreadcrumb({
             <DropdownMenuTrigger asChild>
               <button type="button" className={cn(segmentCls, "rounded-r-lg")}>
                 <Container className="h-3.5 w-3.5 shrink-0" />
-                <span className="max-w-[140px] truncate">
-                  {containerLabel}
-                </span>
+                <span className="max-w-[140px] truncate">{containerLabel}</span>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent

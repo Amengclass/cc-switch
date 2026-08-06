@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/remote";
 import type { McpServer } from "@/types";
 import type { AppId } from "@/lib/api/types";
+import { runSequentialBulkAction } from "@/lib/utils/sequentialBulkAction";
 
 const allMcpKey = (remoteTargetId?: string, remoteContainerId?: string) =>
   remoteTargetId
@@ -43,6 +44,27 @@ export function useAllMcpServers(
   });
 }
 
+/** Toggle multiple MCP servers serially to avoid lost whole-file writes. */
+export function useBulkToggleMcpApp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      serverIds,
+      app,
+      enabled,
+    }: {
+      serverIds: string[];
+      app: AppId;
+      enabled: boolean;
+    }) =>
+      runSequentialBulkAction(serverIds, (serverId) =>
+        mcpApi.toggleApp(serverId, app, enabled),
+      ),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] }),
+  });
+}
+
 /**
  * 添加或更新 MCP 服务器。
  * 选中远端/容器目标时，直接写该目标 ~/.claude.json 的 mcpServers。
@@ -55,20 +77,17 @@ export function useUpsertMcpServer(
   return useMutation({
     mutationFn: async (server: McpServer) => {
       if (remoteTargetId) {
-        return upsertRemoteMcpServer(
-          remoteTargetId,
-          server,
-          remoteContainerId,
-        );
+        return upsertRemoteMcpServer(remoteTargetId, server, remoteContainerId);
       }
       await mcpApi.upsertUnifiedServer(server);
       return true;
     },
-    onSuccess: () => {
+    // 后端可能已持久化但 live 配置写入失败，成功或失败都要刷新
+    // （返回 promise 让 React Query 等 invalidate 完成，期间 mutation 保持 pending）
+    onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: allMcpKey(remoteTargetId, remoteContainerId),
-      });
-    },
+      }),
   });
 }
 
@@ -105,11 +124,12 @@ export function useToggleMcpApp(
       await mcpApi.toggleApp(serverId, app, enabled);
       return true;
     },
-    onSuccess: () => {
+    // 后端可能已持久化但 live 配置写入失败，成功或失败都要刷新
+    // （返回 promise 让 React Query 等 invalidate 完成，期间 mutation 保持 pending）
+    onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: allMcpKey(remoteTargetId, remoteContainerId),
-      });
-    },
+      }),
   });
 }
 
@@ -127,11 +147,12 @@ export function useDeleteMcpServer(
       remoteTargetId
         ? deleteRemoteMcpServer(remoteTargetId, id, remoteContainerId)
         : mcpApi.deleteUnifiedServer(id),
-    onSuccess: () => {
+    // 后端可能已持久化但 live 配置写入失败，成功或失败都要刷新
+    // （返回 promise 让 React Query 等 invalidate 完成，期间 mutation 保持 pending）
+    onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: allMcpKey(remoteTargetId, remoteContainerId),
-      });
-    },
+      }),
   });
 }
 
@@ -153,10 +174,9 @@ export function useImportMcpFromApps(
     },
     // 后端是 best-effort 导入：部分应用失败会返回错误，但其余应用的
     // 服务器已经入库，失败时也要刷新列表。
-    onSettled: () => {
+    onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: allMcpKey(remoteTargetId, remoteContainerId),
-      });
-    },
+      }),
   });
 }

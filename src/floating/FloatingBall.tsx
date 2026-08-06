@@ -4,7 +4,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { statusColor, type FloatingEntry } from "./types";
 
-async function loadWorstPct(): Promise<{ worst: number | null; glyph: string }> {
+async function loadWorstPct(): Promise<{
+  worst: number | null;
+  glyph: string;
+}> {
   const entries = (await invoke("get_floating_window_data")) as FloatingEntry[];
   const pcts = entries
     .map((e) => e.worstPct)
@@ -40,9 +43,13 @@ export function FloatingBall() {
   useEffect(() => {
     refresh();
     const unlisteners: Array<() => void> = [];
-    void listen("floating-data-refresh", refresh).then((u) => unlisteners.push(u));
+    void listen("floating-data-refresh", refresh).then((u) =>
+      unlisteners.push(u),
+    );
     void listen("provider-switched", refresh).then((u) => unlisteners.push(u));
-    void listen("usage-cache-updated", refresh).then((u) => unlisteners.push(u));
+    void listen("usage-cache-updated", refresh).then((u) =>
+      unlisteners.push(u),
+    );
     const timer = setInterval(refresh, 5_000);
     return () => {
       clearInterval(timer);

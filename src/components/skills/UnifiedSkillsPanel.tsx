@@ -7,6 +7,7 @@ import {
   ExternalLink,
   RefreshCw,
   Loader2,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +19,7 @@ import {
   useInstalledSkills,
   useSkillBackups,
   useRestoreSkillBackup,
+  useBulkToggleSkillApp,
   useToggleSkillApp,
   useToggleRemoteSkillApp,
   useUninstallSkill,
@@ -30,6 +32,7 @@ import {
   type SkillUpdateInfo,
 } from "@/hooks/useSkills";
 import type { AppId } from "@/lib/api/types";
+import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
 import { scanRemoteUnmanagedSkills, importRemoteSkill } from "@/lib/api/remote";
@@ -38,6 +41,8 @@ import { SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
 import { AppToggleGroup } from "@/components/common/AppToggleGroup";
 import { ListItemRow } from "@/components/common/ListItemRow";
+import { ManagementListSearch } from "@/components/common/ManagementListSearch";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -54,6 +59,14 @@ interface UnifiedSkillsPanelProps {
   remoteTargetId?: string;
   /** 目标细化到 Docker 容器时，操作容器内 ~/.claude/skills/ */
   remoteContainerId?: string;
+  onInteractionBlockedChange?: (blocked: boolean) => void;
+  onNavigationBlockedChange?: (blocked: boolean) => void;
+  onCheckUpdatesStateChange?: (state: SkillsCheckUpdatesState) => void;
+}
+
+export interface SkillsCheckUpdatesState {
+  isChecking: boolean;
+  hasSkills: boolean;
 }
 
 export interface UnifiedSkillsPanelHandle {
@@ -74,570 +87,845 @@ function formatSkillBackupDate(unixSeconds: number): string {
 const UnifiedSkillsPanel = React.forwardRef<
   UnifiedSkillsPanelHandle,
   UnifiedSkillsPanelProps
->(({ onOpenDiscovery, currentApp, remoteTargetId, remoteContainerId }, ref) => {
-  const { t } = useTranslation();
-  const isRemote = Boolean(remoteTargetId);
-  const [confirmDialog, setConfirmDialog] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    confirmText?: string;
-    variant?: "destructive" | "info";
-    onConfirm: () => void;
-  } | null>(null);
-  const queryClient = useQueryClient();
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
-  /** 远端导入时暂存扫描结果（替代 unmanagedSkills） */
-  const unmanagedSkillsOverride = useRef<
-    | Array<{
-        directory: string;
-        name: string;
-        description?: string;
-        foundIn: string[];
-        path: string;
-      }>
-    | null
-  >(null);
+>(
+  (
+    {
+      onOpenDiscovery,
+      currentApp,
+      remoteTargetId,
+      remoteContainerId,
+      onInteractionBlockedChange,
+      onNavigationBlockedChange,
+      onCheckUpdatesStateChange,
+    },
+    ref,
+  ) => {
+    const { t } = useTranslation();
+    const isRemote = Boolean(remoteTargetId);
+    const [confirmDialog, setConfirmDialog] = useState<{
+      isOpen: boolean;
+      title: string;
+      message: string;
+      confirmText?: string;
+      variant?: "destructive" | "info";
+      onConfirm: () => void;
+    } | null>(null);
+    const queryClient = useQueryClient();
+    const [importDialogOpen, setImportDialogOpen] = useState(false);
+    const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+    /** 远端导入时暂存扫描结果（替代 unmanagedSkills） */
+    const unmanagedSkillsOverride = useRef<Array<{
+      directory: string;
+      name: string;
+      description?: string;
+      foundIn: string[];
+      path: string;
+    }> | null>(null);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [writePending, setWritePending] = useState(false);
+    const writeLockRef = React.useRef(false);
+    const checkUpdatesLockRef = React.useRef(false);
 
-  const { data: skills, isLoading } = useInstalledSkills(
-    remoteTargetId,
-    remoteContainerId,
-  );
-  const {
-    data: skillBackups = [],
-    refetch: refetchSkillBackups,
-    isFetching: isFetchingSkillBackups,
-  } = useSkillBackups();
-  const deleteBackupMutation = useDeleteSkillBackup();
-  const toggleAppMutation = useToggleSkillApp();
-  const toggleRemoteAppMutation = useToggleRemoteSkillApp(
-    remoteTargetId,
-    remoteContainerId,
-  );
-  const uninstallMutation = useUninstallSkill(remoteTargetId, remoteContainerId);
-  const restoreBackupMutation = useRestoreSkillBackup();
-  // enabled: true —— 进入 Skill 页面时自动静默扫描一次（绿点提示来源）
-  // 远端模式下也扫描本机未管理技能（"导入已有"会部署到远端）
-  const { data: unmanagedSkills, refetch: scanUnmanaged } =
-    useScanUnmanagedSkills({ enabled: true });
-  const importMutation = useImportSkillsFromApps(
-    remoteTargetId,
-    remoteContainerId,
-  );
-  const installFromZipMutation = useInstallSkillsFromZip(
-    remoteTargetId,
-    remoteContainerId,
-  );
-  const {
-    data: skillUpdates,
-    refetch: checkUpdates,
-    isFetching: isCheckingUpdates,
-  } = useCheckSkillUpdates();
-  const updateSkillMutation = useUpdateSkill();
-  const [isUpdatingAll, setIsUpdatingAll] = useState(false);
+    const { data: skills, isLoading } = useInstalledSkills(
+      remoteTargetId,
+      remoteContainerId,
+    );
+    const {
+      data: skillBackups = [],
+      refetch: refetchSkillBackups,
+      isFetching: isFetchingSkillBackups,
+    } = useSkillBackups();
+    const deleteBackupMutation = useDeleteSkillBackup();
+    const toggleAppMutation = useToggleSkillApp();
+    const toggleRemoteAppMutation = useToggleRemoteSkillApp(
+      remoteTargetId,
+      remoteContainerId,
+    );
+    const bulkToggleAppMutation = useBulkToggleSkillApp();
+    const uninstallMutation = useUninstallSkill(
+      remoteTargetId,
+      remoteContainerId,
+    );
+    const restoreBackupMutation = useRestoreSkillBackup();
+    // enabled: true —— 进入 Skill 页面时自动静默扫描一次（绿点提示来源）
+    // 远端模式下也扫描本机未管理技能（"导入已有"会部署到远端）
+    const { data: unmanagedSkills, refetch: scanUnmanaged } =
+      useScanUnmanagedSkills({ enabled: true });
+    const importMutation = useImportSkillsFromApps(
+      remoteTargetId,
+      remoteContainerId,
+    );
+    const installFromZipMutation = useInstallSkillsFromZip(
+      remoteTargetId,
+      remoteContainerId,
+    );
+    const {
+      data: skillUpdates,
+      refetch: checkUpdates,
+      isFetching: isCheckingUpdates,
+    } = useCheckSkillUpdates();
+    const updateSkillMutation = useUpdateSkill();
+    const [isUpdatingAll, setIsUpdatingAll] = useState(false);
 
-  const updatesMap = useMemo(() => {
-    const map: Record<string, SkillUpdateInfo> = {};
-    if (skillUpdates) {
-      for (const u of skillUpdates) {
-        map[u.id] = u;
-      }
-    }
-    return map;
-  }, [skillUpdates]);
+    const mutationPending =
+      deleteBackupMutation.isPending ||
+      toggleAppMutation.isPending ||
+      bulkToggleAppMutation.isPending ||
+      uninstallMutation.isPending ||
+      restoreBackupMutation.isPending ||
+      importMutation.isPending ||
+      installFromZipMutation.isPending ||
+      updateSkillMutation.isPending ||
+      isUpdatingAll;
+    const dialogOpen =
+      importDialogOpen || restoreDialogOpen || confirmDialog !== null;
+    const navigationBlocked = writePending || mutationPending || dialogOpen;
+    const interactionBlocked = navigationBlocked || isCheckingUpdates;
 
-  const enabledCounts = useMemo(() => {
-    const counts = {
-      claude: 0,
-      "claude-desktop": 0,
-      codex: 0,
-      gemini: 0,
-      grokbuild: 0,
-      opencode: 0,
-      openclaw: 0,
-      hermes: 0,
-    };
-    if (!skills) return counts;
-    skills.forEach((skill) => {
-      for (const app of SKILLS_APP_IDS) {
-        if (skill.apps[app]) counts[app]++;
-      }
-    });
-    return counts;
-  }, [skills]);
+    React.useEffect(() => {
+      onInteractionBlockedChange?.(interactionBlocked);
+    }, [interactionBlocked, onInteractionBlockedChange]);
 
-  const handleToggleApp = async (id: string, app: AppId, enabled: boolean) => {
-    try {
-      if (isRemote) {
-        await toggleRemoteAppMutation.mutateAsync({ id, app, enabled });
-      } else {
-        await toggleAppMutation.mutateAsync({ id, app, enabled });
-      }
-    } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
-    }
-  };
+    React.useEffect(() => {
+      onNavigationBlockedChange?.(navigationBlocked);
+    }, [navigationBlocked, onNavigationBlockedChange]);
 
-  const handleUninstall = (skill: InstalledSkill) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: t("skills.uninstall"),
-      message: t("skills.uninstallConfirm", { name: skill.name }),
-      onConfirm: async () => {
-        let toastId: string | number | undefined;
-        setConfirmDialog(null);
-        try {
-          toastId = toast.loading(t("skills.uninstalling"));
-
-          // 构建 skillKey 用于更新 discoverable 缓存
-          const installName =
-            skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
-            skill.directory.toLowerCase();
-          const skillKey = `${installName}:${skill.repoOwner?.toLowerCase() || ""}:${skill.repoName?.toLowerCase() || ""}`;
-
-          const result = await uninstallMutation.mutateAsync({
-            id: skill.id,
-            skillKey,
-          });
-          toast.dismiss(toastId);
-          toast.success(t("skills.uninstallSuccess", { name: skill.name }), {
-            description: result.backupPath
-              ? t("skills.backup.location", { path: result.backupPath })
-              : undefined,
-            closeButton: true,
-          });
-        } catch (error) {
-          if (toastId) toast.dismiss(toastId);
-          toast.error(t("common.error"), { description: String(error) });
-        }
+    React.useEffect(
+      () => () => {
+        onInteractionBlockedChange?.(false);
+        onNavigationBlockedChange?.(false);
       },
-    });
-  };
+      [onInteractionBlockedChange, onNavigationBlockedChange],
+    );
 
-  const handleOpenImport = async () => {
-    let toastId: string | number | undefined;
-    try {
-      toastId = toast.loading(t("skills.scanning", { defaultValue: "正在扫描..." }));
-      if (isRemote && remoteTargetId) {
-        // 远端：扫描远端文件系统
-        const remoteUnmanaged = await scanRemoteUnmanagedSkills(
-          remoteTargetId,
-          remoteContainerId || undefined,
+    const hasSkills = (skills?.length ?? 0) > 0;
+
+    React.useEffect(() => {
+      onCheckUpdatesStateChange?.({
+        isChecking: isCheckingUpdates,
+        hasSkills,
+      });
+    }, [hasSkills, isCheckingUpdates, onCheckUpdatesStateChange]);
+
+    React.useEffect(
+      () => () =>
+        onCheckUpdatesStateChange?.({ isChecking: false, hasSkills: false }),
+      [onCheckUpdatesStateChange],
+    );
+
+    const beginWrite = (allowOpenDialog = false) => {
+      if (
+        checkUpdatesLockRef.current ||
+        isCheckingUpdates ||
+        writeLockRef.current ||
+        mutationPending ||
+        (!allowOpenDialog && dialogOpen)
+      ) {
+        return false;
+      }
+      writeLockRef.current = true;
+      setWritePending(true);
+      return true;
+    };
+
+    const endWrite = () => {
+      writeLockRef.current = false;
+      setWritePending(false);
+    };
+
+    const applicableSkillUpdates = useMemo(() => {
+      const installedIds = new Set((skills ?? []).map((skill) => skill.id));
+      return (skillUpdates ?? []).filter((update) =>
+        installedIds.has(update.id),
+      );
+    }, [skillUpdates, skills]);
+
+    const updatesMap = useMemo(() => {
+      const map: Record<string, SkillUpdateInfo> = {};
+      for (const update of applicableSkillUpdates) {
+        map[update.id] = update;
+      }
+      return map;
+    }, [applicableSkillUpdates]);
+
+    const enabledCounts = useMemo(() => {
+      const counts = {
+        claude: 0,
+        "claude-desktop": 0,
+        codex: 0,
+        gemini: 0,
+        grokbuild: 0,
+        opencode: 0,
+        openclaw: 0,
+        hermes: 0,
+      };
+      if (!skills) return counts;
+      skills.forEach((skill) => {
+        for (const app of SKILLS_APP_IDS) {
+          if (skill.apps[app]) counts[app]++;
+        }
+      });
+      return counts;
+    }, [skills]);
+
+    const filteredSkills = useMemo(() => {
+      if (!skills) return [];
+
+      const query = searchQuery.trim().toLocaleLowerCase();
+      if (!query) return skills;
+
+      return skills.filter((skill) => {
+        const searchableValues = [
+          skill.name,
+          skill.id,
+          skill.description,
+          skill.directory,
+          skill.repoOwner,
+          skill.repoName,
+          skill.repoOwner && skill.repoName
+            ? `${skill.repoOwner}/${skill.repoName}`
+            : undefined,
+        ];
+
+        return searchableValues.some((value) =>
+          value?.toLocaleLowerCase().includes(query),
         );
-        if (remoteUnmanaged.length === 0) {
+      });
+    }, [searchQuery, skills]);
+
+    const pendingApp = bulkToggleAppMutation.isPending
+      ? bulkToggleAppMutation.variables?.app
+      : toggleAppMutation.isPending
+        ? toggleAppMutation.variables?.app
+        : null;
+
+    const handleToggleApp = async (
+      id: string,
+      app: AppId,
+      enabled: boolean,
+    ) => {
+      if (!beginWrite()) return;
+
+      try {
+        if (isRemote) {
+          await toggleRemoteAppMutation.mutateAsync({ id, app, enabled });
+        } else {
+          await toggleAppMutation.mutateAsync({ id, app, enabled });
+        }
+      } catch (error) {
+        toast.error(t("common.error"), { description: String(error) });
+      } finally {
+        endWrite();
+      }
+    };
+
+    const handleToggleAll = async (app: AppId, enabled: boolean) => {
+      if (!skills || !beginWrite()) return;
+
+      const ids = skills
+        .filter((skill) => Boolean(skill.apps[app]) !== enabled)
+        .map((skill) => skill.id);
+      if (ids.length === 0) {
+        endWrite();
+        return;
+      }
+
+      try {
+        const result = await bulkToggleAppMutation.mutateAsync({
+          ids,
+          app,
+          enabled,
+        });
+        if (result.failed.length > 0) {
+          toast.error(
+            t("common.bulkToggleFailed", { count: result.failed.length }),
+            { description: String(result.failed[0].error) },
+          );
+        }
+      } catch (error) {
+        toast.error(t("common.bulkToggleFailed", { count: ids.length }), {
+          description: String(error),
+        });
+      } finally {
+        endWrite();
+      }
+    };
+
+    const handleUninstall = (skill: InstalledSkill) => {
+      if (
+        checkUpdatesLockRef.current ||
+        writeLockRef.current ||
+        interactionBlocked
+      ) {
+        return;
+      }
+      setConfirmDialog({
+        isOpen: true,
+        title: t("skills.uninstall"),
+        message: t("skills.uninstallConfirm", { name: skill.name }),
+        onConfirm: async () => {
+          if (!beginWrite(true)) return;
+          let toastId: string | number | undefined;
+          setConfirmDialog(null);
+          try {
+            toastId = toast.loading(t("skills.uninstalling"));
+
+            // 构建 skillKey 用于更新 discoverable 缓存
+            const installName =
+              skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
+              skill.directory.toLowerCase();
+            const skillKey = `${installName}:${skill.repoOwner?.toLowerCase() || ""}:${skill.repoName?.toLowerCase() || ""}`;
+
+            const result = await uninstallMutation.mutateAsync(skill.id);
+            // 本地模式：同步 discoverable 的 installed 标志
+            if (!isRemote) {
+              queryClient.setQueryData<DiscoverableSkill[]>(
+                ["skills", "discoverable"],
+                (oldData) =>
+                  oldData?.map((s) =>
+                    s.key === skillKey ? { ...s, installed: false } : s,
+                  ),
+              );
+            }
+            toast.dismiss(toastId);
+            setConfirmDialog(null);
+            toast.success(t("skills.uninstallSuccess", { name: skill.name }), {
+              description: result.backupPath
+                ? t("skills.backup.location", { path: result.backupPath })
+                : undefined,
+              closeButton: true,
+            });
+          } catch (error) {
+            if (toastId) toast.dismiss(toastId);
+            toast.error(t("common.error"), { description: String(error) });
+          } finally {
+            endWrite();
+          }
+        },
+      });
+    };
+
+    const handleOpenImport = async () => {
+      if (!beginWrite()) return;
+      let toastId: string | number | undefined;
+      try {
+        toastId = toast.loading(
+          t("skills.scanning", { defaultValue: "正在扫描..." }),
+        );
+        if (isRemote && remoteTargetId) {
+          // 远端：扫描远端文件系统
+          const remoteUnmanaged = await scanRemoteUnmanagedSkills(
+            remoteTargetId,
+            remoteContainerId || undefined,
+          );
+          if (remoteUnmanaged.length === 0) {
+            toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
+            return;
+          }
+          // 适配为 ImportSkillsDialog 期望的格式
+          unmanagedSkillsOverride.current = remoteUnmanaged.map((s) => ({
+            directory: s.directory,
+            name: s.name,
+            description: s.description ?? undefined,
+            foundIn: s.foundIn,
+            path: s.path,
+          }));
+          setImportDialogOpen(true);
+          return;
+        }
+
+        // 本机：扫描本机文件系统
+        const result = await scanUnmanaged();
+        if (!result.data || result.data.length === 0) {
           toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
           return;
         }
-        // 适配为 ImportSkillsDialog 期望的格式
-        unmanagedSkillsOverride.current = remoteUnmanaged.map((s) => ({
-          directory: s.directory,
-          name: s.name,
-          description: s.description ?? undefined,
-          foundIn: s.foundIn,
-          path: s.path,
-        }));
-        setImportDialogOpen(true);
-        return;
-      }
-
-      // 本机：扫描本机文件系统
-      const result = await scanUnmanaged();
-      if (!result.data || result.data.length === 0) {
-        toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
-        return;
-      }
-      unmanagedSkillsOverride.current = null;
-      setImportDialogOpen(true);
-    } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
-    } finally {
-      toast.dismiss(toastId);
-    }
-  };
-
-  const handleImport = async (imports: ImportSkillSelection[]) => {
-    let toastId: string | number | undefined;
-    try {
-      if (isRemote && remoteTargetId) {
-        // 远端：逐个 cp -r → SSOT → skills.json → symlink
-        setImportDialogOpen(false);
-        toastId = toast.loading(t("skills.importing", { defaultValue: "正在导入 skill..." }));
-        const installed: InstalledSkill[] = [];
-        for (const imp of imports) {
-          try {
-            const record = await importRemoteSkill(
-              remoteTargetId,
-              imp.path || imp.directory,
-              imp.directory,
-              remoteContainerId || undefined,
-            );
-            installed.push({
-              id: record.id,
-              name: record.name,
-              description: record.description,
-              directory: record.directory,
-              apps: {
-                claude: record.apps.claude,
-                codex: record.apps.codex ?? false,
-                gemini: record.apps.gemini ?? false,
-                opencode: record.apps.opencode ?? false,
-                openclaw: record.apps.openclaw ?? false,
-                hermes: record.apps.hermes ?? false,
-              },
-              installedAt: record.installedAt,
-              updatedAt: record.updatedAt,
-            });
-          } catch (e) {
-            toast.error(`${imp.directory}: ${String(e)}`);
-          }
-        }
         unmanagedSkillsOverride.current = null;
-        const count = installed.length;
+        setImportDialogOpen(true);
+      } catch (error) {
+        toast.error(t("common.error"), { description: String(error) });
+      } finally {
         toast.dismiss(toastId);
-        if (count > 0) {
-          const installedKey = ["skills", "installed", "remote", remoteTargetId, remoteContainerId ?? "__host__"];
-          // 即时更新 UI（本机策略）
-          queryClient.setQueryData<InstalledSkill[]>(installedKey, (old) =>
-            old ? [...old, ...installed] : installed,
+        endWrite();
+      }
+    };
+
+    const handleImport = async (imports: ImportSkillSelection[]) => {
+      if (!beginWrite(true)) return;
+      let toastId: string | number | undefined;
+      try {
+        if (isRemote && remoteTargetId) {
+          // 远端：逐个 cp -r → SSOT → skills.json → symlink
+          setImportDialogOpen(false);
+          toastId = toast.loading(
+            t("skills.importing", { defaultValue: "正在导入 skill..." }),
           );
-          // 后台拉取完整元数据
-          queryClient.invalidateQueries({ queryKey: installedKey });
+          const installed: InstalledSkill[] = [];
+          for (const imp of imports) {
+            try {
+              const record = await importRemoteSkill(
+                remoteTargetId,
+                imp.path || imp.directory,
+                imp.directory,
+                remoteContainerId || undefined,
+              );
+              installed.push({
+                id: record.id,
+                name: record.name,
+                description: record.description,
+                directory: record.directory,
+                apps: {
+                  claude: record.apps.claude,
+                  codex: record.apps.codex ?? false,
+                  gemini: record.apps.gemini ?? false,
+                  opencode: record.apps.opencode ?? false,
+                  openclaw: record.apps.openclaw ?? false,
+                  hermes: record.apps.hermes ?? false,
+                },
+                installedAt: record.installedAt,
+                updatedAt: record.updatedAt,
+              });
+            } catch (e) {
+              toast.error(`${imp.directory}: ${String(e)}`);
+            }
+          }
+          unmanagedSkillsOverride.current = null;
+          const count = installed.length;
+          toast.dismiss(toastId);
+          if (count > 0) {
+            const installedKey = [
+              "skills",
+              "installed",
+              "remote",
+              remoteTargetId,
+              remoteContainerId ?? "__host__",
+            ];
+            // 即时更新 UI（本机策略）
+            queryClient.setQueryData<InstalledSkill[]>(installedKey, (old) =>
+              old ? [...old, ...installed] : installed,
+            );
+            // 后台拉取完整元数据
+            queryClient.invalidateQueries({ queryKey: installedKey });
+            toast.success(
+              t("skills.importSuccessRemote", {
+                defaultValue: "已将 {{count}} 个技能导入远端",
+                count,
+              }),
+              { closeButton: true },
+            );
+          }
+        } else {
+          // 本机：走 importMutation
+          setImportDialogOpen(false);
+          toastId = toast.loading(
+            t("skills.importing", { defaultValue: "正在导入 skill..." }),
+          );
+          await importMutation.mutateAsync(imports);
+          toast.dismiss(toastId);
+          toast.success(t("skills.importSuccess", { count: imports.length }), {
+            closeButton: true,
+          });
+        }
+      } catch (error) {
+        if (toastId) toast.dismiss(toastId);
+        toast.error(t("common.error"), { description: String(error) });
+      } finally {
+        endWrite();
+      }
+    };
+
+    const handleInstallFromZip = async () => {
+      if (!beginWrite()) return;
+      let toastId: string | number | undefined;
+      try {
+        const filePath = await skillsApi.openZipFileDialog();
+        if (!filePath) return;
+
+        toastId = toast.loading(t("skills.installing"));
+        const installed = await installFromZipMutation.mutateAsync({
+          filePath,
+          currentApp,
+        });
+        toast.dismiss(toastId);
+
+        if (installed.length === 0) {
+          toast.info(t("skills.installFromZip.noSkillsFound"), {
+            closeButton: true,
+          });
+        } else if (installed.length === 1) {
           toast.success(
-            t("skills.importSuccessRemote", {
-              defaultValue: "已将 {{count}} 个技能导入远端",
-              count,
+            t("skills.installFromZip.successSingle", {
+              name: installed[0].name,
+            }),
+            { closeButton: true },
+          );
+        } else {
+          toast.success(
+            t("skills.installFromZip.successMultiple", {
+              count: installed.length,
             }),
             { closeButton: true },
           );
         }
-      } else {
-        // 本机：走 importMutation
-        setImportDialogOpen(false);
-        toastId = toast.loading(t("skills.importing", { defaultValue: "正在导入 skill..." }));
-        await importMutation.mutateAsync(imports);
-        toast.dismiss(toastId);
-        toast.success(
-          t("skills.importSuccess", { count: imports.length }),
-          { closeButton: true },
-        );
-      }
-    } catch (error) {
-      if (toastId) toast.dismiss(toastId);
-      toast.error(t("common.error"), { description: String(error) });
-    }
-  };
-
-  const handleInstallFromZip = async () => {
-    let toastId: string | number | undefined;
-    try {
-      const filePath = await skillsApi.openZipFileDialog();
-      if (!filePath) return;
-
-      toastId = toast.loading(t("skills.installing"));
-      const installed = await installFromZipMutation.mutateAsync({
-        filePath,
-        currentApp,
-      });
-      toast.dismiss(toastId);
-
-      if (installed.length === 0) {
-        toast.info(t("skills.installFromZip.noSkillsFound"), {
-          closeButton: true,
-        });
-      } else if (installed.length === 1) {
-        toast.success(
-          t("skills.installFromZip.successSingle", { name: installed[0].name }),
-          { closeButton: true },
-        );
-      } else {
-        toast.success(
-          t("skills.installFromZip.successMultiple", {
-            count: installed.length,
-          }),
-          { closeButton: true },
-        );
-      }
-    } catch (error) {
-      if (toastId) toast.dismiss(toastId);
-      toast.error(t("skills.installFailed"), { description: String(error) });
-    }
-  };
-
-  const handleCheckUpdates = async () => {
-    try {
-      const result = await checkUpdates();
-      const updates = result.data || [];
-      if (updates.length === 0) {
-        toast.success(t("skills.noUpdates"), { closeButton: true });
-      } else {
-        toast.info(t("skills.updatesFound", { count: updates.length }), {
-          closeButton: true,
-        });
-      }
-    } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
-    }
-  };
-
-  const handleUpdateSkill = async (skill: InstalledSkill) => {
-    try {
-      const updated = await updateSkillMutation.mutateAsync(skill.id);
-      toast.success(t("skills.updateSuccess", { name: updated.name }), {
-        closeButton: true,
-      });
-    } catch (error) {
-      toast.error(t("skills.updateFailed"), { description: String(error) });
-    }
-  };
-
-  const handleUpdateAll = async () => {
-    if (!skillUpdates || skillUpdates.length === 0) return;
-    setIsUpdatingAll(true);
-    let successCount = 0;
-    for (const update of skillUpdates) {
-      try {
-        await updateSkillMutation.mutateAsync(update.id);
-        successCount++;
       } catch (error) {
-        toast.error(t("skills.updateFailed"), {
-          description: `${update.name}: ${String(error)}`,
-        });
+        if (toastId) toast.dismiss(toastId);
+        toast.error(t("skills.installFailed"), { description: String(error) });
+      } finally {
+        endWrite();
       }
-    }
-    setIsUpdatingAll(false);
-    if (successCount > 0) {
-      toast.success(t("skills.updateAllSuccess", { count: successCount }), {
-        closeButton: true,
-      });
-    }
-  };
+    };
 
-  const handleOpenRestoreFromBackup = async () => {
-    setRestoreDialogOpen(true);
-    try {
-      await refetchSkillBackups();
-    } catch (error) {
-      toast.error(t("common.error"), { description: String(error) });
-    }
-  };
-
-  const handleRestoreFromBackup = async (backupId: string) => {
-    try {
-      const restored = await restoreBackupMutation.mutateAsync({
-        backupId,
-        currentApp,
-      });
-      setRestoreDialogOpen(false);
-      toast.success(
-        t("skills.restoreFromBackup.success", { name: restored.name }),
-        {
-          closeButton: true,
-        },
-      );
-    } catch (error) {
-      toast.error(t("skills.restoreFromBackup.failed"), {
-        description: String(error),
-      });
-    }
-  };
-
-  const handleDeleteBackup = (backup: SkillBackupEntry) => {
-    setConfirmDialog({
-      isOpen: true,
-      title: t("skills.restoreFromBackup.deleteConfirmTitle"),
-      message: t("skills.restoreFromBackup.deleteConfirmMessage", {
-        name: backup.skill.name,
-      }),
-      confirmText: t("skills.restoreFromBackup.delete"),
-      variant: "destructive",
-      onConfirm: async () => {
-        try {
-          await deleteBackupMutation.mutateAsync(backup.backupId);
-          await refetchSkillBackups();
-          setConfirmDialog(null);
-          toast.success(
-            t("skills.restoreFromBackup.deleteSuccess", {
-              name: backup.skill.name,
-            }),
-            {
-              closeButton: true,
-            },
-          );
-        } catch (error) {
-          toast.error(t("skills.restoreFromBackup.deleteFailed"), {
-            description: String(error),
+    const handleCheckUpdates = async () => {
+      if (
+        checkUpdatesLockRef.current ||
+        writeLockRef.current ||
+        interactionBlocked
+      ) {
+        return;
+      }
+      checkUpdatesLockRef.current = true;
+      try {
+        const result = await checkUpdates();
+        const updates = result.data || [];
+        if (updates.length === 0) {
+          toast.success(t("skills.noUpdates"), { closeButton: true });
+        } else {
+          toast.info(t("skills.updatesFound", { count: updates.length }), {
+            closeButton: true,
           });
         }
-      },
-    });
-  };
+      } catch (error) {
+        toast.error(t("common.error"), { description: String(error) });
+      } finally {
+        checkUpdatesLockRef.current = false;
+      }
+    };
 
-  React.useImperativeHandle(ref, () => ({
-    openDiscovery: onOpenDiscovery,
-    openImport: handleOpenImport,
-    openInstallFromZip: handleInstallFromZip,
-    openRestoreFromBackup: isRemote
-      ? () => undefined
-      : handleOpenRestoreFromBackup,
-    checkUpdates: isRemote ? () => undefined : handleCheckUpdates,
-  }));
+    const handleUpdateSkill = async (skill: InstalledSkill) => {
+      if (!beginWrite()) return;
+      try {
+        const updated = await updateSkillMutation.mutateAsync(skill.id);
+        toast.success(t("skills.updateSuccess", { name: updated.name }), {
+          closeButton: true,
+        });
+      } catch (error) {
+        toast.error(t("skills.updateFailed"), { description: String(error) });
+      } finally {
+        endWrite();
+      }
+    };
 
-  return (
-    <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
-      <div className="flex items-center justify-between">
-        <AppCountBar
-          totalLabel={
-            isRemote
-              ? t("remote.skillsInstalled", {
-                  defaultValue: "远端技能 {{count}}",
-                  count: skills?.length || 0,
-                })
-              : t("skills.installed", { count: skills?.length || 0 })
+    const handleUpdateAll = async () => {
+      if (applicableSkillUpdates.length === 0 || !beginWrite()) {
+        return;
+      }
+      setIsUpdatingAll(true);
+      let successCount = 0;
+      try {
+        for (const update of applicableSkillUpdates) {
+          try {
+            await updateSkillMutation.mutateAsync(update.id);
+            successCount++;
+          } catch (error) {
+            toast.error(t("skills.updateFailed"), {
+              description: `${update.name}: ${String(error)}`,
+            });
           }
-          counts={enabledCounts}
-          appIds={SKILLS_APP_IDS}
-        />
-        <div className="flex items-center gap-1.5">
-          {!isRemote && (
-            <div
-              className="transition-all duration-300 ease-out overflow-hidden"
-              style={{
-                maxWidth:
-                  skillUpdates && skillUpdates.length > 0 ? "200px" : "0px",
-                opacity: skillUpdates && skillUpdates.length > 0 ? 1 : 0,
-              }}
-            >
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 text-xs gap-1 whitespace-nowrap"
-                onClick={handleUpdateAll}
-                disabled={isUpdatingAll || updateSkillMutation.isPending}
-              >
-                {isUpdatingAll ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <RefreshCw size={12} />
-                )}
-                {isUpdatingAll
-                  ? t("skills.updatingAll")
-                  : t("skills.updateAll", {
-                      count: skillUpdates?.length ?? 0,
-                    })}
-              </Button>
-            </div>
-          )}
-          {!isRemote && (
+        }
+      } finally {
+        setIsUpdatingAll(false);
+        endWrite();
+      }
+      if (successCount > 0) {
+        toast.success(t("skills.updateAllSuccess", { count: successCount }), {
+          closeButton: true,
+        });
+      }
+    };
+
+    const handleOpenRestoreFromBackup = async () => {
+      if (!beginWrite()) return;
+      setRestoreDialogOpen(true);
+      try {
+        await refetchSkillBackups({ throwOnError: true });
+      } catch (error) {
+        setRestoreDialogOpen(false);
+        toast.error(t("common.error"), { description: String(error) });
+      } finally {
+        endWrite();
+      }
+    };
+
+    const handleRestoreFromBackup = async (backupId: string) => {
+      if (!beginWrite(true)) return;
+      try {
+        const restored = await restoreBackupMutation.mutateAsync({
+          backupId,
+          currentApp,
+        });
+        setRestoreDialogOpen(false);
+        toast.success(
+          t("skills.restoreFromBackup.success", { name: restored.name }),
+          {
+            closeButton: true,
+          },
+        );
+      } catch (error) {
+        toast.error(t("skills.restoreFromBackup.failed"), {
+          description: String(error),
+        });
+      } finally {
+        endWrite();
+      }
+    };
+
+    const handleDeleteBackup = (backup: SkillBackupEntry) => {
+      if (checkUpdatesLockRef.current || writeLockRef.current) return;
+      setConfirmDialog({
+        isOpen: true,
+        title: t("skills.restoreFromBackup.deleteConfirmTitle"),
+        message: t("skills.restoreFromBackup.deleteConfirmMessage", {
+          name: backup.skill.name,
+        }),
+        confirmText: t("skills.restoreFromBackup.delete"),
+        variant: "destructive",
+        onConfirm: async () => {
+          if (!beginWrite(true)) return;
+          try {
+            let deleteSucceeded = false;
+            let deleteError: unknown;
+            try {
+              await deleteBackupMutation.mutateAsync(backup.backupId);
+              deleteSucceeded = true;
+            } catch (error) {
+              deleteError = error;
+            }
+
+            // The backups query is disabled by default, so invalidation alone
+            // does not fetch authoritative data. Explicitly refresh after both
+            // success and failure (remove_dir_all may have made partial progress).
+            let refreshedBackups: SkillBackupEntry[] | undefined;
+            try {
+              const result = await refetchSkillBackups({ throwOnError: true });
+              refreshedBackups = result.data;
+            } catch (error) {
+              // A refresh failure must not turn a completed deletion into a false
+              // "delete failed" report, or replace the original deletion error.
+              console.error(
+                "Failed to refresh Skill backups after deletion:",
+                error,
+              );
+            }
+
+            if (!deleteSucceeded) {
+              // remove_dir_all may finish removing the directory but still
+              // report an error. If the authoritative refresh confirms that the
+              // item is gone, close the now-stale confirmation dialog.
+              if (
+                refreshedBackups &&
+                !refreshedBackups.some(
+                  (entry) => entry.backupId === backup.backupId,
+                )
+              ) {
+                setConfirmDialog(null);
+              }
+              toast.error(t("skills.restoreFromBackup.deleteFailed"), {
+                description: String(deleteError),
+              });
+            } else {
+              setConfirmDialog(null);
+              toast.success(
+                t("skills.restoreFromBackup.deleteSuccess", {
+                  name: backup.skill.name,
+                }),
+                {
+                  closeButton: true,
+                },
+              );
+            }
+          } finally {
+            endWrite();
+          }
+        },
+      });
+    };
+
+    React.useImperativeHandle(ref, () => ({
+      openDiscovery: () => {
+        if (
+          !checkUpdatesLockRef.current &&
+          !writeLockRef.current &&
+          !interactionBlocked
+        ) {
+          onOpenDiscovery();
+        }
+      },
+      openImport: handleOpenImport,
+      openInstallFromZip: handleInstallFromZip,
+      openRestoreFromBackup: isRemote
+        ? () => undefined
+        : handleOpenRestoreFromBackup,
+      checkUpdates: isRemote ? () => undefined : handleCheckUpdates,
+    }));
+
+    return (
+      <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <AppCountBar
+              totalLabel={
+                isRemote
+                  ? t("remote.skillsInstalled", {
+                      defaultValue: "远端技能 {{count}}",
+                      count: skills?.length || 0,
+                    })
+                  : t("skills.installed", { count: skills?.length || 0 })
+              }
+              counts={enabledCounts}
+              appIds={SKILLS_APP_IDS}
+              totalCount={skills?.length ?? 0}
+              onToggleAll={handleToggleAll}
+              pendingApp={pendingApp}
+              disabled={interactionBlocked}
+            />
+          </div>
+          <div
+            className="mb-4 overflow-hidden transition-all duration-300 ease-out"
+            style={{
+              maxWidth: applicableSkillUpdates.length > 0 ? "200px" : "0px",
+              opacity: applicableSkillUpdates.length > 0 ? 1 : 0,
+            }}
+          >
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               size="sm"
-              className="h-7 text-xs gap-1"
-              onClick={handleCheckUpdates}
-              disabled={isCheckingUpdates || !skills || skills.length === 0}
+              className="h-7 text-xs gap-1 whitespace-nowrap disabled:opacity-100"
+              onClick={handleUpdateAll}
+              disabled={interactionBlocked}
             >
-              {isCheckingUpdates ? (
+              {isUpdatingAll ? (
                 <Loader2 size={12} className="animate-spin" />
               ) : (
                 <RefreshCw size={12} />
               )}
-              {isCheckingUpdates
-                ? t("skills.checkingUpdates")
-                : t("skills.checkUpdates")}
+              {isUpdatingAll
+                ? t("skills.updatingAll")
+                : t("skills.updateAll", {
+                    count: applicableSkillUpdates.length,
+                  })}
             </Button>
-          )}
+          </div>
         </div>
-      </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
-        {isLoading ? (
-          <div className="text-center py-12 text-muted-foreground">
-            {t("skills.loading")}
+        <ManagementListSearch
+          value={searchQuery}
+          onValueChange={setSearchQuery}
+          placeholder={t("skills.installedSearchPlaceholder")}
+          ariaLabel={t("skills.installedSearchAriaLabel")}
+          clearLabel={t("common.clear")}
+        />
+
+        <ScrollArea className="-mr-3 flex-1 min-h-0" type="auto">
+          <div className="pb-24 pr-3">
+            {isLoading ? (
+              <div className="text-center py-12 text-muted-foreground">
+                {t("skills.loading")}
+              </div>
+            ) : !skills || skills.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
+                  <Sparkles size={24} className="text-muted-foreground" />
+                </div>
+                <h3 className="text-lg font-medium text-foreground mb-2">
+                  {isRemote
+                    ? t("remote.skillsEmptyTitle", {
+                        defaultValue: "远端没有已安装的技能",
+                      })
+                    : t("skills.noInstalled")}
+                </h3>
+                <p className="text-muted-foreground text-sm">
+                  {isRemote
+                    ? t("remote.skillsEmptyHint", {
+                        defaultValue:
+                          "点击「从 ZIP 安装」部署技能到远端，或「导入已有」将远端已有技能目录纳入管理",
+                      })
+                    : t("skills.noInstalledDescription")}
+                </p>
+              </div>
+            ) : filteredSkills.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
+                <Search className="mb-4 h-10 w-10 opacity-40" />
+                <p className="text-sm">
+                  {t("skills.noInstalledSearchResults")}
+                </p>
+              </div>
+            ) : (
+              <TooltipProvider delayDuration={300}>
+                <div className="rounded-xl border border-border-default overflow-hidden">
+                  {filteredSkills.map((skill, index) => (
+                    <InstalledSkillListItem
+                      key={skill.id}
+                      skill={skill}
+                      hasUpdate={!!updatesMap[skill.id]}
+                      isUpdating={
+                        updateSkillMutation.isPending &&
+                        updateSkillMutation.variables === skill.id
+                      }
+                      isRemote={isRemote}
+                      actionsDisabled={interactionBlocked}
+                      onToggleApp={handleToggleApp}
+                      onUninstall={() => handleUninstall(skill)}
+                      onUpdate={() => handleUpdateSkill(skill)}
+                      isLast={index === filteredSkills.length - 1}
+                    />
+                  ))}
+                </div>
+              </TooltipProvider>
+            )}
           </div>
-        ) : !skills || skills.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-              <Sparkles size={24} className="text-muted-foreground" />
-            </div>
-            <h3 className="text-lg font-medium text-foreground mb-2">
-              {isRemote
-                ? t("remote.skillsEmptyTitle", {
-                    defaultValue: "远端没有已安装的技能",
-                  })
-                : t("skills.noInstalled")}
-            </h3>
-            <p className="text-muted-foreground text-sm">
-              {isRemote
-                ? t("remote.skillsEmptyHint", {
-                    defaultValue:
-                      "点击「从 ZIP 安装」部署技能到远端，或「导入已有」将远端已有技能目录纳入管理",
-                  })
-                : t("skills.noInstalledDescription")}
-            </p>
-          </div>
-        ) : (
-          <TooltipProvider delayDuration={300}>
-            <div className="rounded-xl border border-border-default overflow-hidden">
-              {skills.map((skill, index) => (
-                <InstalledSkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  hasUpdate={!!updatesMap[skill.id]}
-                  isUpdating={
-                    updateSkillMutation.isPending &&
-                    updateSkillMutation.variables === skill.id
-                  }
-                  isRemote={isRemote}
-                  onToggleApp={handleToggleApp}
-                  onUninstall={() => handleUninstall(skill)}
-                  onUpdate={() => handleUpdateSkill(skill)}
-                  isLast={index === skills.length - 1}
-                />
-              ))}
-            </div>
-          </TooltipProvider>
+        </ScrollArea>
+
+        {confirmDialog && (
+          <ConfirmDialog
+            isOpen={confirmDialog.isOpen}
+            title={confirmDialog.title}
+            message={confirmDialog.message}
+            confirmText={confirmDialog.confirmText}
+            variant={confirmDialog.variant}
+            zIndex="top"
+            pending={writePending}
+            onConfirm={confirmDialog.onConfirm}
+            onCancel={() => setConfirmDialog(null)}
+          />
+        )}
+
+        {importDialogOpen &&
+          (unmanagedSkillsOverride.current || unmanagedSkills) && (
+            <ImportSkillsDialog
+              skills={unmanagedSkillsOverride.current ?? unmanagedSkills!}
+              isImporting={importMutation.isPending}
+              onImport={handleImport}
+              onClose={() => setImportDialogOpen(false)}
+            />
+          )}
+
+        {!isRemote && (
+          <RestoreSkillsDialog
+            backups={skillBackups}
+            isDeleting={deleteBackupMutation.isPending}
+            isLoading={isFetchingSkillBackups}
+            onDelete={handleDeleteBackup}
+            isRestoring={restoreBackupMutation.isPending}
+            onRestore={handleRestoreFromBackup}
+            onClose={() => setRestoreDialogOpen(false)}
+            open={restoreDialogOpen}
+          />
         )}
       </div>
-
-      {confirmDialog && (
-        <ConfirmDialog
-          isOpen={confirmDialog.isOpen}
-          title={confirmDialog.title}
-          message={confirmDialog.message}
-          confirmText={confirmDialog.confirmText}
-          variant={confirmDialog.variant}
-          zIndex="top"
-          onConfirm={confirmDialog.onConfirm}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      )}
-
-      {importDialogOpen && (unmanagedSkillsOverride.current || unmanagedSkills) && (
-        <ImportSkillsDialog
-          skills={unmanagedSkillsOverride.current ?? unmanagedSkills!}
-          isImporting={importMutation.isPending}
-          onImport={handleImport}
-          onClose={() => setImportDialogOpen(false)}
-        />
-      )}
-
-      {!isRemote && (
-        <RestoreSkillsDialog
-          backups={skillBackups}
-          isDeleting={deleteBackupMutation.isPending}
-          isLoading={isFetchingSkillBackups}
-          onDelete={handleDeleteBackup}
-          isRestoring={restoreBackupMutation.isPending}
-          onRestore={handleRestoreFromBackup}
-          onClose={() => setRestoreDialogOpen(false)}
-          open={restoreDialogOpen}
-        />
-      )}
-    </div>
-  );
-});
+    );
+  },
+);
 
 UnifiedSkillsPanel.displayName = "UnifiedSkillsPanel";
 
@@ -646,6 +934,7 @@ interface InstalledSkillListItemProps {
   hasUpdate?: boolean;
   isUpdating?: boolean;
   isRemote?: boolean;
+  actionsDisabled?: boolean;
   onToggleApp: (id: string, app: AppId, enabled: boolean) => void;
   onUninstall: () => void;
   onUpdate?: () => void;
@@ -657,6 +946,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
   hasUpdate,
   isUpdating,
   isRemote,
+  actionsDisabled,
   onToggleApp,
   onUninstall,
   onUpdate,
@@ -722,6 +1012,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
         apps={skill.apps}
         onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
         appIds={SKILLS_APP_IDS}
+        disabled={actionsDisabled}
       />
 
       <div
@@ -733,9 +1024,12 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-7 w-7 hover:text-blue-500 hover:bg-blue-100 dark:hover:text-blue-400 dark:hover:bg-blue-500/10"
+            className={cn(
+              "h-7 w-7 hover:text-blue-500 hover:bg-blue-100 dark:hover:text-blue-400 dark:hover:bg-blue-500/10",
+              actionsDisabled && !isUpdating && "disabled:opacity-100",
+            )}
             onClick={onUpdate}
-            disabled={isUpdating}
+            disabled={actionsDisabled || isUpdating}
             title={t("skills.update")}
           >
             {isUpdating ? (
@@ -749,8 +1043,9 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
           type="button"
           variant="ghost"
           size="icon"
-          className="h-7 w-7 hover:text-red-500 hover:bg-red-100 dark:hover:text-red-400 dark:hover:bg-red-500/10"
+          className="h-7 w-7 hover:text-red-500 hover:bg-red-100 disabled:opacity-100 dark:hover:text-red-400 dark:hover:bg-red-500/10"
           onClick={onUninstall}
+          disabled={actionsDisabled}
           title={t("skills.uninstall")}
         >
           <Trash2 size={14} />
@@ -795,9 +1090,13 @@ const RestoreSkillsDialog: React.FC<RestoreSkillsDialogProps> = ({
   open,
 }) => {
   const { t } = useTranslation();
+  const actionPending = isRestoring || isDeleting;
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => !nextOpen && !actionPending && onClose()}
+    >
       <DialogContent
         className="max-w-2xl max-h-[85vh] flex flex-col"
         zIndex="alert"
@@ -882,7 +1181,12 @@ const RestoreSkillsDialog: React.FC<RestoreSkillsDialogProps> = ({
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            disabled={actionPending}
+          >
             {t("common.close")}
           </Button>
         </DialogFooter>

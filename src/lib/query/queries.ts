@@ -314,12 +314,7 @@ export const useSessionsQuery = (
 ) => {
   return useQuery<SessionMeta[]>({
     queryKey: remoteTargetId
-      ? [
-          "sessions",
-          "remote",
-          remoteTargetId,
-          remoteContainerId ?? "__host__",
-        ]
+      ? ["sessions", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
       : ["sessions"],
     queryFn: async () =>
       remoteTargetId

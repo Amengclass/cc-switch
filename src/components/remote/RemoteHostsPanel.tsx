@@ -204,10 +204,9 @@ export function RemoteHostsPanel() {
       load();
     } catch (error) {
       console.error("Failed to save remote host:", error);
-      toast.error(
-        t("remote.saveError", { defaultValue: "保存远程主机失败" }),
-        { description: String(error) },
-      );
+      toast.error(t("remote.saveError", { defaultValue: "保存远程主机失败" }), {
+        description: String(error),
+      });
     } finally {
       setSaving(false);
     }
@@ -249,10 +248,9 @@ export function RemoteHostsPanel() {
       );
     } catch (error) {
       console.error("Failed to test connection:", error);
-      toast.error(
-        t("remote.connectionFailed", { defaultValue: "连接失败" }),
-        { description: String(error) },
-      );
+      toast.error(t("remote.connectionFailed", { defaultValue: "连接失败" }), {
+        description: String(error),
+      });
     } finally {
       setTestingId(null);
     }
@@ -307,10 +305,9 @@ export function RemoteHostsPanel() {
       );
     } catch (error) {
       console.error("Failed to test new connection:", error);
-      toast.error(
-        t("remote.connectionFailed", { defaultValue: "连接失败" }),
-        { description: String(error) },
-      );
+      toast.error(t("remote.connectionFailed", { defaultValue: "连接失败" }), {
+        description: String(error),
+      });
     } finally {
       setTestFormLoading(false);
     }
@@ -339,9 +336,7 @@ export function RemoteHostsPanel() {
     if (!host) return;
     try {
       await deleteRemoteHost(host.id);
-      toast.success(
-        t("remote.deleted", { defaultValue: "远程主机已删除" }),
-      );
+      toast.success(t("remote.deleted", { defaultValue: "远程主机已删除" }));
       load();
     } catch (error) {
       console.error("Failed to delete remote host:", error);
@@ -398,10 +393,11 @@ export function RemoteHostsPanel() {
   };
 
   const description = useMemo(
-    () => t("remote.description", {
-      defaultValue:
-        "通过 SSH 直连 Linux 服务器，直接读写远端 ~/.claude/settings.json，实现「一处配置、多机生效」。",
-    }),
+    () =>
+      t("remote.description", {
+        defaultValue:
+          "通过 SSH 直连 Linux 服务器，直接读写远端 ~/.claude/settings.json，实现「一处配置、多机生效」。",
+      }),
     [t],
   );
 
@@ -423,7 +419,8 @@ export function RemoteHostsPanel() {
           </p>
           <p className="mt-1 text-xs text-muted-foreground/70">
             {t("remote.emptyHint", {
-              defaultValue: "点击「添加远程主机」，连接你的 GPU 服务器 / 云主机",
+              defaultValue:
+                "点击「添加远程主机」，连接你的 GPU 服务器 / 云主机",
             })}
           </p>
         </div>
@@ -552,7 +549,10 @@ export function RemoteHostsPanel() {
                 {t("remote.basicInfo", { defaultValue: "基础信息" })}
               </h4>
               <div className="space-y-2">
-                <Label htmlFor="host-name" className="flex items-center gap-1.5 text-foreground/80">
+                <Label
+                  htmlFor="host-name"
+                  className="flex items-center gap-1.5 text-foreground/80"
+                >
                   <Tag className="h-3.5 w-3.5 text-foreground/70" />
                   {t("remote.nameLabel", { defaultValue: "名称" })}
                   <span className="text-xs font-normal text-muted-foreground/60">
@@ -587,12 +587,18 @@ export function RemoteHostsPanel() {
               <div className="space-y-2">
                 {/* 标签行 */}
                 <div className="flex items-center gap-3">
-                  <Label htmlFor="host-address" className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-foreground/80">
+                  <Label
+                    htmlFor="host-address"
+                    className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-foreground/80"
+                  >
                     <Globe className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
                     {t("remote.hostLabel", { defaultValue: "主机地址" })}
                     <span className="text-destructive">*</span>
                   </Label>
-                  <Label htmlFor="host-port" className="w-24 shrink-0 text-center text-foreground/80">
+                  <Label
+                    htmlFor="host-port"
+                    className="w-24 shrink-0 text-center text-foreground/80"
+                  >
                     {t("remote.portLabel", { defaultValue: "端口" })}
                   </Label>
                 </div>
@@ -661,7 +667,10 @@ export function RemoteHostsPanel() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="host-user" className="flex items-center gap-1.5 text-foreground/80">
+                <Label
+                  htmlFor="host-user"
+                  className="flex items-center gap-1.5 text-foreground/80"
+                >
                   <User className="h-3.5 w-3.5 text-foreground/70" />
                   {t("remote.usernameLabel", { defaultValue: "用户名" })}
                   <span className="text-destructive">*</span>
@@ -669,7 +678,9 @@ export function RemoteHostsPanel() {
                 <Input
                   id="host-user"
                   value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, username: e.target.value })
+                  }
                   placeholder={t("remote.usernamePlaceholder", {
                     defaultValue: "例如 root",
                   })}
@@ -678,7 +689,8 @@ export function RemoteHostsPanel() {
                   <p className="flex items-center gap-1 text-xs text-muted-foreground">
                     <Info className="h-3 w-3 shrink-0 text-foreground/50" />
                     {t("remote.rootWarning", {
-                      defaultValue: "不建议使用 root，推荐具有 sudo 权限的普通用户",
+                      defaultValue:
+                        "不建议使用 root，推荐具有 sudo 权限的普通用户",
                     })}
                   </p>
                 ) : (
@@ -700,7 +712,10 @@ export function RemoteHostsPanel() {
                 {t("remote.authInfo", { defaultValue: "认证信息" })}
               </h4>
               <div className="space-y-2">
-                <Label htmlFor="host-pass" className="flex items-center gap-1.5 text-foreground/80">
+                <Label
+                  htmlFor="host-pass"
+                  className="flex items-center gap-1.5 text-foreground/80"
+                >
                   <Key className="h-3.5 w-3.5 text-foreground/70" />
                   {t("remote.passwordLabel", { defaultValue: "密码" })}
                   {!editing && <span className="text-destructive">*</span>}
@@ -749,7 +764,9 @@ export function RemoteHostsPanel() {
               {/* 保存密码 - 轻量行内样式 */}
               <div className="flex items-center justify-between py-2">
                 <div className="space-y-0.5">
-                  <Label className={`text-sm font-normal ${editing || form.password ? "text-foreground/80" : "text-muted-foreground/60"}`}>
+                  <Label
+                    className={`text-sm font-normal ${editing || form.password ? "text-foreground/80" : "text-muted-foreground/60"}`}
+                  >
                     {t("remote.savePassword", {
                       defaultValue: "加密保存密码",
                     })}

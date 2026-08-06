@@ -23,6 +23,7 @@ import {
   toggleRemoteSkillApp,
 } from "@/lib/api/remote";
 import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
+import { runSequentialBulkAction } from "@/lib/utils/sequentialBulkAction";
 
 /** 把远端技能目录项适配成 InstalledSkill。 */
 function remoteToInstalled(entry: {
@@ -31,7 +32,15 @@ function remoteToInstalled(entry: {
   directory: string;
   path?: string;
   description?: string;
-  apps?: { claude?: boolean; codex?: boolean; gemini?: boolean; grokbuild?: boolean; opencode?: boolean; openclaw?: boolean; hermes?: boolean };
+  apps?: {
+    claude?: boolean;
+    codex?: boolean;
+    gemini?: boolean;
+    grokbuild?: boolean;
+    opencode?: boolean;
+    openclaw?: boolean;
+    hermes?: boolean;
+  };
   installedAt?: number;
   updatedAt?: number;
   repoOwner?: string;
@@ -85,7 +94,10 @@ export function useInstalledSkills(
       : ["skills", "installed"],
     queryFn: async () => {
       if (remoteTargetId) {
-        const entries = await listRemoteSkills(remoteTargetId, remoteContainerId);
+        const entries = await listRemoteSkills(
+          remoteTargetId,
+          remoteContainerId,
+        );
         return entries.map(remoteToInstalled);
       }
       return skillsApi.getInstalled();
@@ -107,9 +119,16 @@ export function useDeleteSkillBackup() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (backupId: string) => skillsApi.deleteBackup(backupId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
+    onSuccess: (_result, backupId) => {
+      queryClient.setQueryData<SkillBackupEntry[]>(
+        ["skills", "backups"],
+        (oldData) => oldData?.filter((backup) => backup.backupId !== backupId),
+      );
     },
+    // remove_dir_all can partially change the backup directory before
+    // returning an error, so reconcile the authoritative list either way.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
   });
 }
 
@@ -129,7 +148,7 @@ export function useDiscoverableSkills() {
 
 /**
  * 安装 Skill
- * 成功后直接更新缓存，不触发重新加载/刷新
+ * 成功后先合并缓存，并在结束后刷新权威列表
  */
 export function useInstallSkill() {
   const queryClient = useQueryClient();
@@ -141,36 +160,19 @@ export function useInstallSkill() {
       skill: DiscoverableSkill;
       currentApp: AppId;
     }) => skillsApi.installUnified(skill, currentApp),
-    onSuccess: (installedSkill, _vars, _ctx) => {
-      const { skill } = _vars;
-      // 直接更新 installed 缓存
+    onSuccess: (installedSkill) => {
       queryClient.setQueryData<InstalledSkill[]>(
         ["skills", "installed"],
-        (oldData) => {
-          if (!oldData) return [installedSkill];
-          return [...oldData, installedSkill];
-        },
-      );
-
-      // 更新 discoverable 缓存中对应技能的 installed 状态
-      const installName =
-        skill.directory.split(/[/\\]/).pop()?.toLowerCase() ||
-        skill.directory.toLowerCase();
-      const skillKey = `${installName}:${skill.repoOwner.toLowerCase()}:${skill.repoName.toLowerCase()}`;
-
-      queryClient.setQueryData<DiscoverableSkill[]>(
-        ["skills", "discoverable"],
-        (oldData) => {
-          if (!oldData) return oldData;
-          return oldData.map((s) => {
-            if (s.key === skillKey) {
-              return { ...s, installed: true };
-            }
-            return s;
-          });
-        },
+        (oldData) => mergeImportedSkills(oldData, [installedSkill]),
       );
     },
+    // The backend can persist the installation before live-config sync fails.
+    // Always refresh the authoritative list, including rejected mutations.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] }),
+      ]),
   });
 }
 
@@ -216,7 +218,7 @@ export function useInstallRemoteSkillFromDiscoverable(
 
 /**
  * 卸载 Skill
- * 成功后直接更新缓存，不触发重新加载/刷新
+ * 成功后直接移除已安装缓存，并在结束后收敛备份与未管理列表
  */
 export function useUninstallSkill(
   remoteTargetId?: string,
@@ -233,37 +235,36 @@ export function useUninstallSkill(
       ]
     : ["skills", "installed"];
   return useMutation({
-    mutationFn: async ({ id, skillKey }: { id: string; skillKey: string }) => {
+    mutationFn: async (id: string) => {
       if (remoteTargetId) {
         await deleteRemoteSkill(remoteTargetId, id, remoteContainerId);
-        return { backupPath: undefined, skillKey };
+        return { backupPath: undefined };
       }
       const result = await skillsApi.uninstallUnified(id);
-      return { ...result, skillKey };
+      return result;
     },
-    onSuccess: ({ skillKey }, _vars) => {
+    onSuccess: (_result, id) => {
       // 直接更新 installed 缓存，移除该 skill
       queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) => {
         if (!oldData) return oldData;
-        return oldData.filter((s) => s.id !== _vars.id);
+        return oldData.filter((s) => s.id !== id);
       });
 
-      // 远端无 discoverable 概念，仅在本地模式更新 discoverable 缓存
-      if (!remoteTargetId) {
-        queryClient.setQueryData<DiscoverableSkill[]>(
-          ["skills", "discoverable"],
-          (oldData) => {
-            if (!oldData) return oldData;
-            return oldData.map((s) => {
-              if (s.key === skillKey) {
-                return { ...s, installed: false };
-              }
-              return s;
-            });
-          },
-        );
-      }
+      // A completed update check may still contain this Skill. Remove it so
+      // Update All cannot target an ID that was just uninstalled.
+      queryClient.setQueryData<SkillUpdateInfo[]>(
+        ["skills", "updates"],
+        (oldData) => oldData?.filter((update) => update.id !== id),
+      );
     },
+    // Uninstall creates a backup before removing SSOT/DB state. It may reject
+    // after that backup exists, and best-effort app cleanup can also leave an
+    // unmanaged copy after a successful uninstall.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] }),
+      ]),
   });
 }
 
@@ -277,10 +278,11 @@ export function useRestoreSkillBackup() {
       backupId: string;
       currentApp: AppId;
     }) => skillsApi.restoreBackup(backupId, currentApp),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] });
-    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+      ]),
   });
 }
 
@@ -299,9 +301,29 @@ export function useToggleSkillApp() {
       app: AppId;
       enabled: boolean;
     }) => skillsApi.toggleApp(id, app, enabled),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] });
-    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+  });
+}
+
+/** Toggle multiple Skills serially because each operation writes app files. */
+export function useBulkToggleSkillApp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      ids,
+      app,
+      enabled,
+    }: {
+      ids: string[];
+      app: AppId;
+      enabled: boolean;
+    }) =>
+      runSequentialBulkAction(ids, (id) =>
+        skillsApi.toggleApp(id, app, enabled),
+      ),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
   });
 }
 
@@ -367,6 +389,7 @@ export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
  * 从应用目录导入 Skills。
  * 远端模式：逐个上传选中的本地技能目录到远端 ~/.claude/skills/。
  * 本机模式：调用本机 importFromApps API。
+ * 成功后先合并缓存，并在结束后刷新所有可能受影响的列表。
  */
 export function useImportSkillsFromApps(
   remoteTargetId?: string,
@@ -412,9 +435,8 @@ export function useImportSkillsFromApps(
       return skillsApi.importFromApps(imports);
     },
     onSuccess: (importedSkills) => {
-      queryClient.setQueryData<InstalledSkill[]>(
-        installedKey,
-        (oldData) => mergeImportedSkills(oldData, importedSkills),
+      queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) =>
+        mergeImportedSkills(oldData, importedSkills),
       );
       // 远端导入后重新拉取，获得 SKILL.md 解析出的 displayName / description
       if (remoteTargetId) {
@@ -423,6 +445,17 @@ export function useImportSkillsFromApps(
       // 刷新 unmanaged 列表（已被导入的应该移除）
       queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] });
     },
+    // Import may persist Skills or auto-discovered repositories before a
+    // later item fails, so refresh every affected authoritative collection.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "repos"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["skills", "discoverable"],
+        }),
+      ]),
   });
 }
 
@@ -467,7 +500,7 @@ export function useRemoveSkillRepo() {
 
 /**
  * 从 ZIP 文件安装 Skills
- * 成功后直接更新缓存，不触发重新加载/刷新
+ * 成功后先合并缓存，并在结束后刷新权威列表
  */
 export function useInstallSkillsFromZip(
   remoteTargetId?: string,
@@ -495,14 +528,26 @@ export function useInstallSkillsFromZip(
     },
     onSuccess: (installedSkills) => {
       const key = remoteTargetId
-        ? ["skills", "installed", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
+        ? [
+            "skills",
+            "installed",
+            "remote",
+            remoteTargetId,
+            remoteContainerId ?? "__host__",
+          ]
         : ["skills", "installed"];
-      // 即时更新 UI（本地 + 远端统一策略，数据已完整含 description）
-      queryClient.setQueryData<InstalledSkill[]>(key, (oldData) => {
-        if (!oldData) return installedSkills;
-        return [...oldData, ...installedSkills];
-      });
+      // 即时更新 UI（本地 + 远端统一策略，数据已完整含 description，按 id 去重）
+      queryClient.setQueryData<InstalledSkill[]>(key, (oldData) =>
+        mergeImportedSkills(oldData, installedSkills),
+      );
     },
+    // A ZIP can install multiple Skills before a later item or config sync
+    // fails, so refresh even when the mutation rejects.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+        queryClient.invalidateQueries({ queryKey: ["skills", "unmanaged"] }),
+      ]),
   });
 }
 
@@ -545,6 +590,10 @@ export function useUpdateSkill() {
         },
       );
     },
+    // Updating creates an uninstall-style backup before replacing SSOT files;
+    // refresh even when replacement or persistence fails later.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
   });
 }
 

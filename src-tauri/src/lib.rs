@@ -24,7 +24,7 @@ mod lightweight;
 mod linux_fix;
 mod mcp;
 mod model_capabilities;
-mod openclaw_config;
+pub mod openclaw_config;
 mod opencode_config;
 mod panic_hook;
 mod prompt;
@@ -1437,6 +1437,7 @@ pub fn run() {
             commands::apply_profile,
             // model list fetch (OpenAI-compatible /v1/models)
             commands::fetch_models_for_config,
+            commands::get_opencode_models,
             // ours: endpoint speed test + custom endpoint management
             commands::test_api_endpoints,
             commands::get_custom_endpoints,

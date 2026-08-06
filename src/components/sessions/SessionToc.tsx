@@ -85,7 +85,9 @@ export function SessionTocDialog({
     () =>
       searchQuery.trim()
         ? items.filter((item) =>
-            item.preview.toLowerCase().includes(searchQuery.toLowerCase().trim()),
+            item.preview
+              .toLowerCase()
+              .includes(searchQuery.toLowerCase().trim()),
           )
         : items,
     [items, searchQuery],

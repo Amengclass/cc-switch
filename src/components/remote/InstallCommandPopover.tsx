@@ -21,9 +21,7 @@ interface InstallCommandPopoverProps {
  * 用 Popover 而非 Tooltip —— Tooltip 内容 pointer-events-none 无法选中/复制，
  * Popover 是可交互面板，命令既可手选复制，也有一键复制按钮。
  */
-export function InstallCommandPopover({
-  command,
-}: InstallCommandPopoverProps) {
+export function InstallCommandPopover({ command }: InstallCommandPopoverProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [open, setOpen] = useState(false);

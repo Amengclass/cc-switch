@@ -1202,7 +1202,9 @@ export function SessionManagerPage({
                               className="size-7"
                               onClick={() => void refetch()}
                             >
-                              <RefreshCw className={`size-3.5 ${isFetching ? "animate-spin" : ""}`} />
+                              <RefreshCw
+                                className={`size-3.5 ${isFetching ? "animate-spin" : ""}`}
+                              />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>{t("common.refresh")}</TooltipContent>

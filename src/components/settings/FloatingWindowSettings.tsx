@@ -59,8 +59,12 @@ export function FloatingWindowSettings({
                   }
                   className="h-8 rounded-md border border-border/40 bg-background px-2 text-sm text-foreground outline-none"
                 >
-                  <option value={0}>{t("settings.floatingSnapSpeedOff")}</option>
-                  <option value={80}>{t("settings.floatingSnapSpeedFast")}</option>
+                  <option value={0}>
+                    {t("settings.floatingSnapSpeedOff")}
+                  </option>
+                  <option value={80}>
+                    {t("settings.floatingSnapSpeedFast")}
+                  </option>
                   <option value={160}>
                     {t("settings.floatingSnapSpeedMedium")}
                   </option>

@@ -23,7 +23,13 @@ function formatRelativeTime(ts: number | null, now: number): string {
  * 单个用量数据 → 主窗口 UsageFooter 同款结构：标签灰、数值状态色+等宽数字、单位灰。
  * showPlan 用于多套餐的补行（主窗口完整模式有套餐名，inline 主行没有）。
  */
-function UsageDetail({ d, showPlan = false }: { d: FloatingUsageData; showPlan?: boolean }) {
+function UsageDetail({
+  d,
+  showPlan = false,
+}: {
+  d: FloatingUsageData;
+  showPlan?: boolean;
+}) {
   const hasRemaining = d.remaining != null && isFinite(d.remaining);
   const hasUsed = d.used != null && isFinite(d.used);
   const nodes: ReactNode[] = [];
@@ -78,7 +84,9 @@ export function FloatingPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const data = (await invoke("get_floating_window_data")) as FloatingEntry[];
+      const data = (await invoke(
+        "get_floating_window_data",
+      )) as FloatingEntry[];
       setEntries(data);
     } catch (e) {
       console.error("[Floating] 面板加载失败", e);
@@ -90,9 +98,13 @@ export function FloatingPanel() {
   useEffect(() => {
     void refresh();
     const unlisteners: Array<() => void> = [];
-    void listen("floating-data-refresh", refresh).then((u) => unlisteners.push(u));
+    void listen("floating-data-refresh", refresh).then((u) =>
+      unlisteners.push(u),
+    );
     void listen("provider-switched", refresh).then((u) => unlisteners.push(u));
-    void listen("usage-cache-updated", refresh).then((u) => unlisteners.push(u));
+    void listen("usage-cache-updated", refresh).then((u) =>
+      unlisteners.push(u),
+    );
     // 高频轮询作为事件兜底：隐藏窗口若收不到事件，3s 内也能同步到
     // 主窗口最新的供应商/余量（get_floating_window_data 只读本地缓存）。
     const timer = setInterval(refresh, 3_000);
@@ -122,7 +134,8 @@ export function FloatingPanel() {
       <div className="panel-list">
         {entries.map((e) => {
           const hasUsage = e.usage && e.usage.length > 0;
-          const extraItems = hasUsage && e.usage!.length > 1 ? e.usage!.slice(1) : [];
+          const extraItems =
+            hasUsage && e.usage!.length > 1 ? e.usage!.slice(1) : [];
           return (
             <div key={e.appType}>
               <div className="row">
@@ -130,7 +143,9 @@ export function FloatingPanel() {
                   <span className="row-app">{e.appLabel}</span>
                   <span
                     className={
-                      e.hasProvider ? "row-provider row-provider-set" : "row-provider"
+                      e.hasProvider
+                        ? "row-provider row-provider-set"
+                        : "row-provider"
                     }
                   >
                     {e.providerName}
@@ -174,7 +189,9 @@ export function FloatingPanel() {
       </div>
 
       <div className="panel-footer">
-        <button onClick={() => void invoke("open_main_window")}>打开主界面</button>
+        <button onClick={() => void invoke("open_main_window")}>
+          打开主界面
+        </button>
         <button onClick={() => void invoke("disable_floating_window")}>
           关闭悬浮窗
         </button>

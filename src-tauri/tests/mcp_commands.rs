@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
 
 use serde_json::json;
 
 use cc_switch_lib::{
     get_claude_mcp_path, get_claude_mcp_status, get_claude_settings_path, get_grok_config_path,
-    import_default_config_test_hook, read_claude_mcp_config, update_settings, AppError,
-    AppSettings, AppType, McpApps, McpServer, McpService, MultiAppConfig, ProviderService,
+    import_default_config_test_hook, openclaw_config, read_claude_mcp_config, update_settings,
+    AppError, AppSettings, AppState, AppType, Database, McpApps, McpServer, McpService,
+    MultiAppConfig, ProviderService,
 };
 
 #[path = "support.rs"]
@@ -1298,7 +1300,9 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
 fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();
-    let _home = ensure_test_home();
+    let home = ensure_test_home();
+    // 模拟 OpenClaw 已安装：存在 ~/.openclaw 目录（should_sync_openclaw_mcp gate）
+    fs::create_dir_all(home.join(".openclaw")).expect("create ~/.openclaw dir");
 
     let state = create_test_state().expect("create test state");
 
@@ -1344,16 +1348,9 @@ fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
     };
     McpService::upsert_server(&state, http_server).expect("upsert http server");
 
-    // 验证 openclaw.json 写入：顶层 mcp.servers，格式为 OpenClaw 风格
-    let openclaw_path = home_dir_join(".openclaw/openclaw.json");
-    let text = fs::read_to_string(&openclaw_path).expect("read openclaw.json");
-    let value: serde_json::Value = serde_json::from_str(&text).expect("parse openclaw.json");
-
-    let servers = value
-        .get("mcp")
-        .and_then(|m| m.get("servers"))
-        .and_then(|s| s.as_object())
-        .expect("openclaw.json mcp.servers object");
+    // 验证 openclaw.json 写入：顶层 mcp.servers（openclaw.json 为 JSON5 格式，
+    // 用 openclaw_config::get_mcp_servers 读取，避免手写 JSON5 解析）
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
 
     assert_eq!(servers.len(), 2, "both servers written to openclaw.json");
 
@@ -1385,12 +1382,13 @@ fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
     );
     assert!(http_entry.get("type").is_none());
 
-    // 导入回读：OpenClaw 的条目转为统一格式，且 apps.openclaw 标记启用
-    let mut config = MultiAppConfig::default();
-    config.ensure_app(&AppType::OpenClaw);
-    let count = McpService::import_from_openclaw(&state).expect("import from openclaw");
+    // 导入回读：用独立内存 DB 验证 openclaw.json 的条目能作为新服务器导入，
+    // 且 apps.openclaw 标记启用（Database::init 是共享文件库，upsert 已写入，
+    // 用 memory 库避免把已存在服务器判为"非新增"导致计数为 0）
+    let import_state = AppState::new(Arc::new(Database::memory().expect("create memory db")));
+    let count = McpService::import_from_openclaw(&import_state).expect("import from openclaw");
     assert_eq!(count, 2, "both servers imported");
-    let servers = state
+    let servers = import_state
         .db
         .get_all_mcp_servers()
         .expect("get all mcp servers");
@@ -1422,7 +1420,9 @@ fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
 fn toggle_openclaw_server_enables_and_removes_live_entry() {
     let _guard = test_mutex().lock().expect("acquire test mutex");
     reset_test_fs();
-    let _home = ensure_test_home();
+    let home = ensure_test_home();
+    // 模拟 OpenClaw 已安装：存在 ~/.openclaw 目录（should_sync_openclaw_mcp gate）
+    fs::create_dir_all(home.join(".openclaw")).expect("create ~/.openclaw dir");
 
     let state = create_test_state().expect("create test state");
 
@@ -1445,37 +1445,18 @@ fn toggle_openclaw_server_enables_and_removes_live_entry() {
     // 启用 OpenClaw
     McpService::toggle_app(&state, "openclaw-toggle", AppType::OpenClaw, true)
         .expect("enable openclaw");
-    let openclaw_path = home_dir_join(".openclaw/openclaw.json");
-    let text = fs::read_to_string(&openclaw_path).expect("read openclaw.json");
-    let value: serde_json::Value = serde_json::from_str(&text).expect("parse openclaw.json");
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
     assert!(
-        value
-            .get("mcp")
-            .and_then(|m| m.get("servers"))
-            .and_then(|s| s.as_object())
-            .map(|s| s.contains_key("openclaw-toggle"))
-            .unwrap_or(false),
+        servers.contains_key("openclaw-toggle"),
         "server present in mcp.servers after toggle on"
     );
 
     // 禁用 OpenClaw → 从 live 移除
     McpService::toggle_app(&state, "openclaw-toggle", AppType::OpenClaw, false)
         .expect("disable openclaw");
-    let text = fs::read_to_string(&openclaw_path).expect("read openclaw.json");
-    let value: serde_json::Value = serde_json::from_str(&text).expect("parse openclaw.json");
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
     assert!(
-        !value
-            .get("mcp")
-            .and_then(|m| m.get("servers"))
-            .and_then(|s| s.as_object())
-            .map(|s| s.contains_key("openclaw-toggle"))
-            .unwrap_or(true),
+        !servers.contains_key("openclaw-toggle"),
         "server removed from mcp.servers after toggle off"
     );
-}
-
-/// 拼接测试 HOME 下的相对路径。
-fn home_dir_join(rel: &str) -> std::path::PathBuf {
-    let home = std::env::var("CC_SWITCH_TEST_HOME").expect("test home set");
-    std::path::PathBuf::from(home).join(rel)
 }
