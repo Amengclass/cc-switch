@@ -125,6 +125,8 @@ export function FloatingPanel() {
       onMouseLeave={() =>
         void invoke("floating_set_hover", { source: "panel", active: false })
       }
+      // 面板是纯展示，右键不弹任何东西（含 WebView 默认菜单）
+      onContextMenu={(e) => e.preventDefault()}
     >
       <div className="panel-header">
         <span className="panel-title">CC Switch</span>

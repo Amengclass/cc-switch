@@ -1,7 +1,7 @@
 //! 悬浮窗（加速球）模块
 //!
 //! 提供桌面常驻的透明小圆球 + 悬停展开的用量面板：
-//! - 小球窗口 `floating-ball`（64×64），置顶、无边框、透明、跳过任务栏，可原生拖动
+//! - 小球窗口 `floating-ball`（240×56 横向胶囊条，本身即信息条：app/模型/余量），置顶、无边框、透明、跳过任务栏，可原生拖动
 //! - 面板窗口 `floating-panel`（300×320），悬停小球时在旁展开，列出各 app 当前
 //!   供应商 / 模型 / 用量
 //!
@@ -19,7 +19,9 @@ pub const BALL_LABEL: &str = "floating-ball";
 pub const PANEL_LABEL: &str = "floating-panel";
 /// 右键菜单窗口（与面板同款透明样式，自定义 HTML 菜单）
 pub const MENU_LABEL: &str = "floating-menu";
-const BALL_SIZE: f64 = 64.0;
+/// 悬浮球窗口尺寸（方案C：横向胶囊条 180×40，无阴影所以窗口与胶囊同尺寸）
+const BALL_WIDTH: f64 = 180.0;
+const BALL_HEIGHT: f64 = 40.0;
 const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;
 /// 右键菜单窗口尺寸（瘦高样式，与 .floating-menu CSS 保持一致：
@@ -233,7 +235,8 @@ fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
     let pos = ball.outer_position().ok()?;
     let mut px = pos.x as f64;
     let mut py = pos.y as f64;
-    let ball_px = BALL_SIZE * scale;
+    let ball_w = BALL_WIDTH * scale;
+    let ball_h = BALL_HEIGHT * scale;
     let thresh_px = SNAP_THRESHOLD * scale;
 
     if let Some(monitor) = ball.current_monitor().ok().flatten() {
@@ -246,16 +249,16 @@ fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
 
         if px - left <= thresh_px {
             px = left;
-        } else if right - (px + ball_px) <= thresh_px {
-            px = right - ball_px;
+        } else if right - (px + ball_w) <= thresh_px {
+            px = right - ball_w;
         }
         if py - top <= thresh_px {
             py = top;
-        } else if bottom - (py + ball_px) <= thresh_px {
-            py = bottom - ball_px;
+        } else if bottom - (py + ball_h) <= thresh_px {
+            py = bottom - ball_h;
         }
-        px = px.max(left).min(right - ball_px);
-        py = py.max(top).min(bottom - ball_px);
+        px = px.max(left).min(right - ball_w);
+        py = py.max(top).min(bottom - ball_h);
         log::info!(
             "[Floating] 吸附计算: pos=({px:.0},{py:.0}) monitor=({left:.0},{top:.0},{right:.0},{bottom:.0}) scale={scale}"
         );
@@ -396,7 +399,7 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
 
     // 创建小球窗口（含坐标初始化）
     if !ball_exists {
-        let Ok(ball) = build_floating_window(app, BALL_LABEL, BALL_SIZE, BALL_SIZE) else {
+        let Ok(ball) = build_floating_window(app, BALL_LABEL, BALL_WIDTH, BALL_HEIGHT) else {
             return;
         };
         apply_saved_ball_position(&ball);
@@ -447,8 +450,8 @@ fn default_ball_position(ball: &WebviewWindow) -> tauri::LogicalPosition<f64> {
     let w = size.width as f64 / scale;
     let h = size.height as f64 / scale;
     tauri::LogicalPosition::new(
-        (w - BALL_SIZE - 24.0).max(0.0),
-        (h - BALL_SIZE - 48.0).max(0.0),
+        (w - BALL_WIDTH - 24.0).max(0.0),
+        (h - BALL_HEIGHT - 48.0).max(0.0),
     )
 }
 
@@ -872,18 +875,18 @@ fn position_for_ball(
 
     // 球相对所在显示器左上角的逻辑坐标
     let (bx, by) = (ball_pos.0 - origin_x, ball_pos.1 - origin_y);
-    let ball_cx = bx + BALL_SIZE / 2.0;
-    let ball_cy = by + BALL_SIZE / 2.0;
+    let ball_cx = bx + BALL_WIDTH / 2.0;
+    let ball_cy = by + BALL_HEIGHT / 2.0;
 
     // 水平：球偏左 → 弹窗左缘=球左缘（向右展开）；球偏右 → 弹窗右缘=球右缘（向左展开）
     let mut px = if ball_cx < screen_w / 2.0 {
         bx
     } else {
-        bx + BALL_SIZE - width
+        bx + BALL_WIDTH - width
     };
     // 该方向放不下 → 翻到反方向对齐
     if px + width > screen_w {
-        px = bx + BALL_SIZE - width;
+        px = bx + BALL_WIDTH - width;
     } else if px < 0.0 {
         px = bx;
     }
@@ -891,14 +894,14 @@ fn position_for_ball(
 
     // 垂直：球偏上 → 弹窗顶缘=球底缘+间隙（向下展开）；球偏下 → 弹窗底缘=球顶缘-间隙（向上展开）
     let mut py = if ball_cy < screen_h / 2.0 {
-        by + BALL_SIZE + PANEL_GAP
+        by + BALL_HEIGHT + PANEL_GAP
     } else {
         by - PANEL_GAP - height
     };
     if py + height > screen_h {
         py = by - PANEL_GAP - height;
     } else if py < 0.0 {
-        py = by + BALL_SIZE + PANEL_GAP;
+        py = by + BALL_HEIGHT + PANEL_GAP;
     }
     py = py.clamp(0.0, (screen_h - height).max(0.0)) + origin_y;
 

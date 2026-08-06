@@ -23,7 +23,11 @@ export function FloatingContextMenu() {
   };
 
   return (
-    <div className="floating-menu">
+    <div
+      className="floating-menu"
+      // 菜单自身右键不弹任何东西（含 WebView 默认菜单）
+      onContextMenu={(e) => e.preventDefault()}
+    >
       <button className="menu-item" onClick={onSettings}>
         <Settings size={12} className="menu-icon" />
         <span className="menu-label">设置</span>

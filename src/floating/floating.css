@@ -10,6 +10,10 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
+  /* 球窗口比胶囊大一圈（阴影留白），这里让胶囊居中 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-family:
     system-ui,
     -apple-system,
@@ -28,6 +32,7 @@ body {
   --fb-muted: #71717a;
   --fb-border: rgba(24, 24, 27, 0.1);
   --fb-hover: rgba(0, 0, 0, 0.07);
+  --fb-primary: #1f8fff; /* 主应用 --primary 蓝色（HSL 210 100% 56%） */
   --fb-danger-bg: rgba(239, 68, 68, 0.12);
   --fb-danger-hover: rgba(239, 68, 68, 0.25);
 }
@@ -37,40 +42,149 @@ body {
   --fb-muted: #a1a1aa;
   --fb-border: rgba(255, 255, 255, 0.12);
   --fb-hover: rgba(255, 255, 255, 0.09);
+  --fb-primary: #148aff; /* 主应用 dark --primary 蓝色 */
   --fb-danger-bg: rgba(239, 68, 68, 0.22);
   --fb-danger-hover: rgba(239, 68, 68, 0.4);
 }
 
-/* ---- 小球 ---- */
+/* ---- 悬浮球（方案C：180×40 横向胶囊条，cc-switch 风格） ----
+ * 白/深底卡片 + 细边框 + 蓝色强调 + 小字号；用量状态色用左侧小圆点表达。
+ */
 .ball {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6 55%, #ec4899);
+  width: 180px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 20px;
+  background: var(--fb-bg);
+  border: 1px solid var(--fb-border);
   display: flex;
+  flex-direction: row;
   align-items: center;
-  justify-content: center;
+  gap: 0;
+  padding: 0 10px;
   cursor: pointer;
   box-sizing: border-box;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    transform 0.1s ease;
 }
-.ball-inner {
-  width: 46px;
-  height: 46px;
+/* 悬停：边框提为品牌蓝，提示可点 */
+.ball:hover {
+  border-color: var(--fb-primary);
+}
+/* 按下/拖动：轻微缩放，给拖动手感 */
+.ball:active {
+  transform: scale(0.97);
+}
+.ball-status {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: rgba(15, 23, 42, 0.85);
+  flex-shrink: 0;
+  align-self: center;
+  transition: background 0.3s ease;
+}
+/* 左半区：固定宽，不收缩（右半区无法挤压它） */
+.ball-left {
+  flex: 0 0 98px;
+  width: 98px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* 左半区第一行：app 主标题（图标 + app 名，深色） */
+.ball-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--fb-fg);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ball-app svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.ball-model {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border: 3px solid #94a3b8;
-  transition: border-color 0.3s;
-  box-sizing: border-box;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
 }
-.ball-glyph {
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  line-height: 1;
+/* 供应商 / 模型：胶囊状文字标签 */
+.ball-tag {
+  padding: 0px 4px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 供应商：浅灰底灰字（低调） */
+.ball-tag-provider {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--fb-muted);
+  flex-shrink: 0;
+}
+.dark .ball-tag-provider {
+  background: rgba(255, 255, 255, 0.1);
+}
+/* 模型名：淡品牌蓝底蓝字（突出核心） */
+.ball-tag-model {
+  background: rgba(31, 143, 255, 0.12);
+  color: var(--fb-primary);
+  min-width: 0;
+}
+.dark .ball-tag-model {
+  background: rgba(31, 143, 255, 0.2);
+}
+/* 右半区：固定宽，不收缩（左半区无法挤压它），内容靠右 */
+.ball-usage {
+  flex: 0 0 62px;
+  width: 62px;
+  margin-left: auto;
+  box-sizing: border-box;
+  border-left: 1px solid var(--fb-border);
+  padding-left: 8px;
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 1px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.1;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+/* 多套餐：右半区竖向堆叠，每行一个套餐缩写（h5% / d20% / m30%），左对齐 */
+.ball-usage-multi {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.ball-usage-multi > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 数值过长时省略号截断，单位保持 */
+.ball-usage > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 单位（CNY/GB）：灰色，不带状态色 */
+.ball-usage-unit {
+  color: var(--fb-muted);
 }
 
 /* ---- 面板 ---- */
