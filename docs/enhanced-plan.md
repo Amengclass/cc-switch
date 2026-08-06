@@ -121,6 +121,17 @@
   - **PostToolUse `mcp__*`**:兜底扫描所有 MCP 工具返回结果,含 base64 图片标记则 `decision: block` 隐藏
 - 残余局限:用户直接拖拽/粘贴进 prompt 的图片不经过任何工具,拦不住;遇到 400 请 `/compact` 或 `/clear`
 
+### 基座升级:官方 v3.19.2 合并
+- 网络:git https 无代理连不上、ssh 传输断流,最终用 **socks5 代理**(`socks5h://127.0.0.1:7897`,Clash)稳定拉取官方仓库
+- 流程:`upgrade-v3.19.2` 试验分支 merge 官方 v3.19.2(14 个 commit)→ 解决冲突 → 并入 main 推送
+- 官方带来的主要变化:#5967 搜索列表 + 批量开关 + busy 状态、usage 性能优化、安全加固等
+- 冲突解决(9 文件):`mcp.rs`/`skill.rs`(后端)、MCP/Skills/Prompts 面板——融合官方重构 + fork 远端/OpenClaw 逻辑;悬浮窗/远端控制面/OpenClaw 核心零冲突完整保留
+- 顺手修复 fork 遗留的 **3 个 OpenClaw MCP 测试**(merge 前就失败):目录 gate(每个 app 的 `should_sync_xxx_mcp` 都要求目录存在,测试内创建 `~/.openclaw`)、JSON5 解析(改走 `openclaw_config::get_mcp_servers`)、import 计数(测试改用 `Database::memory()` 内存库)
+- 验证全过:`pnpm typecheck` / `format:check` / `build:renderer` / `cargo check` / `cargo test` / `cargo clippy`
+- 已知遗留:
+  - vitest 693/695 —— 2 个 `App.test.tsx` 集成测试全量并行时超时/隔离 flaky,单独跑全过(测试环境问题,非功能 bug)
+  - clippy 16 个 warning 均在官方 v3.19.2 / fork 遗留代码(不在 merge 改动里),未处理
+
 ### 构建与基础设施
 - 构建脚本 `C:\build\build-exe.ps1`(规避火绒 `sysdiag` 文件锁 LNK1105)
 - 推送到 GitHub fork `https://github.com/Amengclass/cc-switch`
@@ -202,6 +213,7 @@
 | ✅ | toggle 合并 | 容器 toggle 合并 exec | 读 JSON → 修改 → 写 JSON + 操作链接合并为一次 exec_with_stdin |
 | ✅ | Docker 容器 | Docker 容器目标(方案 B) | FileOps + RemoteTarget + 全部面板泛型 + ZIP/导入支持容器 |
 | ✅ | 推送 | 推送到 GitHub fork | `https://github.com/Amengclass/cc-switch` |
+| ✅ | 基座升级 v3.19.2 | merge 官方 v3.19.2 进 fork(14 commit) | 编译/测试/clippy 全过;悬浮窗/远端/OpenClaw 保留;修好 3 个遗留 OpenClaw 测试 |
 | 🔄 | 悬浮窗(加速球) | 桌面小球 + 悬停面板 | 透明窗口/拖动/吸附/单击开主窗/余量复用主窗口缓存/托盘开关/主题跟随 |
 | 🔄 | 悬浮窗样式与右键菜单 | 样式打磨 + 小球右键菜单 | 待做 |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |
