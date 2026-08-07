@@ -70,6 +70,7 @@ import {
   listRemoteHosts,
   switchRemoteProvider,
 } from "@/lib/api/remote";
+import { useSwitchRemoteProviderMutation } from "@/lib/query/remoteMutations";
 import type { RemoteHost } from "@/types/remote";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
@@ -485,38 +486,22 @@ function App() {
     isProxyRunning && isCurrentAppTakeoverActive,
   );
 
+  // 远程切换 mutation：与本机 useSwitchProviderMutation 同构（onSuccess 回写高亮 +
+  // invalidateQueries + 集中 toast；isPending 供按钮禁用防连点）。
+  const remoteSwitchMutation = useSwitchRemoteProviderMutation(
+    setRemoteCurrentProviderId,
+  );
+
   // 供应商切换：选中服务器目标时走远端原子写回，否则走本地
   const handleProviderSwitch = async (provider: Provider) => {
     if (remoteTargetId) {
-      try {
-        const container = remoteContainerId || undefined;
-        const report = await switchRemoteProvider(
-          remoteTargetId,
-          provider.id,
-          container,
-        );
-        const cur = await getRemoteCurrentProvider(
-          remoteTargetId,
-          container,
-        ).catch(() => null);
-        setRemoteCurrentProviderId(cur);
-        await refetch();
-        toast.success(
-          t("remote.switchDone", {
-            defaultValue: "已在 {{target}} 切换到 {{provider}}",
-            target:
-              (activeRemoteHost?.name ?? remoteTargetId) +
-              (container ? ` / ${container}` : ""),
-            provider: report.providerName,
-          }),
-          { description: report.notes.join("；"), closeButton: true },
-        );
-      } catch (error) {
-        console.error("Failed to switch remote provider:", error);
-        toast.error(t("remote.switchError", { defaultValue: "远程切换失败" }), {
-          description: extractErrorMessage(error),
-        });
-      }
+      // 一次 IPC：后端 EffectReport.currentProviderId 直接带回当前供应商 id，
+      // 高亮/刷新/toast 都由 mutation onSuccess 完成
+      await remoteSwitchMutation.mutateAsync({
+        hostId: remoteTargetId,
+        providerId: provider.id,
+        container: remoteContainerId || undefined,
+      });
       return;
     }
     await switchProvider(provider);
@@ -896,11 +881,8 @@ function App() {
           provider.id,
           container,
         );
-        const cur = await getRemoteCurrentProvider(
-          remoteTargetId!,
-          container,
-        ).catch(() => null);
-        setRemoteCurrentProviderId(cur);
+        // 后端已带回当前供应商 id，无需再调 get_remote_current_provider
+        setRemoteCurrentProviderId(report.currentProviderId ?? null);
         await refetch();
         toast.success(
           t("remote.editSynced", {
@@ -1272,6 +1254,11 @@ function App() {
                       isProxyRunning={isProxyRunning}
                       isProxyTakeover={
                         isProxyRunning && isCurrentAppTakeoverActive
+                      }
+                      isSwitching={
+                        remoteTargetId
+                          ? remoteSwitchMutation.isPending
+                          : undefined
                       }
                       activeProviderId={activeProviderId}
                       onSwitch={handleProviderSwitch}

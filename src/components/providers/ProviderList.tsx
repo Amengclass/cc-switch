@@ -66,6 +66,8 @@ interface ProviderListProps {
   isLoading?: boolean;
   isProxyRunning?: boolean; // 代理服务运行状态
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
+  /** 远程切换进行中：禁用切换按钮防连点 */
+  isSwitching?: boolean;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider) => void; // OpenClaw: set as default model
 }
@@ -88,6 +90,7 @@ export function ProviderList({
   isLoading = false,
   isProxyRunning = false,
   isProxyTakeover = false,
+  isSwitching = false,
   activeProviderId,
   onSetAsDefault,
 }: ProviderListProps) {
@@ -422,6 +425,7 @@ export function ProviderList({
                 onOpenTerminal={onOpenTerminal}
                 onTest={handleTest}
                 isTesting={isChecking(provider.id)}
+                isSwitching={isSwitching}
                 isProxyRunning={isProxyRunning}
                 isProxyTakeover={isProxyTakeover}
                 isAutoFailoverEnabled={isFailoverModeActive}
@@ -561,6 +565,7 @@ interface SortableProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   isTesting: boolean;
+  isSwitching?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
   isAutoFailoverEnabled: boolean;
@@ -592,6 +597,7 @@ function SortableProviderCard({
   onOpenTerminal,
   onTest,
   isTesting,
+  isSwitching,
   isProxyRunning,
   isProxyTakeover,
   isAutoFailoverEnabled,
@@ -639,6 +645,7 @@ function SortableProviderCard({
         onOpenTerminal={onOpenTerminal}
         onTest={onTest}
         isTesting={isTesting}
+        isSwitching={isSwitching}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
         dragHandleProps={{

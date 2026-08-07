@@ -38,6 +38,8 @@ export interface RemoteHostDraft {
 export interface EffectReport {
   target: string;
   providerName: string;
+  /** 本次切换后生效的供应商 id（远程切换时返回，前端省一次 getRemoteCurrentProvider 调用） */
+  currentProviderId?: string | null;
   conflictsCleaned: number;
   notes: string[];
 }

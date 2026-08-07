@@ -10,7 +10,7 @@ use russh_sftp::client::SftpSession;
 
 use crate::fsops::{split_head_tail, DirEntry, FileOps};
 
-use super::connection::{exec_command, RemoteHandler};
+use super::connection::{exec_command, shell_quote, RemoteHandler};
 
 /// 统一的数据源包装：宿主机（SFTP）或容器内（docker exec）。
 /// 命令层构造一个 `RemoteTarget`，业务函数按 `FileOps` 泛型使用，
@@ -307,17 +307,6 @@ impl FileOps for DockerExecFileOps<'_> {
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {
         // 复用 write_bytes_atomic（text → bytes → base64 → stdin 管道）
         self.write_bytes_atomic(path, content.as_bytes()).await
-    }
-}
-
-/// 把参数安全地包进单引号（shell 转义）：单引号内一切字面化，无需担心特殊字符。
-/// 参数本身若含单引号则拒绝（路径/容器名不会含）。
-fn shell_quote(s: &str) -> String {
-    if s.contains('\'') {
-        // 极少见；用双引号兜底但加一层转义
-        format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        format!("'{s}'")
     }
 }
 

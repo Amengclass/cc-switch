@@ -23,44 +23,38 @@ pub async fn read_remote_settings<F: FileOps>(fs: &F, root: &str) -> Result<Valu
     }
 }
 
-/// 将完整 settings.json 原子写回远端。
-pub async fn write_remote_settings<F: FileOps>(
-    fs: &F,
-    root: &str,
-    settings: &Value,
-) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(settings)
-        .map_err(|e| format!("序列化 settings.json 失败: {e}"))?;
-    fs.write_text_atomic(&remote_settings_path(root), &text).await
-}
-
 /// 将完整 settings 对象应用到远端 settings.json（**整文件覆盖**，与 cc switch
 /// 本机切换行为一致），并保留 .bak 备份 + 原子写回。
 ///
 /// settings 应通过 `build_effective_settings_with_common_config` 构建，
 /// 保证与本地切换产出完全一致（provider env + 通用配置片段）。
 ///
+/// **落盘方式**：一次 exec + stdin 管道（宿主机 `sh -c` / 容器 `docker exec sh -c`，
+/// 共用同一 POSIX 脚本），把「存在才备份 .bak + mkdir + base64 原子写 + 失败清理」
+/// 合并为单次往返——宿主机由原来 15~20 个 SFTP RTT 降到 ~1 RTT。
+///
 /// 返回「生效方式」报告，前端据此明确提示用户如何生效。
-pub async fn apply_provider_settings<F: FileOps>(
-    fs: &F,
+pub async fn apply_provider_settings(
+    session: &crate::remote::connection::RemoteSession,
+    container: Option<&str>,
     root: &str,
-    target: &str,
+    target_name: &str,
     provider_name: &str,
     settings: &Value,
 ) -> Result<EffectReport, String> {
     let path = remote_settings_path(root);
+    let text = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("序列化 settings.json 失败: {e}"))?;
 
-    // 1. 备份原文件到 settings.json.bak（幂等覆盖）
-    if let Some(original) = fs.read_text_optional(&path).await? {
-        fs.write_text_atomic(&format!("{path}.bak"), &original).await?;
-    }
-
-    // 2. 整文件覆盖写回
-    write_remote_settings(fs, root, settings).await?;
+    // 一次 exec：目标存在才备份（[ -f ] && cp），原子替换失败自动清理 tmp
+    session
+        .write_settings_with_backup(&path, &text, container)
+        .await?;
 
     Ok(EffectReport {
-        target: target.to_string(),
+        target: target_name.to_string(),
         provider_name: provider_name.to_string(),
+        current_provider_id: None,
         conflicts_cleaned: 0,
         notes: vec![
             format!("已整文件覆盖远端 {path}"),

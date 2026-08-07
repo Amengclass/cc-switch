@@ -203,13 +203,9 @@ pub async fn switch_remote_provider(
         crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
 
     let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
     let report = settings::apply_provider_settings(
-        &target,
+        &session,
+        container.as_deref(),
         &host.default_home(),
         &host.name,
         &provider.name,
@@ -222,6 +218,10 @@ pub async fn switch_remote_provider(
     if let Err(e) = crate::remote::current::save_current_provider(&host_id, &provider_id) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
+
+    // 直接带上前端需要的当前供应商 id，避免前端再调一次 get_remote_current_provider
+    let mut report = report;
+    report.current_provider_id = Some(provider_id.clone());
 
     Ok(report)
 }

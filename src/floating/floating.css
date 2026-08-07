@@ -61,7 +61,12 @@ body {
   --fb-fg: #18181b;
   --fb-muted: #71717a;
   --fb-border: rgba(24, 24, 27, 0.1);
-  --fb-outline: rgba(24, 24, 27, 0.28); /* 外轮廓：明显但中性，白色背景上清晰可辨 */
+  --fb-outline: rgba(
+    24,
+    24,
+    27,
+    0.28
+  ); /* 外轮廓：明显但中性，白色背景上清晰可辨 */
   --fb-hover: rgba(0, 0, 0, 0.07);
   --fb-primary: #1f8fff; /* 主应用 --primary 蓝色（HSL 210 100% 56%） */
   --fb-danger-bg: rgba(239, 68, 68, 0.12);

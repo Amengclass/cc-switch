@@ -56,6 +56,8 @@ interface ProviderCardProps {
   onTest?: (provider: Provider) => void;
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
+  /** 远程切换进行中：禁用切换按钮防连点 */
+  isSwitching?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管，切换为热切换）
   dragHandleProps?: DragHandleProps;
@@ -155,6 +157,7 @@ export function ProviderCard({
   onTest,
   onOpenTerminal,
   isTesting,
+  isSwitching,
   isProxyRunning,
   isProxyTakeover = false,
   dragHandleProps,
@@ -562,6 +565,7 @@ export function ProviderCard({
               isCurrent={isCurrent}
               isInConfig={isInConfig}
               isTesting={isTesting}
+              isSwitching={isSwitching}
               isProxyTakeover={isProxyTakeover}
               isOfficialBlockedByProxy={isOfficialBlockedByProxy}
               isReadOnly={isHermesReadOnly}

@@ -11,6 +11,9 @@ pub struct EffectReport {
     pub target: String,
     /// 当前生效的供应商名称。
     pub provider_name: String,
+    /// 本次切换后生效的供应商 id（远程切换时返回，前端省一次 get_remote_current_provider 调用）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_provider_id: Option<String>,
     /// 已清理的冲突环境变量数量。
     pub conflicts_cleaned: usize,
     /// 面向用户的生效方式说明(每条一句,前端逐条展示)。
