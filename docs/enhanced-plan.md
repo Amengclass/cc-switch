@@ -8,6 +8,8 @@
 > - 增强版是「**本机 GUI 直连任意远程主机,直接读写远端 `~/.claude/settings.json`**」。
 >
 > **同步策略**:不裁剪上游,远程能力作为独立新增层叠加。上游同步 = 纯 `git merge`,零冲突。
+>
+> **守则**:改动前必读项目根 `AGENTS.md` —— 第一要素:不破坏本机(原生 cc-switch)功能,本机代码能不改就不改;本机逻辑是完善远端功能的标准参考。
 
 ---
 
@@ -20,7 +22,22 @@
 
 ---
 
-## 已完成 ✅
+## 功能模块总览
+
+> 全文按 4 大功能模块组织,每个模块下有「已完成」与「待完成」。
+
+| 模块 | 范围 | 状态速览 |
+|---|---|---|
+| **模块① 远程主机统一控制面(SSH)** | 远程主机管理/切换 Provider/远程面板/Docker 容器/提速/per-app 扩展/安装检测 | 已完成 11 项;待完成 12 项(见「待完成」模块①) |
+| **模块② 悬浮窗组件(加速球)** | 桌面小球/悬停面板/右键菜单/定位与尺寸保护 | 已完成;待完成:样式打磨 + 右键菜单增强 |
+| **模块③ 本地体验增强** | UI 修复/图像拦截钩子/前端刷新策略一致性 | 已完成 2 项;待完成 6 项 |
+| **模块④ 基座升级与工程** | 官方 v3.19.2 合并/构建与发布 | 已完成 2 项;待完成 2 项 |
+
+---
+
+## 已完成 ✅(按功能模块)
+
+### 模块① 远程主机统一控制面(SSH)
 
 ### 远程主机连接与管理
 - 远程主机 CRUD(名称、host、port、用户名、密码认证),配置存 SQLite
@@ -32,6 +49,36 @@
 - 对远端执行供应商切换:env 块合并 → 原子写回(远端临时文件 + rename)
 - 切换失败回滚(保留远端原文件 `.bak`)
 - 切换后明确提示生效方式(本机/远程、claude 运行中/未运行)
+
+### 远程切换提速与 per-app 扩展(2026-08-07)
+- **切换提速**:宿主机落盘从多趟 SFTP(15~20 RTT)改为**一次 exec + stdin 管道**——
+  `RemoteSession.exec_with_stdin`(强制 `sh -c`)+ `write_settings_with_backup`:
+  `[ -f path ] && cp path path.bak; mkdir -p && base64 -d > tmp && mv tmp path || rm -f tmp`,
+  宿主机/容器共用脚本,~1 RTT;失败自动清理 tmp
+- **脏写防护(预留)**:`write_settings_with_backup` 保留 `expected_hash` 参数(写前读 sha256,
+  同一脚本内校验,冲突输出 `REMOTE_CONFLICT` abort,0 额外 RTT);**当前 claude 与 codex 均传
+  None —— 与各 app 本机切换行为完全一致(无校验整文件覆盖)**,机制仅作预留
+- **EffectReport.current_provider_id**:`switch_remote_provider` 一次返回当前供应商 id,
+  前端省一次 `get_remote_current_provider` IPC
+- **前端 mutation 同构**:新增 `useSwitchRemoteProviderMutation`(remoteMutations.ts),
+  与本机 `useSwitchProviderMutation` 同构(onSuccess 回写高亮+invalidateQueries+toast,
+  onError 统一 toast);ProviderCard 切换按钮 `isSwitching` 禁用防连点
+- **远程切换 per-app(阶段 1:codex MVP)**:`switch_remote_provider` 加 `app` 参数;
+  claude 保持整文件覆盖 settings.json;codex 走 `remote/codex.rs`,**产出与本机逐字节一致**——
+  ① modelCatalog:复用本机 `prepare_codex_catalog_plan`,有 catalog 则写远端同名
+  `cc-switch-model-catalog.json` + 注入字段,无则清理/web_search 兜底;
+  ② 配置文本:复用本机 `build_codex_live_config`(官方+统一会话开关开启 → 注入 unified 路由;
+  bearer token 注入);
+  ③ auth.json 判定:与本机 `should_write_auth` 一致(官方+登录材料,或第三方且
+  「不保留官方登录态」设置 → 写;否则保留远端登录态);
+  无 hash 校验原子写回(与本机一致),`remote/codex.rs` 只做远端 I/O
+- **当前供应商记录 per-app**:`remote_current_providers.json` 结构 `host -> {app -> id}`,
+  兼容老格式(字符串视为 claude)
+- **目标选择器全 app 放开**:`TargetBreadcrumb` 不再限 `activeApp === "claude"`,
+  所有 app 页面可选中远程服务器/容器;Sessions 面板非 claude 时忽略远程目标(避免误读远端 ~/.claude/projects)
+- **安装检测全 app 化**:`check_local_cli_installed(app)` / `check_remote_cli_installed(host, app, container)`,
+  `cli_binary_for_app` 映射(claude/codex/gemini/grokbuild→grok/opencode/openclaw/hermes);
+  前端徽标动态显示「{App} 已安装/未安装」+ 按 app 给安装命令(`APP_INSTALL_CMDS`)
 
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
@@ -97,11 +144,16 @@
 - 通过 SSH `command -v claude` 检测远端安装状态
 - 面板徽标 + 测试连接展示
 
-### UI 修复与打磨
-- **Sonner toast 修复**:portaling 到 document.body + `pointerEvents:auto`,解决模态抽屉打开时 toast X 点不了的问题(根因:Radix 模态 Dialog 设置 `body { pointer-events: none }`)
-- **Sonner 关闭按钮位置**:修正到右上角(覆盖 sonner 默认左上角定位)
-- **目标选择器可滚动**:主机/容器下拉框 `max-h-[50vh]` + 可见细滚动条
-- **目标选择器聚焦样式**:与全局 `*:focus-visible` 保持一致,不下拉特殊处理
+### 远端批量开关优化(C + A)
+- **背景**:远端场景批量开关(MCP/Skills)此前前端 `runSequentialBulkAction` 逐条调 `toggle_remote_*`——每条都新建 SSH 连接 + 重复读写同一份 SSOT/live 文件,且点击后要等 SSH 往返图标才有反馈
+- **C(真实提速)**:新增后端 `bulk_toggle_remote_mcp_app` / `bulk_toggle_remote_skill_app` 命令,一次连接内改完 N 个开关(SSOT 读一次写一次;同一 app 的 live 文件读一次写一次);skills 把每条链接脚本拼进同一个 `&&` 链,仍是一次 `exec_command_with_stdin`。MCP per-format helper 全部改成 `*_many` 版,单条委托 many。前端批量从 N 次 invoke 变 1 次
+- **A(感知提速)**:前端批量 hook 加 `onMutate`/`onError` 乐观更新(照 `failover.ts` 范式),点击瞬间翻转缓存图标,失败回滚,settle 后权威校准
+- **返回值**:后端 `RemoteBulkToggleResult{succeeded, failed}` 与前端 `SequentialBulkActionResult` 形状一致,面板零改动;逐条失败(id 不存在)聚合上报
+- **测试**:新增 `remote::mcp` 4 个 + `remote::skill` 7 个单元测试(`LocalFileOps` + `tempfile`);前端批量 hook 测试改断言单次 bulk 调用 + 新增部分失败用例
+- 验证全过:`pnpm typecheck` / `format:check` / vitest 48 个相关测试 / `cargo test` 全绿 / `cargo clippy` 无新增 warning / 打包启动正常
+
+
+### 模块② 悬浮窗组件(加速球)
 
 ### 悬浮窗(加速球)
 - 桌面常驻透明小球 + 悬停展开面板:列出每个 app(Claude Code / Codex / Gemini / Grok Build / OpenCode / OpenClaw / Hermes)的当前供应商 / 模型 / 余量
@@ -118,12 +170,22 @@
 - **悬浮窗尺寸保护(修复窗口大小异常,2026-08-07)**:两个根因——(1) `window-state` 插件把悬浮窗恢复成历史错误尺寸(`skip_initial_state` 实测拦不住,改用 **`with_denylist`** 完全排除球/面板/菜单三个窗口);(2) **WebView2 内容加载后把悬浮窗窗口 resize 成 133 逻辑宽**(球/菜单实测被拉宽,面板/菜单未 show 故不受影响),用 **`on_page_load` 回调强制 `set_size` 回逻辑尺寸**(含 300ms 延迟二次兜底);右键菜单宽度 60、面板 300、球 64 由此保证,菜单右缘与球右缘对齐
 - 右键菜单交互:弹出即抢焦点,**鼠标离开/重新悬停球都不关闭**;只有**点击菜单外部任意处**(小球/桌面/其他应用,靠失焦 `Focused(false)` 收起)才关闭;点击球只关菜单不开主窗口(`MENU_CLOSED_AT` 300ms 内抑制单击开主窗)
 
+### 模块③ 本地体验增强
+
 ### 图像拦截钩子(纯文本模型保护)
 - 三道闸,防止纯文本模型(deepseek/glm 经火山引擎)因上下文含有图片块触发 `400 Model only support text input`
   - **PreToolUse `Read`**:拦截图片/PDF 文件读取
   - **PreToolUse `*screenshot*`**:拦截 MCP 截图工具,根本不让截图发生
   - **PostToolUse `mcp__*`**:兜底扫描所有 MCP 工具返回结果,含 base64 图片标记则 `decision: block` 隐藏
 - 残余局限:用户直接拖拽/粘贴进 prompt 的图片不经过任何工具,拦不住;遇到 400 请 `/compact` 或 `/clear`
+
+### UI 修复与打磨
+- **Sonner toast 修复**:portaling 到 document.body + `pointerEvents:auto`,解决模态抽屉打开时 toast X 点不了的问题(根因:Radix 模态 Dialog 设置 `body { pointer-events: none }`)
+- **Sonner 关闭按钮位置**:修正到右上角(覆盖 sonner 默认左上角定位)
+- **目标选择器可滚动**:主机/容器下拉框 `max-h-[50vh]` + 可见细滚动条
+- **目标选择器聚焦样式**:与全局 `*:focus-visible` 保持一致,不下拉特殊处理
+
+### 模块④ 基座升级与工程基建
 
 ### 基座升级:官方 v3.19.2 合并
 - 网络:git https 无代理连不上、ssh 传输断流,最终用 **socks5 代理**(`socks5h://127.0.0.1:7897`,Clash)稳定拉取官方仓库
@@ -136,23 +198,47 @@
   - vitest 693/695 —— 2 个 `App.test.tsx` 集成测试全量并行时超时/隔离 flaky,单独跑全过(测试环境问题,非功能 bug)
   - clippy 16 个 warning 均在官方 v3.19.2 / fork 遗留代码(不在 merge 改动里),未处理
 
-### 远端批量开关优化(C + A)
-- **背景**:远端场景批量开关(MCP/Skills)此前前端 `runSequentialBulkAction` 逐条调 `toggle_remote_*`——每条都新建 SSH 连接 + 重复读写同一份 SSOT/live 文件,且点击后要等 SSH 往返图标才有反馈
-- **C(真实提速)**:新增后端 `bulk_toggle_remote_mcp_app` / `bulk_toggle_remote_skill_app` 命令,一次连接内改完 N 个开关(SSOT 读一次写一次;同一 app 的 live 文件读一次写一次);skills 把每条链接脚本拼进同一个 `&&` 链,仍是一次 `exec_command_with_stdin`。MCP per-format helper 全部改成 `*_many` 版,单条委托 many。前端批量从 N 次 invoke 变 1 次
-- **A(感知提速)**:前端批量 hook 加 `onMutate`/`onError` 乐观更新(照 `failover.ts` 范式),点击瞬间翻转缓存图标,失败回滚,settle 后权威校准
-- **返回值**:后端 `RemoteBulkToggleResult{succeeded, failed}` 与前端 `SequentialBulkActionResult` 形状一致,面板零改动;逐条失败(id 不存在)聚合上报
-- **测试**:新增 `remote::mcp` 4 个 + `remote::skill` 7 个单元测试(`LocalFileOps` + `tempfile`);前端批量 hook 测试改断言单次 bulk 调用 + 新增部分失败用例
-- 验证全过:`pnpm typecheck` / `format:check` / vitest 48 个相关测试 / `cargo test` 全绿 / `cargo clippy` 无新增 warning / 打包启动正常
-
 ### 构建与基础设施
 - 构建脚本 `C:\build\build-exe.ps1`(规避火绒 `sysdiag` 文件锁 LNK1105)
 - 推送到 GitHub fork `https://github.com/Amengclass/cc-switch`
 
 ---
 
-## 待完成 ⏳
+## 远程工作清单(SSH 远程主机统一控制面)
 
-### 功能增强
+> **本 fork 的核心新增能力。** 一条命令把当前 Provider 应用到远端主机/容器:SSH 连接 → 读远端配置文件 → 合并 env 块 → 原子写回 → 清理冲突环境变量 → 提示生效方式;并延伸出远程会话管理、Docker 容器目标、桌面悬浮球等。
+> 详细实现见上文「远程主机连接与管理」「远程切换 Provider(env 合并)」「远程功能面板」「Docker 容器支持」等小节。
+
+### ✅ 远程·已完成
+
+| 类别 | 内容 |
+|---|---|
+| 远程主机基础 | SSH 连接 / 主机 CRUD / DPAPI 密码加密 / 读远端 settings.json |
+| 远程切换(本机) | env 块合并 → 原子写回 → .bak 备份 → 生效提示;冲突 env 清理;安装检测 |
+| 远程切换提速(08-07) | 宿主机**一次 exec+stdin 原子写**(15~20 RTT→1,强制 sh -c 兼容);`[ -f ] && cp .bak` 在 || 分支;hash 脏写防护**机制预留**(当前 claude/codex 均传 None,与本机行为一致);远程 ~10x 提速 |
+| 前端对齐(08-07) | `useSwitchRemoteProviderMutation` onSuccess/onError/toast **同构本机**;`EffectReport.current_provider_id` 少一次 IPC;ProviderCard/ProviderActions isPending 禁用防连点;切换/同步成功 toast 的 notes 以 ① 序号列表展示(单条保持纯文本) |
+| per-app 扩展·codex(08-07) | `switch_remote_provider`/`get_remote_current_provider` 加 `app` 参数;`remote/codex.rs` 复用本机 `prepare_codex_catalog_plan` + `build_codex_live_config`(catalog/unified/bearer/auth 判定,产出逐字节一致)+ 无校验原子写;`remote_current_providers.json` 迁移 `host -> {app:id}`;auth.json 按本机语义 |
+| 目标选择器全 app(08-07) | `TargetBreadcrumb` 去掉 claude 限制,Sessions 非 claude 忽略远程目标 |
+| 安装检测全 app(08-07) | `check_remote_cli_installed(app)` / `check_local_cli_installed(app)` + `cli_binary_for_app` 映射;徽标动态「{App} 已安装/未安装」+ `APP_INSTALL_CMDS` 按 app 给安装命令 |
+| 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
+
+### ⏳ 远程·待完成(优先级从高到低)
+
+| 优先级 | 事项 |
+|---|---|
+| 高 | **gemini 远程切换分支**(复用 codex 模式:纯变换 + 无校验原子写,与本机一致) |
+| 高 | **grok 远程切换分支**(`~/.grok/config.toml`) |
+| 中 | opencode / openclaw / hermes 远程切换分支 |
+| 中 | 远程 Sessions per-app(当前仅 claude 的 `~/.claude/projects`) |
+| 中 | `get_remote_current_provider` 兜底 per-app(当前仅 claude 有 base_url 兜底) |
+| 低 | `APP_INSTALL_CMDS` 包名校对(grok/openclaw/hermes 按官方文档核对) |
+| 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
+
+---
+
+## 待完成 ⏳(按功能模块)
+
+### 模块① 远程主机统一控制面(SSH) — 待完成
 
 | 事项 | 说明 |
 |---|---|
@@ -163,7 +249,24 @@
 | 远端「从备份恢复」Skills | 本地备份 → 恢复到远端 SSOT |
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
+
+### 远程 per-app 扩展(2026-08-07 起,阶段 1 已做 codex)
+
+| 事项 | 说明 |
+|---|---|
+| 远程切换扩展到 gemini / grok | 复用 codex 模式:远端 live 文件路径(gemini `~/.gemini/settings.json`、grok `~/.grok/config.toml`)+ 本机纯变换函数 + 无校验原子写(与本机一致)。gemini / grok API 兼容性强,base_url/env 模式类似 claude |
+| 远程切换扩展到 opencode / openclaw / hermes | 同上,结构差异更大(自有 schema / 格式转换),放二期 |
+| 远程 Sessions per-app | 当前仅 claude(`~/.claude/projects`);codex 等按各自会话目录扩展 |
+| `get_remote_current_provider` 兜底 per-app | 当前仅 claude 有 base_url 兜底;其他 app 只有持久化记录,老数据(本应用切换前已生效的远端)恢复现场缺失 |
+| 安装命令 `APP_INSTALL_CMDS` 包名校对 | grok/openclaw/hermes 等包名按常见 npm 名填写,需按各 CLI 官方文档核对 |
+
+### 模块② 悬浮窗组件(加速球) — 待完成
+
+| 事项 | 说明 |
+|---|---|
 | 悬浮窗样式与右键菜单 | 继续打磨悬浮窗样式细节(尺寸/间距/动效);悬浮球右键菜单(快捷切换、打开主界面等) |
+
+### 模块③ 本地体验增强 — 待完成
 
 ### 前端 UI 刷新策略一致性
 
@@ -175,6 +278,8 @@
 | 远端「更新」Skill | 功能缺失，本机有 `useUpdateSkill` + `setQueryData` replace by id |
 | 技能安装/卸载 loading 提示多语言适配 | 当前硬编码中文 `"正在安装 skill..."` / `"正在卸载 skill..."`，英文/日文/繁中下也显示中文 |
 | 悬浮窗文案多语言 | 右键菜单「设置 / 隐藏悬浮窗」、设置页「固定当前位置」开关、悬浮窗面板硬编码中文（「刚刚 / x分钟前」「暂无数据」「从未更新」等）——统一 i18n，与其他改进一并处理（2026-08-06 用户要求先记录再统一做） |
+
+### 模块④ 基座升级与工程 — 待完成
 
 ### 基座裁剪
 
@@ -243,6 +348,9 @@
 | ✅ | 基座升级 v3.19.2 | merge 官方 v3.19.2 进 fork(14 commit) | 编译/测试/clippy 全过;悬浮窗/远端/OpenClaw 保留;修好 3 个遗留 OpenClaw 测试 |
 | ✅ | 远端批量开关优化(C+A) | 远端 bulk 命令(单次 SSH round-trip)+ 前端乐观更新 | MCP/Skills 批量一次连接改完;点击瞬间反馈;新增 11 个后端单测 + 前端部分失败用例;全检查通过 |
 | ✅ | 悬浮窗(加速球) | 桌面小球 + 悬停面板 | 透明窗口/拖动/吸附/单击开主窗/余量复用主窗口缓存/托盘开关/主题跟随 |
+| ✅ | 远程切换提速 + 前端对齐(2026-08-07) | 宿主机一次 exec 原子写(15~20 RTT→1)+ hash 机制预留 + mutation 同构 | 切换 ~10x 提速;isPending 防连点;EffectReport 一次返回当前供应商 |
+| ✅ | 远程 per-app 扩展·codex(2026-08-07) | switch_remote_provider 加 app 参数;codex 复用本机 catalog/unified/bearer/auth 全链路(产出逐字节一致);当前供应商记录 per-app | codex 远端切换生效,保留远端 auth.json 登录态;老记录兼容 |
+| ✅ | 目标选择器/安装检测全 app(2026-08-07) | TargetBreadcrumb 放开所有 app;check_local/remote_cli_installed(app) 参数化 | 所有 app 页可选服务器/容器;徽标动态显示「{App} 已安装/未安装」+ 按 app 安装命令 |
 | 🔄 | 悬浮窗样式与右键菜单 | 样式打磨 + 小球右键菜单 | 待做 |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |
 
