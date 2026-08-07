@@ -5,6 +5,7 @@
 //!
 //! 里程碑:M1 骨架(类型 + 模块声明)→ M2 连接/读配置 → M3 切换写回 → M4 env 清理 → M5 远程会话。
 
+pub mod codex;
 pub mod commands;
 pub mod connection;
 pub mod credentials;

@@ -124,7 +124,7 @@ async fn probe_remote(
     let settings_exists = target.exists(&settings_path).await;
 
     // 通过 exec 通道检测是否安装 Claude Code（命中哨兵 = 已安装）
-    let claude_cmd = claude_installed_probe(container);
+    let claude_cmd = cli_installed_probe("claude", container)?;
     let claude_installed = match connection::exec_command(&session.channel, &claude_cmd).await {
         Ok(out) => {
             // Info 级：默认日志等级可记录，用于确认探测命令的真实返回
@@ -168,54 +168,81 @@ pub async fn read_remote_settings(
     settings::read_remote_settings(&target, &host.default_home()).await
 }
 
-/// 对远程主机执行供应商切换：将本地供应商的 env 块原子写回远端 settings.json，
+/// 对远程主机执行供应商切换：将本地供应商配置原子写回远端对应 app 的 live 文件，
 /// 返回「生效方式」报告。
+///
+/// - `app = "claude"`：整文件覆盖远端 settings.json env 块（历史行为）
+/// - `app = "codex"`：读-改-写远端 config.toml（复用本机 codex_config 纯变换 +
+///   sha256 脏写防护 + 原子写回；auth.json 按本机语义处理）
 #[tauri::command]
 pub async fn switch_remote_provider(
     state: State<'_, AppState>,
     host_id: String,
     provider_id: String,
+    app: String,
     container: Option<String>,
 ) -> Result<EffectReport, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
 
-    // 加载 Claude 供应商（远程切换当前只针对 Claude Code）
     let providers = state
         .db
-        .get_all_providers("claude")
+        .get_all_providers(&app)
         .map_err(|e| e.to_string())?;
     let provider = providers
         .get(&provider_id)
         .ok_or_else(|| "供应商不存在，可能已被删除".to_string())?;
 
-    // 复用本机切换的构建逻辑：provider env + 通用配置片段 + 供应商默认值，
-    // 保证远端产出的 settings.json 与本机「启用」完全一致。
-    let effective =
-        crate::services::provider::live::build_effective_settings_with_common_config(
-            &state.db,
-            &crate::app_config::AppType::Claude,
-            provider,
-        )
-        .map_err(|e| e.to_string())?;
-    // 与本机 write_live_snapshot 一致：剔除内部字段
-    let sanitized =
-        crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
-
     let session = connection::connect(&host, Some(&password)).await?;
-    let report = settings::apply_provider_settings(
-        &session,
-        container.as_deref(),
-        &host.default_home(),
-        &host.name,
-        &provider.name,
-        &sanitized,
-    )
-    .await?;
 
-    // 切换成功即持久化「该远端当前生效供应商」。与原生 cc switch 的「当前供应商」
-    // 语义一致（判断当前不靠 base_url 匹配），这样编辑该供应商时能可靠判定需要写回远端。
-    if let Err(e) = crate::remote::current::save_current_provider(&host_id, &provider_id) {
+    let report = match app.as_str() {
+        // Claude：整文件覆盖 settings.json env 块（复用本机「生效配置」构建，保持历史行为）
+        "claude" => {
+            // 复用本机切换的构建逻辑：provider env + 通用配置片段 + 供应商默认值，
+            // 保证远端产出的 settings.json 与本机「启用」完全一致。
+            let effective =
+                crate::services::provider::live::build_effective_settings_with_common_config(
+                    &state.db,
+                    &crate::app_config::AppType::Claude,
+                    provider,
+                )
+                .map_err(|e| e.to_string())?;
+            // 与本机 write_live_snapshot 一致：剔除内部字段
+            let sanitized =
+                crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
+            settings::apply_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &sanitized,
+            )
+            .await?
+        }
+        // Codex：远端切齐本机 codex_config 全部变换（catalog/unified/bearer/auth 判定）
+        "codex" => {
+            crate::remote::codex::apply_codex_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                provider.category.as_deref(),
+                crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
+            )
+            .await?
+        }
+        other => {
+            return Err(format!("远程切换暂不支持应用: {other}"));
+        }
+    };
+
+    // 切换成功即持久化「该远端当前生效供应商」（per-app）。与原生 cc switch 的
+    // 「当前供应商」语义一致（判断当前不靠 base_url 匹配），这样编辑该供应商时
+    // 能可靠判定需要写回远端。
+    if let Err(e) = crate::remote::current::save_current_provider(&host_id, &app, &provider_id) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
@@ -244,28 +271,29 @@ pub async fn scan_remote_env_conflicts(
     crate::remote::env_clean::scan_remote_env_conflicts(&target, &host.default_home()).await
 }
 
-/// 读取远端「当前生效」的本地供应商 id。
+/// 读取远端「当前生效」的本地供应商 id（per-app）。
 ///
 /// 优先返回本应用切换时持久化的记录（`~/.cc-switch/remote_current_providers.json`，
 /// 与原生 cc switch 的「当前供应商」语义一致、不依赖 base_url 匹配）；
 /// 持久化缺失（如该供应商从未经本应用切换过、或记录被清理）时，才连 SSH 读远端
-/// settings.json 按 ANTHROPIC_BASE_URL 兜底匹配。
+/// live 文件按 base_url 兜底匹配（当前仅 claude 实现兜底）。
 ///
 /// 用于目标选择器：选中服务器后，主界面供应商列表的当前高亮取自远端。
 #[tauri::command]
 pub async fn get_remote_current_provider(
     state: State<'_, AppState>,
     host_id: String,
+    app: String,
     container: Option<String>,
 ) -> Result<Option<String>, String> {
     let host = load_host(&state, &host_id)?;
 
     // 1) 持久化记录优先：这是本应用上次「切换」写入的真实当前供应商，
     //    不受用户后续编辑 base_url / 通用配置片段影响（那正是匹配法失效的场景）。
-    if let Some(persisted) = crate::remote::current::get_current_provider(&host_id)? {
+    if let Some(persisted) = crate::remote::current::get_current_provider(&host_id, &app)? {
         if state
             .db
-            .get_provider_by_id(&persisted, "claude")
+            .get_provider_by_id(&persisted, &app)
             .map_err(|e| e.to_string())?
             .is_some()
         {
@@ -273,7 +301,12 @@ pub async fn get_remote_current_provider(
         }
     }
 
-    // 2) 兜底：读目标（宿主机/容器）settings.json 匹配 base_url（对从未经本应用切换的老配置）。
+    // 2) 兜底：读目标（宿主机/容器）settings.json 匹配 base_url（对从未经本应用
+    //    切换的老配置）。当前仅 claude 实现（其他 app 的 base_url 兜底待后续扩展）。
+    if app != "claude" {
+        return Ok(None);
+    }
+
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
     let target = crate::remote::docker::RemoteTarget::new(
@@ -313,12 +346,14 @@ pub async fn get_remote_current_provider(
     Ok(None)
 }
 
-/// 检测本机是否安装 Claude Code（`where claude` / `command -v claude`）。
+/// 检测本机是否安装指定 app 的 CLI（`where <bin>` / `command -v <bin>`）。
 #[tauri::command]
-pub fn check_local_claude_installed() -> Result<bool, String> {
+pub fn check_local_cli_installed(app: String) -> Result<bool, String> {
+    let bin = cli_binary_for_app(&app).ok_or_else(|| format!("未知应用: {app}"))?;
+
     #[cfg(target_os = "windows")]
     let found = std::process::Command::new("where")
-        .arg("claude")
+        .arg(bin)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -328,7 +363,7 @@ pub fn check_local_claude_installed() -> Result<bool, String> {
     #[cfg(not(target_os = "windows"))]
     let found = std::process::Command::new("sh")
         .arg("-c")
-        .arg("command -v claude")
+        .arg(format!("command -v {bin}"))
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
@@ -338,33 +373,35 @@ pub fn check_local_claude_installed() -> Result<bool, String> {
     Ok(found)
 }
 
-/// 检测远端是否安装 Claude Code（`command -v claude`），带超时。
+/// 检测远端是否安装指定 app 的 CLI（`command -v <bin>`），带超时。
 /// 返回 true=已安装 / false=未安装 / None=检测失败或超时。
 #[tauri::command]
-pub async fn check_remote_claude_installed(
+pub async fn check_remote_cli_installed(
     state: State<'_, AppState>,
     host_id: String,
+    app: String,
     container: Option<String>,
 ) -> Result<Option<bool>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
 
-    let claude_cmd = claude_installed_probe(container.as_deref());
+    let probe = cli_installed_probe(&app, container.as_deref())?;
+    let app_name = app.clone();
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(15),
         async move {
             let session = connection::connect(&host, Some(&password)).await?;
-            match connection::exec_command(&session.channel, &claude_cmd).await {
+            match connection::exec_command(&session.channel, &probe).await {
                 Ok(out) => {
                     // Info 级：默认日志等级可记录，用于确认探测命令的真实返回
                     log::info!(
-                        "[remote] claude 探测 cmd={claude_cmd:?} out={out:?} found={}",
+                        "[remote] {app_name} 探测 cmd={probe:?} out={out:?} found={}",
                         out.contains(CLAUDE_INSTALLED_MARKER)
                     );
                     Ok(Some(out.contains(CLAUDE_INSTALLED_MARKER)))
                 }
                 Err(e) => {
-                    log::warn!("[remote] 检测远端 claude 安装状态失败: {e}");
+                    log::warn!("[remote] 检测远端 {app_name} 安装状态失败: {e}");
                     Ok(None)
                 }
             }
@@ -375,7 +412,7 @@ pub async fn check_remote_claude_installed(
     match result {
         Ok(r) => r,
         Err(_) => {
-            log::warn!("[remote] 检测远端 claude 安装状态超时 host_id={host_id}");
+            log::warn!("[remote] 检测远端 {app} 安装状态超时 host_id={host_id}");
             Ok(None)
         }
     }
@@ -1250,24 +1287,39 @@ pub async fn list_docker_containers(
     crate::remote::docker::list_docker_containers(&session.channel).await
 }
 
-/// 检测 claude 是否安装的**标记**（命令命中时输出；调用方按 `contains` 判断）。
+/// 检测 CLI 是否安装的**标记**（命令命中时输出；调用方按 `contains` 判断）。
 const CLAUDE_INSTALLED_MARKER: &str = "CC_SWITCH_FOUND";
 
-/// 生成「检测 claude 是否安装」的 shell 命令。
+/// app → CLI 二进制名（安装检测用；与前端 APP_ICON_MAP 的 key 一致）。
+fn cli_binary_for_app(app: &str) -> Option<&'static str> {
+    match app {
+        "claude" => Some("claude"),
+        "codex" => Some("codex"),
+        "gemini" => Some("gemini"),
+        "grokbuild" => Some("grok"),
+        "opencode" => Some("opencode"),
+        "openclaw" => Some("openclaw"),
+        "hermes" => Some("hermes"),
+        _ => None,
+    }
+}
+
+/// 生成「检测指定 app 的 CLI 是否安装」的 shell 命令。
 ///
 /// 不用「输出非空」判断（stderr 混流/时序抖动都会误判），改用固定哨兵：
 /// 命中则输出 `CC_SWITCH_FOUND`，未命中 stderr 丢弃、无哨兵。
 /// `|| true` 保证命令本身成功退出，避免非零退出码带来的读取歧义。
 /// `container` 为 Some 时包一层 `docker exec <c> sh -c '...'`。
-fn claude_installed_probe(container: Option<&str>) -> String {
+fn cli_installed_probe(app: &str, container: Option<&str>) -> Result<String, String> {
+    let bin = cli_binary_for_app(app).ok_or_else(|| format!("未知应用: {app}"))?;
     let inner = format!(
-        "command -v claude 2>/dev/null && echo {} || true",
+        "command -v {bin} 2>/dev/null && echo {} || true",
         CLAUDE_INSTALLED_MARKER
     );
-    match container {
+    Ok(match container {
         Some(c) => format!("docker exec {c} sh -c '{inner}'"),
         None => inner,
-    }
+    })
 }
 
 /// 按 id 加载主机，不存在时报错。

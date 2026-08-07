@@ -46,9 +46,10 @@ pub async fn apply_provider_settings(
     let text = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("序列化 settings.json 失败: {e}"))?;
 
-    // 一次 exec：目标存在才备份（[ -f ] && cp），原子替换失败自动清理 tmp
+    // 一次 exec：目标存在才备份（[ -f ] && cp），原子替换失败自动清理 tmp。
+    // claude 保持历史行为：不校验 hash（expected_hash=None）
     session
-        .write_settings_with_backup(&path, &text, container)
+        .write_settings_with_backup(&path, &text, container, None)
         .await?;
 
     Ok(EffectReport {

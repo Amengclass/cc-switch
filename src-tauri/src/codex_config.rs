@@ -1307,17 +1307,19 @@ fn set_codex_native_web_search_field(config_text: &str, disable: bool) -> Result
     Ok(doc.to_string())
 }
 
-/// Generate Codex `model_catalog_json` from provider settings and inject/remove
-/// the top-level TOML field that points Codex to the generated file.
-pub fn prepare_codex_config_text_with_model_catalog(
+/// 纯计算：provider → modelCatalog 变换后的 config 文本 + 可选的 catalog JSON。
+/// 与 `prepare_codex_config_text_with_model_catalog` 同一逻辑，但不落盘——
+/// 本机写入 `get_codex_model_catalog_path()`，远端写入远端同名文件。
+pub(crate) fn prepare_codex_catalog_plan(
     settings: &Value,
     config_text: &str,
     profile: CodexCatalogToolProfile,
-) -> Result<String, AppError> {
-    let catalog_path = get_codex_model_catalog_path();
-
+) -> Result<(String, Option<Value>), AppError> {
     if let Some(catalog) = codex_model_catalog_from_settings(settings, config_text, profile)? {
-        let config_text = set_codex_model_catalog_json_field(config_text, Some(&catalog_path))?;
+        let config_text = set_codex_model_catalog_json_field(
+            config_text,
+            Some(Path::new(CC_SWITCH_CODEX_MODEL_CATALOG_FILENAME)),
+        )?;
         // Disable web_search only for native gateways on the reject blacklist
         // (MiMo/LongCat/MiniMax by host or model brand; Qwen3-Coder by model).
         // Everything else — relays, DouBao, web-search-capable Qwen models,
@@ -1332,16 +1334,32 @@ pub fn prepare_codex_config_text_with_model_catalog(
             CodexCatalogToolProfile::ProxyChat => false,
         };
         let config_text = set_codex_native_web_search_field(&config_text, disable_web_search)?;
-        write_json_file(&catalog_path, &catalog)?;
-        Ok(config_text)
+        Ok((config_text, Some(catalog)))
     } else {
         let config_text = set_codex_model_catalog_json_field(config_text, None)?;
         // Even without a generated catalog, the Responses→Anthropic transform drops the
         // Codex web_search hosted tool, so keep the invariant that an Anthropic provider
         // never presents it as a dead tool.
         let disable_web_search = profile == CodexCatalogToolProfile::Anthropic;
-        set_codex_native_web_search_field(&config_text, disable_web_search)
+        Ok((
+            set_codex_native_web_search_field(&config_text, disable_web_search)?,
+            None,
+        ))
     }
+}
+
+/// Generate Codex `model_catalog_json` from provider settings and inject/remove
+/// the top-level TOML field that points Codex to the generated file.
+pub fn prepare_codex_config_text_with_model_catalog(
+    settings: &Value,
+    config_text: &str,
+    profile: CodexCatalogToolProfile,
+) -> Result<String, AppError> {
+    let (config_text, catalog) = prepare_codex_catalog_plan(settings, config_text, profile)?;
+    if let Some(catalog) = catalog {
+        write_json_file(&get_codex_model_catalog_path(), &catalog)?;
+    }
+    Ok(config_text)
 }
 
 /// Reverse of `prepare_codex_config_text_with_model_catalog`: read the
@@ -2102,30 +2120,57 @@ pub fn strip_codex_mcp_servers_from_settings(settings: &mut Value) -> Result<(),
 ///
 /// 统一会话开关开启时，官方配置在落盘前注入共享的 `custom` 路由
 /// （见 `inject_codex_unified_session_bucket`）。
+/// 本机 / 远端共用的纯计算：provider → 最终 live config.toml 文本 + 是否写 auth.json。
+/// 不落盘；`write_codex_live_for_provider`（本机 I/O）与 `remote/codex.rs`
+/// （远端 I/O）都基于本函数产出，保证两端切换结果逐字节一致。
+pub struct CodexLiveConfigPlan {
+    /// 最终写入 config.toml 的文本
+    pub config_text: String,
+    /// 是否同时写入 auth.json（官方+登录材料，或第三方且不保留官方登录态）
+    pub write_auth: bool,
+}
+
+pub fn build_codex_live_config(
+    category: Option<&str>,
+    auth: &Value,
+    config_text: &str,
+) -> Result<CodexLiveConfigPlan, AppError> {
+    let unified_official_config =
+        if category == Some("official") && crate::settings::unify_codex_session_history() {
+            Some(inject_codex_unified_session_bucket(config_text)?)
+        } else {
+            None
+        };
+    let config_text = unified_official_config.as_deref().unwrap_or(config_text);
+
+    let write_auth = (category == Some("official") && codex_auth_has_login_material(auth))
+        || (category != Some("official")
+            && !crate::settings::preserve_codex_official_auth_on_switch());
+
+    if write_auth {
+        Ok(CodexLiveConfigPlan {
+            config_text: config_text.to_string(),
+            write_auth: true,
+        })
+    } else {
+        let live_config = prepare_codex_provider_live_config(auth, config_text)?;
+        Ok(CodexLiveConfigPlan {
+            config_text: live_config,
+            write_auth: false,
+        })
+    }
+}
+
 pub fn write_codex_live_for_provider(
     category: Option<&str>,
     auth: &Value,
     config_text: Option<&str>,
 ) -> Result<(), AppError> {
-    let unified_official_config =
-        if category == Some("official") && crate::settings::unify_codex_session_history() {
-            Some(inject_codex_unified_session_bucket(
-                config_text.unwrap_or(""),
-            )?)
-        } else {
-            None
-        };
-    let config_text = unified_official_config.as_deref().or(config_text);
-
-    let should_write_auth = (category == Some("official") && codex_auth_has_login_material(auth))
-        || (category != Some("official")
-            && !crate::settings::preserve_codex_official_auth_on_switch());
-
-    if should_write_auth {
-        write_codex_live_atomic(auth, config_text)
+    let plan = build_codex_live_config(category, auth, config_text.unwrap_or(""))?;
+    if plan.write_auth {
+        write_codex_live_atomic(auth, Some(&plan.config_text))
     } else {
-        let live_config = prepare_codex_provider_live_config(auth, config_text.unwrap_or(""))?;
-        write_codex_live_config_atomic(Some(&live_config))
+        write_codex_live_config_atomic(Some(&plan.config_text))
     }
 }
 

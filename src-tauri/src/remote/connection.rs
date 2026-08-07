@@ -55,11 +55,16 @@ impl RemoteSession {
     /// - 目标文件不存在 → 跳过备份、正常创建（与三端现状语义一致）
     /// - 任一写环节失败走 `|| rm -f tmp` 清理临时文件（磁盘满/权限不足不留残）
     /// - 数据 base64 编码经 stdin 管道传入，不嵌入命令字符串，无大小限制
+    ///
+    /// `expected_hash` 为写前读到的文件 sha256（十六进制）：非 None 时在同一脚本内
+    /// 先校验远端文件未被外部修改，不一致则输出 `REMOTE_CONFLICT` 并返回 Err
+    /// （脏写防护，0 额外 RTT）；None 跳过校验（claude 保持历史行为）。
     pub async fn write_settings_with_backup(
         &self,
         path: &str,
         content: &str,
         container: Option<&str>,
+        expected_hash: Option<&str>,
     ) -> Result<(), String> {
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD.encode(content.as_bytes());
@@ -68,24 +73,40 @@ impl RemoteSession {
             _ => "/",
         };
         let tmp = format!("{path}.ccswitch.tmp");
+        let hash_guard = match expected_hash {
+            Some(h) if !h.is_empty() => format!(
+                "if [ -f {p} ] && [ \"$(sha256sum {p} 2>/dev/null | cut -d' ' -f1)\" != '{h}' ]; then echo REMOTE_CONFLICT; exit 0; fi; ",
+                p = shell_quote(path),
+                h = h,
+            ),
+            _ => String::new(),
+        };
         let script = format!(
-            "[ -f {p} ] && cp {p} {bak}; mkdir -p {parent} && base64 -d > {tmp} && mv {tmp} {p} || rm -f {tmp}",
+            "{guard}[ -f {p} ] && cp {p} {bak}; mkdir -p {parent} && base64 -d > {tmp} && mv {tmp} {p} || rm -f {tmp}; echo ATOMIC_OK",
+            guard = hash_guard,
             p = shell_quote(path),
             bak = shell_quote(&format!("{path}.bak")),
             parent = shell_quote(parent),
             tmp = shell_quote(&tmp),
         );
-        match container {
+        let out = match container {
             // 宿主机：强制 sh -c（不依赖远端默认 login shell）
-            None => {
-                let _ = self.exec_with_stdin(&script, b64.as_bytes()).await?;
-            }
+            None => self.exec_with_stdin(&script, b64.as_bytes()).await?,
             // 容器：docker exec -i，容器名沿用 DockerExecFileOps 的合法性校验
             Some(c) => {
                 let ops = super::docker::DockerExecFileOps::new(&self.channel, c)?;
-                let cmd = format!("docker exec -i {} sh -c {}", ops.container, shell_quote(&script));
-                let _ = exec_command_with_stdin(&self.channel, &cmd, b64.as_bytes()).await?;
+                let cmd = format!(
+                    "docker exec -i {} sh -c {}",
+                    ops.container,
+                    shell_quote(&script),
+                );
+                exec_command_with_stdin(&self.channel, &cmd, b64.as_bytes()).await?
             }
+        };
+        if out.contains("REMOTE_CONFLICT") {
+            return Err(format!(
+                "远端 {path} 已被外部修改，切换中止（避免覆盖你的改动）；如需强制覆盖请手动处理"
+            ));
         }
         Ok(())
     }
