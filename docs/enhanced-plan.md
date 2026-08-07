@@ -228,10 +228,10 @@
 
 | 优先级 | 事项 |
 |---|---|
-| 中 | 远程 Sessions per-app(当前仅 claude 的 `~/.claude/projects`) |
-| 中 | 远程 Prompts per-app(当前仅 claude 的 CLAUDE.md) |
+| 中 | ~~远程 Sessions per-app~~ 🔄 进行中:grokbuild 已完成(抽纯解析 + FileOps 扫描器);codex/gemini/openclaw 待扩展;hermes/opencode 含 SQLite 主存储暂不支持 |
+| 中 | ~~远程 Prompts per-app~~ ✅ 已完成(2026-08-07,按本机 prompt_files 矩阵映射 live 文件,claude 外 per-app SSOT) |
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
-| 中 | `get_remote_current_provider` 兜底 per-app(当前仅 claude 有 base_url 兜底) |
+| 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |
 | 低 | `APP_INSTALL_CMDS` 包名校对(grok/openclaw/hermes 按官方文档核对) |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
 
