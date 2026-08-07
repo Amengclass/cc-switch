@@ -58,9 +58,14 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     let file = File::open(&chat_path)
         .map_err(|e| format!("Failed to open Grok Build chat history: {e}"))?;
     let reader = BufReader::new(file);
+    Ok(parse_messages_from_lines(reader.lines().map_while(Result::ok)))
+}
+
+/// 纯解析：chat_history.jsonl 逐行 → 消息（本机/远端共用）。
+pub fn parse_messages_from_lines(lines: impl IntoIterator<Item = String>) -> Vec<SessionMessage> {
     let mut messages = Vec::new();
 
-    for line in reader.lines().map_while(Result::ok) {
+    for line in lines {
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -86,7 +91,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
         });
     }
 
-    Ok(messages)
+    messages
 }
 
 pub fn delete_session(root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
@@ -155,7 +160,13 @@ fn read_summary(path: &Path) -> Result<GrokSessionSummary, String> {
 }
 
 fn parse_summary(path: &Path) -> Option<SessionMeta> {
-    let summary = read_summary(path).ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
+    parse_summary_text(&text, &path.to_string_lossy())
+}
+
+/// 纯解析：summary.json 文本 → SessionMeta（本机/远端共用）。
+pub fn parse_summary_text(text: &str, path: &str) -> Option<SessionMeta> {
+    let summary: GrokSessionSummary = serde_json::from_str(text).ok()?;
     let session_id = summary.info.id;
     let title = summary
         .generated_title
@@ -188,9 +199,45 @@ fn parse_summary(path: &Path) -> Option<SessionMeta> {
         project_dir: summary.info.cwd,
         created_at,
         last_active_at,
-        source_path: Some(path.to_string_lossy().to_string()),
+        source_path: Some(path.to_string()),
         resume_command: Some(format!("grok --resume {session_id}")),
     })
+}
+
+/// FileOps 版扫描（远端复用，照 claude.rs 的 scan_sessions_fs 模式）：
+/// 递归收集 summary.json → 读文本 → 纯解析。
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
+    let mut summaries = Vec::new();
+    collect_summary_files_fs(fs, root, &mut summaries).await;
+    let mut out = Vec::new();
+    for path in summaries {
+        if let Ok(Some(text)) = fs.read_text_optional(&path).await {
+            if let Some(meta) = parse_summary_text(&text, &path) {
+                out.push(meta);
+            }
+        }
+    }
+    out
+}
+
+async fn collect_summary_files_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    dir: &str,
+    out: &mut Vec<String>,
+) {
+    let Ok(entries) = fs.read_dir(dir).await else {
+        return;
+    };
+    for entry in entries {
+        if entry.is_dir {
+            Box::pin(collect_summary_files_fs(fs, &entry.path, out)).await;
+        } else if entry.name == "summary.json" {
+            out.push(entry.path);
+        }
+    }
 }
 
 #[cfg(test)]

@@ -195,10 +195,12 @@ export async function checkLocalCliInstalled(app: string): Promise<boolean> {
 export async function listRemoteSessionsDetailed(
   hostId: string,
   container?: string,
+  app?: string,
 ): Promise<SessionMeta[]> {
   return invoke<SessionMeta[]>("list_remote_sessions_detailed", {
     hostId,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -207,11 +209,13 @@ export async function getRemoteSessionMessages(
   hostId: string,
   sourcePath: string,
   container?: string,
+  app?: string,
 ): Promise<SessionMessage[]> {
   return invoke<SessionMessage[]>("get_remote_session_messages", {
     hostId,
     sourcePath,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -221,12 +225,14 @@ export async function deleteRemoteSession(
   sourcePath: string,
   sessionId: string,
   container?: string,
+  app?: string,
 ): Promise<boolean> {
   return invoke<boolean>("delete_remote_session", {
     hostId,
     sourcePath,
     sessionId,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -329,27 +335,31 @@ export async function importRemoteMcpFromApps(
   });
 }
 
-/** 读取远端 ~/.claude/CLAUDE.md 内容（文件缺失返回空字符串） */
+/** 读取远端 live 提示词文件内容（文件缺失返回空字符串；app 缺省 claude 兼容） */
 export async function readRemotePrompt(
   hostId: string,
   container?: string,
+  app?: string,
 ): Promise<string> {
   return invoke<string>("read_remote_prompt", {
     hostId,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
-/** 将内容整文件原子写回远端 ~/.claude/CLAUDE.md */
+/** 将内容整文件原子写回远端 live 提示词文件 */
 export async function writeRemotePrompt(
   hostId: string,
   content: string,
   container?: string,
+  app?: string,
 ): Promise<boolean> {
   return invoke<boolean>("write_remote_prompt", {
     hostId,
     content,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -368,23 +378,27 @@ export interface RemotePrompt {
 export async function listRemotePrompts(
   hostId: string,
   container?: string,
+  app?: string,
 ): Promise<RemotePrompt[]> {
   return invoke<RemotePrompt[]>("list_remote_prompts", {
     hostId,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
-/** 保存远端提示词列表，并同步启用项到 CLAUDE.md */
+/** 保存远端提示词列表，并同步启用项到 live 提示词文件 */
 export async function saveRemotePrompts(
   hostId: string,
   prompts: RemotePrompt[],
   container?: string,
+  app?: string,
 ): Promise<boolean> {
   return invoke<boolean>("save_remote_prompts", {
     hostId,
     prompts,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 

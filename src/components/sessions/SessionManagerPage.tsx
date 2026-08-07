@@ -198,12 +198,16 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  // 远程会话当前仅 claude 实现（远端 ~/.claude/projects）；其他 app 忽略远程目标走本机
+  // 远程会话支持 claude / grokbuild（后端已实现 FileOps 扫描）；
+  // codex/gemini/openclaw 待扩展，hermes/opencode 含 SQLite 主存储暂不支持
   const effectiveRemoteTargetId =
-    appId === "claude" ? remoteTargetId : undefined;
+    appId === "claude" || appId === "grokbuild"
+      ? remoteTargetId
+      : undefined;
   const { data, isLoading, isFetching, refetch } = useSessionsQuery(
     effectiveRemoteTargetId,
     remoteContainerId,
+    appId,
   );
   const sessions = data ?? [];
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -341,6 +345,7 @@ export function SessionManagerPage({
       selectedSession?.sourcePath,
       effectiveRemoteTargetId,
       remoteContainerId,
+      appId,
     );
   const deleteSessionMutation = useDeleteSessionMutation();
   const isDeleting = deleteSessionMutation.isPending || isBatchDeleting;
@@ -480,6 +485,7 @@ export function SessionManagerPage({
               target.sourcePath!,
               target.sessionId,
               remoteContainerId,
+              appId,
             );
             deletedCount += 1;
             queryClient.removeQueries({

@@ -578,44 +578,101 @@ pub async fn get_remote_current_provider(
         }
     }
 
-    // 2) 兜底：读目标（宿主机/容器）settings.json 匹配 base_url（对从未经本应用
-    //    切换的老配置）。当前仅 claude 实现（其他 app 的 base_url 兜底待后续扩展）。
-    if app != "claude" {
+    // 2) 兜底：读目标 live 匹配 base_url（对从未经本应用切换的老配置）。
+    //    仅「整文件覆盖式」app 有明确的 base_url 判定字段；additive 模式 app
+    //    （opencode/openclaw/hermes）无「当前供应商」概念，与本机一致跳过。
+    if !matches!(app.as_str(), "claude" | "codex" | "gemini" | "grokbuild") {
         return Ok(None);
     }
 
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let settings = settings::read_remote_settings(&target, &host.default_home()).await?;
+    let home = host.default_home();
 
-    let remote_base = settings
-        .pointer("/env/ANTHROPIC_BASE_URL")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    // 读远端 live 文件 → 提取当前 base_url（与本机各 app 判定字段一致）
+    let remote_base = match app.as_str() {
+        "codex" => {
+            let path = format!("{home}/.codex/config.toml");
+            session
+                .read_remote_text(&path, container.as_deref())
+                .await?
+                .and_then(|t| crate::codex_config::extract_codex_base_url(&t))
+                .unwrap_or_default()
+        }
+        "gemini" => {
+            let path = format!("{home}/.gemini/.env");
+            session
+                .read_remote_text(&path, container.as_deref())
+                .await?
+                .map(|t| crate::gemini_config::parse_env_file(&t))
+                .and_then(|m| m.get("GOOGLE_GEMINI_BASE_URL").cloned())
+                .unwrap_or_default()
+        }
+        "grokbuild" => {
+            let path = format!("{home}/.grok/config.toml");
+            session
+                .read_remote_text(&path, container.as_deref())
+                .await?
+                .and_then(|t| crate::grok_config::extract_base_url(&t))
+                .unwrap_or_default()
+        }
+        _ => {
+            // claude：settings.json（FileOps，容器兼容）
+            let target = crate::remote::docker::RemoteTarget::new(
+                &session.sftp,
+                &session.channel,
+                container.as_deref(),
+            )?;
+            settings::read_remote_settings(&target, &home)
+                .await?
+                .pointer("/env/ANTHROPIC_BASE_URL")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        }
+    };
+    if remote_base.is_empty() {
+        return Ok(None);
+    }
 
+    let app_type = crate::app_config::AppType::from_str(&app)
+        .map_err(|_| format!("未知应用类型: {app}"))?;
     let providers = state
         .db
-        .get_all_providers("claude")
+        .get_all_providers(&app)
         .map_err(|e| e.to_string())?;
     for (id, p) in &providers {
-        // 远端 settings.json 里存的是「生效配置」——即合并通用配置片段后的结果，
+        // 远端 live 里存的是「生效配置」——即合并通用配置片段后的结果，
         // 与 switch_remote_provider 写入时一致。因此这里必须用同一份生效配置的
         // base_url 去比对，否则开启了通用配置的供应商永远匹配不上，编辑推送会被跳过。
         let effective = crate::services::provider::live::build_effective_settings_with_common_config(
             &state.db,
-            &crate::app_config::AppType::Claude,
+            &app_type,
             p,
         )
         .map_err(|e| e.to_string())?;
-        let local_base = effective
-            .pointer("/env/ANTHROPIC_BASE_URL")
-            .and_then(Value::as_str)
-            .unwrap_or("");
+        let local_base = match app.as_str() {
+            "codex" => effective
+                .get("config")
+                .and_then(Value::as_str)
+                .and_then(crate::codex_config::extract_codex_base_url)
+                .unwrap_or_default(),
+            "gemini" => effective
+                .pointer("/env/GOOGLE_GEMINI_BASE_URL")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            "grokbuild" => effective
+                .get("config")
+                .and_then(Value::as_str)
+                .and_then(crate::grok_config::extract_base_url)
+                .unwrap_or_default(),
+            _ => effective
+                .pointer("/env/ANTHROPIC_BASE_URL")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        };
         if !local_base.is_empty() && local_base == remote_base {
             return Ok(Some(id.clone()));
         }
@@ -715,11 +772,13 @@ pub async fn list_remote_sessions(
 
 /// 复用本机 `session_manager` 的解析逻辑，列出远端会话的**完整元数据**（标题/摘要/时间等）。
 /// 通过 `FileOps` + 共享的 `scan_sessions_fs` 实现「一套逻辑、本机/远端/容器三套数据源」。
+/// `app`：claude / grokbuild 已支持；其余待扩展（hermes/opencode 含 SQLite 主存储，暂不支持）。
 #[tauri::command]
 pub async fn list_remote_sessions_detailed(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
+    app: String,
 ) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -730,17 +789,28 @@ pub async fn list_remote_sessions_detailed(
         container.as_deref(),
     )?;
     let home = host.default_home();
-    let root = format!("{home}/.claude/projects");
-    Ok(crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await)
+    let root = match app.as_str() {
+        "claude" => format!("{home}/.claude/projects"),
+        "grokbuild" => format!("{home}/.grok/sessions"),
+        other => {
+            return Err(format!("远程会话管理暂不支持应用 {other}"));
+        }
+    };
+    Ok(match app.as_str() {
+        "claude" => crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await,
+        "grokbuild" => crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await,
+        _ => unreachable!(),
+    })
 }
 
-/// 读取远端会话消息（复用本机 `parse_messages_from_lines` 纯解析）。
+/// 读取远端会话消息（复用本机各 provider 的纯解析；`app` 决定解析器）。
 #[tauri::command]
 pub async fn get_remote_session_messages(
     state: State<'_, AppState>,
     host_id: String,
     source_path: String,
     container: Option<String>,
+    app: String,
 ) -> Result<Vec<crate::session_manager::SessionMessage>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -750,16 +820,29 @@ pub async fn get_remote_session_messages(
         &session.channel,
         container.as_deref(),
     )?;
-    let content = target
-        .read_text_optional(&source_path)
-        .await?
-        .unwrap_or_default();
-    Ok(crate::session_manager::providers::claude::parse_messages_from_lines(
-        content.lines().map(|s| s.to_string()),
-    ))
+    match app.as_str() {
+        "claude" => {
+            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
+            Ok(crate::session_manager::providers::claude::parse_messages_from_lines(
+                content.lines().map(|s| s.to_string()),
+            ))
+        }
+        "grokbuild" => {
+            // 列表里 source_path 是 summary.json，消息在同目录 chat_history.jsonl
+            let chat_path = format!(
+                "{}/chat_history.jsonl",
+                source_path.trim_end_matches("/summary.json")
+            );
+            let content = target.read_text_optional(&chat_path).await?.unwrap_or_default();
+            Ok(crate::session_manager::providers::grokbuild::parse_messages_from_lines(
+                content.lines().map(|s| s.to_string()),
+            ))
+        }
+        other => Err(format!("远程会话管理暂不支持应用 {other}")),
+    }
 }
 
-/// 删除远端会话（主文件 + sidecar 目录），通过 FileOps 实现。
+/// 删除远端会话（per-app 校验 + 删除），通过 FileOps 实现。
 #[tauri::command]
 pub async fn delete_remote_session(
     state: State<'_, AppState>,
@@ -767,6 +850,7 @@ pub async fn delete_remote_session(
     source_path: String,
     session_id: String,
     container: Option<String>,
+    app: String,
 ) -> Result<bool, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -777,35 +861,59 @@ pub async fn delete_remote_session(
         container.as_deref(),
     )?;
 
-    // 校验 session_id 与远端文件匹配（复用本机解析）
-    let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
-    let meta = crate::session_manager::providers::claude::parse_session_meta_from_lines(
-        &source_path,
-        &head,
-        &tail,
-    )
-    .ok_or_else(|| format!("无法解析远端会话元数据: {source_path}"))?;
-    if meta.session_id != session_id {
-        return Err(format!(
-            "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-            meta.session_id
-        ));
-    }
+    match app.as_str() {
+        "claude" => {
+            // 校验 session_id 与远端文件匹配（复用本机解析）
+            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
+            let meta = crate::session_manager::providers::claude::parse_session_meta_from_lines(
+                &source_path, &head, &tail,
+            )
+            .ok_or_else(|| format!("无法解析远端会话元数据: {source_path}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
 
-    // 删除主文件 + sidecar 目录（同名无 .jsonl 后缀）
-    let sidecar = source_path
-        .strip_suffix(".jsonl")
-        .unwrap_or(&source_path)
-        .to_string();
-    if target.exists(&sidecar).await {
-        if target.is_dir(&sidecar).await {
-            target.remove_dir_all(&sidecar).await?;
-        } else {
-            target.remove_file(&sidecar).await?;
+            // 删除主文件 + sidecar 目录（同名无 .jsonl 后缀）
+            let sidecar = source_path
+                .strip_suffix(".jsonl")
+                .unwrap_or(&source_path)
+                .to_string();
+            if target.exists(&sidecar).await {
+                if target.is_dir(&sidecar).await {
+                    target.remove_dir_all(&sidecar).await?;
+                } else {
+                    target.remove_file(&sidecar).await?;
+                }
+            }
+            target.remove_file(&source_path).await?;
+            Ok(true)
         }
+        "grokbuild" => {
+            // source_path 是 summary.json：读文本校验 id，然后删整个会话目录
+            let text = target
+                .read_text_optional(&source_path)
+                .await?
+                .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
+            let meta =
+                crate::session_manager::providers::grokbuild::parse_summary_text(&text, &source_path)
+                    .ok_or_else(|| format!("无法解析远端 Grok Build 会话: {source_path}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
+            let session_dir = source_path
+                .trim_end_matches("/summary.json")
+                .to_string();
+            target.remove_dir_all(&session_dir).await?;
+            Ok(true)
+        }
+        other => Err(format!("远程会话管理暂不支持应用 {other}")),
     }
-    target.remove_file(&source_path).await?;
-    Ok(true)
 }
 
 /// 列出远端 MCP 服务器（完整 McpServer，读 SSOT ~/.cc-switch/mcp.json）。
@@ -958,12 +1066,13 @@ pub async fn import_remote_mcp_from_apps(
     crate::remote::mcp::import_remote_mcp_from_apps(&target, &host.default_home()).await
 }
 
-/// 读取远端 `~/.claude/CLAUDE.md` 内容（文件缺失返回空字符串）。
+/// 读取远端 live 提示词文件内容（文件缺失返回空字符串）。
 #[tauri::command]
 pub async fn read_remote_prompt(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
+    app: String,
 ) -> Result<String, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -973,16 +1082,17 @@ pub async fn read_remote_prompt(
         &session.channel,
         container.as_deref(),
     )?;
-    crate::remote::prompt::read_remote_prompt(&target, &host.default_home()).await
+    crate::remote::prompt::read_remote_prompt(&target, &host.default_home(), &app).await
 }
 
-/// 将内容整文件原子写回远端 `~/.claude/CLAUDE.md`。
+/// 将内容整文件原子写回远端 live 提示词文件。
 #[tauri::command]
 pub async fn write_remote_prompt(
     state: State<'_, AppState>,
     host_id: String,
     content: String,
     container: Option<String>,
+    app: String,
 ) -> Result<bool, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -992,7 +1102,8 @@ pub async fn write_remote_prompt(
         &session.channel,
         container.as_deref(),
     )?;
-    crate::remote::prompt::write_remote_prompt(&target, &host.default_home(), &content).await?;
+    crate::remote::prompt::write_remote_prompt(&target, &host.default_home(), &app, &content)
+        .await?;
     Ok(true)
 }
 
@@ -1002,6 +1113,7 @@ pub async fn list_remote_prompts(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
+    app: String,
 ) -> Result<Vec<crate::prompt::Prompt>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1009,16 +1121,17 @@ pub async fn list_remote_prompts(
     let target = crate::remote::docker::RemoteTarget::new(
         &session.sftp, &session.channel, container.as_deref(),
     )?;
-    crate::remote::prompt::read_remote_prompts(&target, &host.default_home()).await
+    crate::remote::prompt::read_remote_prompts(&target, &host.default_home(), &app).await
 }
 
-/// 保存（新增/更新）远端提示词列表，并同步启用项到 CLAUDE.md。
+/// 保存（新增/更新）远端提示词列表，并同步启用项到 live 提示词文件。
 #[tauri::command]
 pub async fn save_remote_prompts(
     state: State<'_, AppState>,
     host_id: String,
     prompts: Vec<crate::prompt::Prompt>,
     container: Option<String>,
+    app: String,
 ) -> Result<bool, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1026,7 +1139,8 @@ pub async fn save_remote_prompts(
     let target = crate::remote::docker::RemoteTarget::new(
         &session.sftp, &session.channel, container.as_deref(),
     )?;
-    crate::remote::prompt::write_remote_prompts(&target, &host.default_home(), &prompts).await?;
+    crate::remote::prompt::write_remote_prompts(&target, &host.default_home(), &app, &prompts)
+        .await?;
     Ok(true)
 }
 

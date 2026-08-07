@@ -311,14 +311,21 @@ export const useUsageQuery = (
 export const useSessionsQuery = (
   remoteTargetId?: string,
   remoteContainerId?: string,
+  appId?: string,
 ) => {
   return useQuery<SessionMeta[]>({
     queryKey: remoteTargetId
-      ? ["sessions", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
+      ? [
+          "sessions",
+          "remote",
+          remoteTargetId,
+          remoteContainerId ?? "__host__",
+          appId ?? "claude",
+        ]
       : ["sessions"],
     queryFn: async () =>
       remoteTargetId
-        ? listRemoteSessionsDetailed(remoteTargetId, remoteContainerId)
+        ? listRemoteSessionsDetailed(remoteTargetId, remoteContainerId, appId)
         : sessionsApi.list(),
     staleTime: 30 * 1000,
   });
@@ -329,6 +336,7 @@ export const useSessionMessagesQuery = (
   sourcePath?: string,
   remoteTargetId?: string,
   remoteContainerId?: string,
+  appId?: string,
 ) => {
   return useQuery<SessionMessage[]>({
     queryKey: remoteTargetId
@@ -338,6 +346,7 @@ export const useSessionMessagesQuery = (
           remoteTargetId,
           remoteContainerId ?? "__host__",
           sourcePath,
+          appId ?? "claude",
         ]
       : ["sessionMessages", providerId, sourcePath],
     queryFn: async () =>
@@ -346,6 +355,7 @@ export const useSessionMessagesQuery = (
             remoteTargetId,
             sourcePath!,
             remoteContainerId,
+            appId,
           )
         : sessionsApi.getMessages(providerId!, sourcePath!),
     enabled: Boolean(providerId && sourcePath),

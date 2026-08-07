@@ -45,7 +45,8 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
     ref,
   ) => {
     const { t } = useTranslation();
-    const isRemote = Boolean(remoteTargetId && appId === "claude");
+    // 远端目标下走远端 prompts 管理（所有 app，后端按 app 映射 live 提示词文件）
+    const isRemote = Boolean(remoteTargetId);
 
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
@@ -80,6 +81,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         const list = await listRemotePrompts(
           remoteTargetId,
           remoteContainerId || undefined,
+          appId,
         );
         const map: Record<string, RemotePrompt> = {};
         list.forEach((p) => {
@@ -236,6 +238,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
                 remoteTargetId,
                 list,
                 remoteContainerId || undefined,
+                appId,
               );
               // 同步更新前端状态
               setRemotePrompts((prev) => {
@@ -298,6 +301,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
               remoteTargetId,
               list,
               remoteContainerId || undefined,
+              appId,
             );
             toast.success(
               enabled
@@ -354,6 +358,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
             remoteTargetId,
             list,
             remoteContainerId || undefined,
+            appId,
           );
           // 同步更新前端状态
           const map: Record<string, RemotePrompt> = {};
