@@ -10,6 +10,9 @@ body {
   padding: 0;
   background: transparent;
   overflow: hidden;
+  /* 撑满窗口，使内容根节点 #floating-root 可占满 */
+  width: 100%;
+  height: 100%;
   /* 球窗口比胶囊大一圈（阴影留白），这里让胶囊居中 */
   display: flex;
   align-items: center;
@@ -23,6 +26,20 @@ body {
     sans-serif;
   -webkit-user-select: none;
   user-select: none;
+}
+
+/* 各悬浮窗口内容根节点：占满整个窗口。否则 flex 容器宽度=内容宽度，
+ * .floating-menu 这类 width:100% 的容器只画到内容宽（约 60px），
+ * 窗口加宽后两侧会留下透明空隙（"增宽没显现"）。
+ * 同时是 flex 容器并居中：菜单窗口比菜单白框大一圈（阴影留白），
+ * 白框必须居中，「窗口位置 = 内容位置 − 留白」的对齐才成立，
+ * 否则白框贴窗口左上角、整体偏左上 MENU_SHADOW_MARGIN 像素。 */
+#floating-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* ---- 主题变量 ---- */
@@ -256,7 +273,7 @@ body {
   flex-shrink: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: flex-start;
   gap: 2px;
   /* 面板空间有限（300px、最多 8 行），余量字号取小保证每行紧凑 */
   font-size: 10px;
@@ -278,7 +295,7 @@ body {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 1px 7px;
   max-width: 170px;
 }
@@ -354,7 +371,7 @@ body {
 }
 .row-sub-item {
   font-size: 10px; /* 与主行用量一致，面板紧凑 */
-  text-align: right;
+  text-align: left;
 }
 .empty {
   padding: 20px;
@@ -390,23 +407,32 @@ body {
 }
 
 /* ---- 右键菜单（floating-menu 透明窗，瘦高样式，与面板同款配色）----
- * 窗口尺寸 60×68 与 MENU_WIDTH/MENU_HEIGHT 对应；
+ * 窗口尺寸 80×68 与 MENU_WIDTH/MENU_HEIGHT 对应（比最窄内容 59 留一些余量）；
  * 项保持正常大小（项高28/图标12/字号12），仅面板内边距取最小以收窄整体宽度；
  * 内容：padding 2×2 + 2×28 项 + gap 2×2 + 1 分隔线 + 2 边框 = 67（高）
  *       项内容 53（图标12+gap5+2字24+内边距12）+ padding 4 + 边框 2 = 59（宽）
  */
 .floating-menu {
-  width: 100%;
-  height: 100%;
+  /* 固定为菜单内容尺寸（与 Rust MENU_WIDTH/MENU_HEIGHT 同步），四周留
+   * MENU_SHADOW_MARGIN=10 空白给阴影完整渲染，避免被透明窗口裁剪 */
+  width: 80px;
+  height: 68px;
   box-sizing: border-box;
   padding: 2px;
   background: var(--fb-bg);
-  border: 1px solid var(--fb-border);
+  /* 边框要比全局 --fb-border 明显：菜单浮在桌面/壁纸上也要能分辨轮廓 */
+  border: 1px solid rgba(24, 24, 27, 0.2);
   border-radius: 10px;
+  /* 轻微外阴影，增强与桌面的层次（模糊扩散 ≤ 留白，不被窗口裁剪） */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   color: var(--fb-fg);
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.dark .floating-menu {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
 }
 .menu-item {
   display: flex;

@@ -26,11 +26,24 @@ const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;
 /// 右键菜单窗口尺寸（瘦高样式，与 .floating-menu CSS 保持一致：
 /// padding 2+2、2×28 项、2×2 gap、1 分隔线、1 边框；带图标列。
-/// 项内容最小宽 53（图标12+gap5+2字24+内边距12）+ padding 4 + 边框 2 = 59，取 60）
-const MENU_WIDTH: f64 = 60.0;
+/// 比最窄内容（项内容 53 + padding 4 + 边框 2 = 59）留一些余量，取 80）
+const MENU_WIDTH: f64 = 80.0;
 const MENU_HEIGHT: f64 = 68.0;
+/// 菜单窗口四周留白（逻辑像素）：box-shadow 羽化超出透明窗口会被裁成方形，
+/// 窗口必须比菜单内容大一圈才能完整显示阴影/描边。
+const MENU_SHADOW_MARGIN: f64 = 10.0;
+
+/// 菜单窗口实际尺寸 = 内容尺寸 + 四周阴影留白（创建/显示时用窗口尺寸，定位时用内容尺寸）
+fn menu_window_size() -> (f64, f64) {
+    (
+        MENU_WIDTH + MENU_SHADOW_MARGIN * 2.0,
+        MENU_HEIGHT + MENU_SHADOW_MARGIN * 2.0,
+    )
+}
 /// 面板/菜单与小球之间的间距（逻辑像素）
 const PANEL_GAP: f64 = 8.0;
+/// 吸附后与屏幕边缘（及任务栏边缘）保留的一小段间距（逻辑像素）
+const EDGE_GAP: f64 = 6.0;
 /// 小球→面板跨窗移动时的隐藏宽限期
 const HOVER_GRACE_MS: u64 = 300;
 
@@ -238,29 +251,33 @@ fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
     let ball_w = BALL_WIDTH * scale;
     let ball_h = BALL_HEIGHT * scale;
     let thresh_px = SNAP_THRESHOLD * scale;
+    // 吸附后与边缘保留的一小段间距（物理像素）
+    let gap_px = EDGE_GAP * scale;
 
     if let Some(monitor) = ball.current_monitor().ok().flatten() {
-        let mpos = monitor.position();
-        let msize = monitor.size();
-        let left = mpos.x as f64;
-        let top = mpos.y as f64;
-        let right = left + msize.width as f64;
-        let bottom = top + msize.height as f64;
+        // 用显示器**工作区**（去掉任务栏的区域）作吸附边界：球贴底时吸附到
+        // 任务栏顶端，而不是屏幕最底部（会被任务栏遮住）。任务栏在顶/左/右侧
+        // 时同理，球始终留在工作区内。
+        let work = monitor.work_area();
+        let left = work.position.x as f64;
+        let top = work.position.y as f64;
+        let right = left + work.size.width as f64;
+        let bottom = top + work.size.height as f64;
 
         if px - left <= thresh_px {
-            px = left;
+            px = left + gap_px;
         } else if right - (px + ball_w) <= thresh_px {
-            px = right - ball_w;
+            px = right - ball_w - gap_px;
         }
         if py - top <= thresh_px {
-            py = top;
+            py = top + gap_px;
         } else if bottom - (py + ball_h) <= thresh_px {
-            py = bottom - ball_h;
+            py = bottom - ball_h - gap_px;
         }
         px = px.max(left).min(right - ball_w);
         py = py.max(top).min(bottom - ball_h);
         log::info!(
-            "[Floating] 吸附计算: pos=({px:.0},{py:.0}) monitor=({left:.0},{top:.0},{right:.0},{bottom:.0}) scale={scale}"
+            "[Floating] 吸附计算: pos=({px:.0},{py:.0}) work_area=({left:.0},{top:.0},{right:.0},{bottom:.0}) gap={gap_px:.0} scale={scale}"
         );
     }
     Some((px, py))
@@ -418,7 +435,8 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
 
     // 创建右键菜单窗口（保持隐藏，右键时才显示）
     if app.get_webview_window(MENU_LABEL).is_none() {
-        if let Ok(menu) = build_floating_window(app, MENU_LABEL, MENU_WIDTH, MENU_HEIGHT) {
+        let (mw, mh) = menu_window_size();
+        if let Ok(menu) = build_floating_window(app, MENU_LABEL, mw, mh) {
             let _ = menu.set_position(tauri::LogicalPosition::new(-20000.0, -20000.0));
             log::info!("[Floating] 右键菜单窗口已创建");
         }
@@ -445,13 +463,14 @@ fn default_ball_position(ball: &WebviewWindow) -> tauri::LogicalPosition<f64> {
     let Some(monitor) = ball.primary_monitor().ok().flatten() else {
         return tauri::LogicalPosition::new(200.0, 200.0);
     };
-    let size = monitor.size();
     let scale = monitor.scale_factor();
-    let w = size.width as f64 / scale;
-    let h = size.height as f64 / scale;
+    // 用工作区（去掉任务栏）算默认右下角位置：首次启动也落在任务栏之上
+    let work = monitor.work_area();
+    let w = work.size.width as f64 / scale;
+    let h = work.size.height as f64 / scale;
     tauri::LogicalPosition::new(
-        (w - BALL_WIDTH - 24.0).max(0.0),
-        (h - BALL_HEIGHT - 48.0).max(0.0),
+        work.position.x as f64 / scale + (w - BALL_WIDTH - 24.0).max(0.0),
+        work.position.y as f64 / scale + (h - BALL_HEIGHT - 48.0).max(0.0),
     )
 }
 
@@ -524,6 +543,27 @@ fn current_ball_position(app: &tauri::AppHandle) -> Option<(f64, f64)> {
     let scale = ball.scale_factor().ok()?;
     let pos = ball.outer_position().ok()?;
     Some((pos.x as f64 / scale, pos.y as f64 / scale))
+}
+
+/// 读取小球当前逻辑尺寸（宽/高）。面板/菜单位位时**不直接用 BALL_WIDTH/HEIGHT
+/// 常量**，而是读球窗口当前实际尺寸：WebView2 加载内容后可能把窗口临时撑宽
+/// （on_page_load 已兜底设回 180×40），这里实时读取可保证弹出位置始终贴着球
+/// 的真实外缘；球尺寸日后调整时，面板/菜单位置自动跟随，无需再同步改常量。
+fn ball_logical_size(app: &tauri::AppHandle) -> (f64, f64) {
+    let Some(ball) = app.get_webview_window(BALL_LABEL) else {
+        return (BALL_WIDTH, BALL_HEIGHT);
+    };
+    let Ok(size) = ball.inner_size() else {
+        return (BALL_WIDTH, BALL_HEIGHT);
+    };
+    let scale = ball.scale_factor().unwrap_or(1.0);
+    let w = size.width as f64 / scale;
+    let h = size.height as f64 / scale;
+    if w > 1.0 && h > 1.0 {
+        (w, h)
+    } else {
+        (BALL_WIDTH, BALL_HEIGHT)
+    }
 }
 
 // ============================================================
@@ -873,20 +913,22 @@ fn position_for_ball(
         None => (0.0, 0.0, 1920.0, 1080.0),
     };
 
+    // 球当前实际逻辑尺寸（运行时读取，球尺寸变化时定位自动跟随）
+    let (ball_w, ball_h) = ball_logical_size(app);
     // 球相对所在显示器左上角的逻辑坐标
     let (bx, by) = (ball_pos.0 - origin_x, ball_pos.1 - origin_y);
-    let ball_cx = bx + BALL_WIDTH / 2.0;
-    let ball_cy = by + BALL_HEIGHT / 2.0;
+    let ball_cx = bx + ball_w / 2.0;
+    let ball_cy = by + ball_h / 2.0;
 
     // 水平：球偏左 → 弹窗左缘=球左缘（向右展开）；球偏右 → 弹窗右缘=球右缘（向左展开）
     let mut px = if ball_cx < screen_w / 2.0 {
         bx
     } else {
-        bx + BALL_WIDTH - width
+        bx + ball_w - width
     };
     // 该方向放不下 → 翻到反方向对齐
     if px + width > screen_w {
-        px = bx + BALL_WIDTH - width;
+        px = bx + ball_w - width;
     } else if px < 0.0 {
         px = bx;
     }
@@ -894,14 +936,14 @@ fn position_for_ball(
 
     // 垂直：球偏上 → 弹窗顶缘=球底缘+间隙（向下展开）；球偏下 → 弹窗底缘=球顶缘-间隙（向上展开）
     let mut py = if ball_cy < screen_h / 2.0 {
-        by + BALL_HEIGHT + PANEL_GAP
+        by + ball_h + PANEL_GAP
     } else {
         by - PANEL_GAP - height
     };
     if py + height > screen_h {
         py = by - PANEL_GAP - height;
     } else if py < 0.0 {
-        py = by + BALL_HEIGHT + PANEL_GAP;
+        py = by + ball_h + PANEL_GAP;
     }
     py = py.clamp(0.0, (screen_h - height).max(0.0)) + origin_y;
 
@@ -913,9 +955,11 @@ fn panel_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64
     position_for_ball(app, ball_pos, PANEL_WIDTH, PANEL_HEIGHT)
 }
 
-/// 右键菜单位置
+/// 右键菜单位置：内容按 position_for_ball 规则对齐球边缘（菜单左/右缘=球相应缘），
+/// 窗口位置再整体平移阴影留白，使窗口的阴影区跟随内容一起定位。
 fn menu_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64, f64) {
-    position_for_ball(app, ball_pos, MENU_WIDTH, MENU_HEIGHT)
+    let (px, py) = position_for_ball(app, ball_pos, MENU_WIDTH, MENU_HEIGHT);
+    (px - MENU_SHADOW_MARGIN, py - MENU_SHADOW_MARGIN)
 }
 
 /// 悬停小球：定位并显示面板，通知面板拉取数据
@@ -1071,11 +1115,22 @@ pub async fn show_floating_context_menu(app: tauri::AppHandle) -> Result<(), Str
 
     let (px, py) = menu_position_for_ball(&app, ball_pos);
     let _ = menu.set_position(tauri::LogicalPosition::new(px, py));
+    // 显示瞬间再强制一次窗口尺寸：WebView2 加载内容后可能把菜单窗口撑宽
+    // （on_page_load 已设回，这里兜底到显示时刻）；窗口尺寸含阴影留白
+    let (mw, mh) = menu_window_size();
+    let _ = menu.set_size(tauri::LogicalSize::new(mw, mh));
     MENU_OPEN.store(true, Ordering::Release);
     let _ = menu.show();
     // 菜单是模态的，必须抢焦点，否则无法靠「失焦」感知点击别处
     let _ = menu.set_focus();
-    log::debug!("[Floating] 右键菜单已显示");
+    if let Ok(size) = menu.inner_size() {
+        let scale = menu.scale_factor().unwrap_or(1.0);
+        log::info!(
+            "[Floating] 右键菜单窗口尺寸: {:.0}x{:.0} 逻辑 (内容 {MENU_WIDTH}x{MENU_HEIGHT})",
+            size.width as f64 / scale,
+            size.height as f64 / scale
+        );
+    }
     Ok(())
 }
 

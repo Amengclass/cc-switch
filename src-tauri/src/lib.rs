@@ -1192,6 +1192,19 @@ pub fn run() {
                 }
             }
 
+            // 启动后预热用量缓存：悬浮球/悬浮面板/托盘首次展示即有余量数据。
+            // 悬浮窗按设计只读缓存、从不主动发查询，主窗口又可能未挂载用量组件，
+            // 因此启动时兜底查一次（复用托盘刷新逻辑，含 10 秒防抖），结果写入
+            // UsageCache 后经 usage-cache-updated 事件推给悬浮窗。
+            {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    // 稍等片刻，等网络/WebView/DB 就绪再查，减少启动竞态
+                    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                    crate::tray::refresh_all_usage_in_tray(&app_handle).await;
+                });
+            }
+
             // 异常退出恢复 + 代理状态自动恢复
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
