@@ -268,8 +268,69 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     Ok(messages)
 }
 
-pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
-    let meta = parse_session(path)
+/// 纯解析：Codex 会话 JSONL 行 → 消息（本机/远端共用，新增于 2026-08-07）。
+pub fn parse_messages_from_lines(lines: impl IntoIterator<Item = String>) -> Vec<SessionMessage> {
+    let mut messages = Vec::new();
+
+    for line in lines {
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+
+        if value.get("type").and_then(Value::as_str) != Some("response_item") {
+            continue;
+        }
+
+        let payload = match value.get("payload") {
+            Some(payload) => payload,
+            None => continue,
+        };
+
+        let payload_type = payload.get("type").and_then(Value::as_str).unwrap_or("");
+
+        // Codex uses separate payload types for tool interactions
+        let (role, content) = match payload_type {
+            "message" => {
+                let role = payload
+                    .get("role")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown")
+                    .to_string();
+                let content = payload.get("content").map(extract_text).unwrap_or_default();
+                (role, content)
+            }
+            "function_call" => {
+                let name = payload
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                ("assistant".to_string(), format!("[Tool: {name}]"))
+            }
+            "function_call_output" => {
+                let output = payload
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                ("tool".to_string(), output)
+            }
+            _ => continue,
+        };
+
+        if content.trim().is_empty() {
+            continue;
+        }
+
+        let ts = value.get("timestamp").and_then(parse_timestamp_to_ms);
+
+        messages.push(SessionMessage { role, content, ts });
+    }
+
+    messages
+}
+
+pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {    let meta = parse_session(path)
         .ok_or_else(|| format!("Failed to parse Codex session metadata: {}", path.display()))?;
 
     if meta.session_id != session_id {
@@ -501,6 +562,136 @@ fn infer_session_id_from_filename(path: &Path) -> Option<String> {
     UUID_RE.find(&file_name).map(|mat| mat.as_str().to_string())
 }
 
+/// 纯解析：会话 head/tail 行 → SessionMeta（本机/远端共用，新增于 2026-08-07）。
+/// 标题优先级：thread_titles 表 → 首条用户消息 → 项目目录名。
+pub fn parse_session_meta_from_lines(
+    path: &str,
+    head: &[String],
+    tail: &[String],
+    thread_titles: &HashMap<String, String>,
+) -> Option<SessionMeta> {
+    let mut session_id: Option<String> = None;
+    let mut project_dir: Option<String> = None;
+    let mut created_at: Option<i64> = None;
+    let mut first_user_message: Option<String> = None;
+
+    // Extract metadata and first user message from head lines
+    for line in head {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        if created_at.is_none() {
+            created_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("session_meta") {
+            if let Some(payload) = value.get("payload") {
+                if is_subagent_source(payload.get("source")) {
+                    return None;
+                }
+                if session_id.is_none() {
+                    session_id = payload
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string());
+                }
+                if project_dir.is_none() {
+                    project_dir = payload
+                        .get("cwd")
+                        .and_then(Value::as_str)
+                        .map(|s| s.to_string());
+                }
+                if let Some(ts) = payload.get("timestamp").and_then(parse_timestamp_to_ms) {
+                    created_at.get_or_insert(ts);
+                }
+            }
+        }
+        // Extract first user message as title candidate
+        if first_user_message.is_none()
+            && value.get("type").and_then(Value::as_str) == Some("response_item")
+        {
+            if let Some(payload) = value.get("payload") {
+                if payload.get("type").and_then(Value::as_str) == Some("message")
+                    && payload.get("role").and_then(Value::as_str) == Some("user")
+                {
+                    let text = payload.get("content").map(extract_text).unwrap_or_default();
+                    if let Some(title) = title_candidate_from_user_message(&text) {
+                        first_user_message = Some(title);
+                    }
+                }
+            }
+        }
+        if session_id.is_some()
+            && project_dir.is_some()
+            && created_at.is_some()
+            && first_user_message.is_some()
+        {
+            break;
+        }
+    }
+
+    // Extract last_active_at and summary from tail lines (reverse order)
+    let mut last_active_at: Option<i64> = None;
+    let mut summary: Option<String> = None;
+
+    for line in tail.iter().rev() {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        if last_active_at.is_none() {
+            last_active_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
+        }
+        if summary.is_none() && value.get("type").and_then(Value::as_str) == Some("response_item")
+        {
+            if let Some(payload) = value.get("payload") {
+                if payload.get("type").and_then(Value::as_str) == Some("message") {
+                    let text = payload.get("content").map(extract_text).unwrap_or_default();
+                    if !text.trim().is_empty() {
+                        summary = Some(text);
+                    }
+                }
+            }
+        }
+        if last_active_at.is_some() && summary.is_some() {
+            break;
+        }
+    }
+
+    let session_id = session_id.or_else(|| infer_session_id_from_filename_str(path));
+    let session_id = session_id?;
+
+    let title = thread_titles
+        .get(&session_id)
+        .map(|t| truncate_summary(t, TITLE_MAX_CHARS))
+        .or_else(|| first_user_message.map(|t| truncate_summary(&t, TITLE_MAX_CHARS)))
+        .or_else(|| {
+            project_dir
+                .as_deref()
+                .and_then(path_basename)
+                .map(|v| v.to_string())
+        });
+
+    let summary = summary.map(|text| truncate_summary(&text, 160));
+
+    Some(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: session_id.clone(),
+        title,
+        summary,
+        project_dir,
+        created_at,
+        last_active_at,
+        source_path: Some(path.to_string()),
+        resume_command: Some(format!("codex resume {session_id}")),
+    })
+}
+
+fn infer_session_id_from_filename_str(path: &str) -> Option<String> {
+    let file_name = Path::new(path).file_name()?.to_string_lossy();
+    UUID_RE.find(&file_name).map(|mat| mat.as_str().to_string())
+}
+
 fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
     if !root.exists() {
         return;
@@ -519,6 +710,75 @@ fn collect_jsonl_files(root: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+/// FileOps 版递归收集 jsonl（远端复用，照 claude.rs 模式）。
+async fn collect_jsonl_files_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    dir: &str,
+    files: &mut Vec<String>,
+) {
+    let Ok(entries) = fs.read_dir(dir).await else {
+        return;
+    };
+    for entry in entries {
+        if entry.is_dir {
+            Box::pin(collect_jsonl_files_fs(fs, &entry.path, files)).await;
+        } else if entry.name.ends_with(".jsonl") {
+            files.push(entry.path);
+        }
+    }
+}
+
+/// 纯解析：session_index.jsonl 文本 → 标题表（远端复用；远端读不到 SQLite db 标题）。
+fn parse_thread_titles_from_index_text(text: &str) -> HashMap<String, String> {
+    let mut titles = HashMap::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(entry) = serde_json::from_str::<SessionIndexEntry>(line) else {
+            continue;
+        };
+        let id = entry.id.trim();
+        let title = entry.thread_name.trim();
+        if !id.is_empty() && !title.is_empty() {
+            titles.insert(id.to_string(), title.to_string());
+        }
+    }
+    titles
+}
+
+/// FileOps 版扫描（远端复用）：扫描 sessions/ + archived_sessions/ 的 jsonl，
+/// 标题仅来自远端 session_index.jsonl（SQLite db 标题远端读不到，自动降级）。
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
+    let mut files = Vec::new();
+    for sub in ["sessions", "archived_sessions"] {
+        collect_jsonl_files_fs(fs, &format!("{root}/{sub}"), &mut files).await;
+    }
+
+    // 标题：远端 session_index.jsonl（FileOps 读文本 → 纯解析）
+    let titles = match fs
+        .read_text_optional(&format!("{root}/{CODEX_SESSION_INDEX_FILENAME}"))
+        .await
+    {
+        Ok(Some(text)) => parse_thread_titles_from_index_text(&text),
+        _ => HashMap::new(),
+    };
+
+    let mut sessions = Vec::new();
+    for path in files {
+        if let Ok((head, tail)) = fs.read_head_tail_lines(&path, 10, 30).await {
+            if let Some(meta) = parse_session_meta_from_lines(&path, &head, &tail, &titles) {
+                sessions.push(meta);
+            }
+        }
+    }
+    sessions
 }
 
 #[cfg(test)]

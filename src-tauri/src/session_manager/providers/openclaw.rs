@@ -337,6 +337,231 @@ fn prune_sessions_index(
     })
 }
 
+/// 纯解析：sessions.json 文本 → displayName 表（本机/远端共用，新增 2026-08-07）。
+pub fn parse_display_names_text(content: &str) -> HashMap<String, String> {
+    let index: serde_json::Map<String, Value> = match serde_json::from_str(content) {
+        Ok(m) => m,
+        Err(_) => return HashMap::new(),
+    };
+
+    let mut map = HashMap::new();
+    for (_key, entry) in &index {
+        if let (Some(id), Some(name)) = (
+            entry.get("sessionId").and_then(Value::as_str),
+            entry.get("displayName").and_then(Value::as_str),
+        ) {
+            if !name.is_empty() {
+                map.insert(id.to_string(), name.to_string());
+            }
+        }
+    }
+    map
+}
+
+/// 纯解析：会话 head/tail 行 → SessionMeta（本机/远端共用，新增 2026-08-07）。
+pub fn parse_session_from_lines(
+    path: &str,
+    head: &[String],
+    tail: &[String],
+    display_names: Option<&HashMap<String, String>>,
+) -> Option<SessionMeta> {
+    let mut session_id: Option<String> = None;
+    let mut cwd: Option<String> = None;
+    let mut created_at: Option<i64> = None;
+    let mut summary: Option<String> = None;
+    let mut first_user_message: Option<String> = None;
+
+    // Extract metadata, summary, and first user message from head lines
+    for line in head {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+
+        if created_at.is_none() {
+            created_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
+        }
+
+        let event_type = value.get("type").and_then(Value::as_str).unwrap_or("");
+
+        if event_type == "session" {
+            if session_id.is_none() {
+                session_id = value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+            }
+            if cwd.is_none() {
+                cwd = value
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(|s| s.to_string());
+            }
+            if let Some(ts) = value.get("timestamp").and_then(parse_timestamp_to_ms) {
+                created_at.get_or_insert(ts);
+            }
+            continue;
+        }
+
+        if event_type == "message" {
+            if let Some(message) = value.get("message") {
+                let text = message.get("content").map(extract_text).unwrap_or_default();
+                let cleaned = strip_message_id_suffix(&text);
+                if !cleaned.trim().is_empty() {
+                    if first_user_message.is_none()
+                        && message.get("role").and_then(Value::as_str) == Some("user")
+                    {
+                        first_user_message = Some(cleaned.trim().to_string());
+                    }
+                    if summary.is_none() {
+                        summary = Some(cleaned.trim().to_string());
+                    }
+                }
+            }
+        }
+
+        if session_id.is_some()
+            && cwd.is_some()
+            && created_at.is_some()
+            && summary.is_some()
+            && first_user_message.is_some()
+        {
+            break;
+        }
+    }
+
+    // Extract last_active_at from tail lines (reverse order)
+    let mut last_active_at: Option<i64> = None;
+    for line in tail.iter().rev() {
+        let value: Value = match serde_json::from_str(line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+        if let Some(ts) = value.get("timestamp").and_then(parse_timestamp_to_ms) {
+            last_active_at = Some(ts);
+            break;
+        }
+    }
+
+    // Fall back to filename as session ID
+    let session_id = session_id.or_else(|| {
+        Path::new(path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+    });
+    let session_id = session_id?;
+
+    // Title priority: displayName (from sessions.json) > first user message > dir basename
+    let title = display_names
+        .and_then(|m| m.get(&session_id))
+        .filter(|s| !s.is_empty())
+        .map(|t| truncate_summary(t, TITLE_MAX_CHARS))
+        .or_else(|| first_user_message.map(|t| truncate_summary(&t, TITLE_MAX_CHARS)))
+        .or_else(|| cwd.as_deref().and_then(path_basename).map(|s| s.to_string()));
+
+    let summary = summary.map(|text| truncate_summary(&text, 160));
+
+    Some(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: session_id.clone(),
+        title,
+        summary,
+        project_dir: cwd,
+        created_at,
+        last_active_at,
+        source_path: Some(path.to_string()),
+        resume_command: None, // OpenClaw sessions are gateway-managed, no CLI resume
+    })
+}
+
+/// 纯解析：OpenClaw 会话 JSONL 行 → 消息（本机/远端共用，新增 2026-08-07）。
+pub fn parse_messages_from_lines(lines: impl IntoIterator<Item = String>) -> Vec<SessionMessage> {
+    let mut messages = Vec::new();
+
+    for line in lines {
+        let value: Value = match serde_json::from_str(&line) {
+            Ok(parsed) => parsed,
+            Err(_) => continue,
+        };
+
+        if value.get("type").and_then(Value::as_str) != Some("message") {
+            continue;
+        }
+
+        let message = match value.get("message") {
+            Some(msg) => msg,
+            None => continue,
+        };
+
+        let raw_role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+
+        // Map OpenClaw roles to our standard roles
+        let role = match raw_role {
+            "toolResult" => "tool".to_string(),
+            other => other.to_string(),
+        };
+
+        let content = message.get("content").map(extract_text).unwrap_or_default();
+        if content.trim().is_empty() {
+            continue;
+        }
+
+        let ts = value.get("timestamp").and_then(parse_timestamp_to_ms);
+
+        messages.push(SessionMessage { role, content, ts });
+    }
+
+    messages
+}
+
+/// FileOps 版扫描（远端复用）：agents/<agent>/sessions/*.jsonl + sessions.json 标题。
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
+    // root = {home}/.openclaw/agents
+    let Ok(agent_entries) = fs.read_dir(root).await else {
+        return Vec::new();
+    };
+
+    let mut sessions = Vec::new();
+    for agent_entry in agent_entries {
+        if !agent_entry.is_dir {
+            continue;
+        }
+        let sessions_dir = format!("{}/sessions", agent_entry.path);
+        let Ok(session_entries) = fs.read_dir(&sessions_dir).await else {
+            continue;
+        };
+
+        let display_names = match fs
+            .read_text_optional(&format!("{sessions_dir}/sessions.json"))
+            .await
+        {
+            Ok(Some(text)) => parse_display_names_text(&text),
+            _ => HashMap::new(),
+        };
+
+        for entry in session_entries {
+            if !entry.name.ends_with(".jsonl") {
+                continue;
+            }
+            if let Ok((head, tail)) = fs.read_head_tail_lines(&entry.path, 10, 30).await {
+                if let Some(meta) =
+                    parse_session_from_lines(&entry.path, &head, &tail, Some(&display_names))
+                {
+                    sessions.push(meta);
+                }
+            }
+        }
+    }
+    sessions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -228,7 +228,7 @@
 
 | 优先级 | 事项 |
 |---|---|
-| 中 | ~~远程 Sessions per-app~~ 🔄 进行中:grokbuild 已完成(抽纯解析 + FileOps 扫描器);codex/gemini/openclaw 待扩展;hermes/opencode 含 SQLite 主存储暂不支持 |
+| 中 | ~~远程 Sessions per-app~~ 🔄 进行中:claude/grokbuild/codex/gemini/openclaw 已完成(抽纯解析 + FileOps 扫描器);hermes/opencode 含 SQLite 主存储,方案=远端 exec `sqlite3 <db> "SELECT ..."` 读会话(依赖远端 sqlite3,表结构按官方 schema)或 JSONL 文件兜底,另行设计 |
 | 中 | ~~远程 Prompts per-app~~ ✅ 已完成(2026-08-07,按本机 prompt_files 矩阵映射 live 文件,claude 外 per-app SSOT) |
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |

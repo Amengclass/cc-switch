@@ -792,6 +792,9 @@ pub async fn list_remote_sessions_detailed(
     let root = match app.as_str() {
         "claude" => format!("{home}/.claude/projects"),
         "grokbuild" => format!("{home}/.grok/sessions"),
+        "codex" => format!("{home}/.codex"),
+        "gemini" => format!("{home}/.gemini/tmp"),
+        "openclaw" => format!("{home}/.openclaw/agents"),
         other => {
             return Err(format!("远程会话管理暂不支持应用 {other}"));
         }
@@ -799,6 +802,9 @@ pub async fn list_remote_sessions_detailed(
     Ok(match app.as_str() {
         "claude" => crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await,
         "grokbuild" => crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await,
+        "codex" => crate::session_manager::providers::codex::scan_sessions_fs(&target, &root).await,
+        "gemini" => crate::session_manager::providers::gemini::scan_sessions_fs(&target, &root).await,
+        "openclaw" => crate::session_manager::providers::openclaw::scan_sessions_fs(&target, &root).await,
         _ => unreachable!(),
     })
 }
@@ -835,6 +841,22 @@ pub async fn get_remote_session_messages(
             );
             let content = target.read_text_optional(&chat_path).await?.unwrap_or_default();
             Ok(crate::session_manager::providers::grokbuild::parse_messages_from_lines(
+                content.lines().map(|s| s.to_string()),
+            ))
+        }
+        "codex" => {
+            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
+            Ok(crate::session_manager::providers::codex::parse_messages_from_lines(
+                content.lines().map(|s| s.to_string()),
+            ))
+        }
+        "gemini" => {
+            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
+            crate::session_manager::providers::gemini::parse_messages_from_json_text(&content)
+        }
+        "openclaw" => {
+            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
+            Ok(crate::session_manager::providers::openclaw::parse_messages_from_lines(
                 content.lines().map(|s| s.to_string()),
             ))
         }
@@ -910,6 +932,85 @@ pub async fn delete_remote_session(
                 .trim_end_matches("/summary.json")
                 .to_string();
             target.remove_dir_all(&session_dir).await?;
+            Ok(true)
+        }
+        "codex" => {
+            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
+            let meta = crate::session_manager::providers::codex::parse_session_meta_from_lines(
+                &source_path,
+                &head,
+                &tail,
+                &std::collections::HashMap::new(),
+            )
+            .ok_or_else(|| format!("无法解析远端 Codex 会话元数据: {source_path}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
+            target.remove_file(&source_path).await?;
+            Ok(true)
+        }
+        "gemini" => {
+            let text = target
+                .read_text_optional(&source_path)
+                .await?
+                .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
+            let meta =
+                crate::session_manager::providers::gemini::parse_session_from_json_text(
+                    &source_path,
+                    &text,
+                )
+                .ok_or_else(|| format!("无法解析远端 Gemini 会话: {source_path}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
+            target.remove_file(&source_path).await?;
+            Ok(true)
+        }
+        "openclaw" => {
+            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
+            let meta = crate::session_manager::providers::openclaw::parse_session_from_lines(
+                &source_path,
+                &head,
+                &tail,
+                None,
+            )
+            .ok_or_else(|| format!("无法解析远端 OpenClaw 会话: {source_path}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
+            // 同步清理 sessions.json 索引（对齐本机 prune_sessions_index）
+            let sessions_dir = source_path
+                .trim_end_matches(
+                    &format!(
+                        "/{}.jsonl",
+                        meta.session_id
+                    ),
+                );
+            let index_path = format!("{sessions_dir}/sessions.json");
+            if let Ok(Some(index_text)) = target.read_text_optional(&index_path).await {
+                let mut index: serde_json::Map<String, Value> =
+                    serde_json::from_str(&index_text).unwrap_or_default();
+                index.retain(|_, entry| {
+                    let same_id =
+                        entry.get("sessionId").and_then(Value::as_str) == Some(session_id.as_str());
+                    let same_file =
+                        entry.get("sessionFile").and_then(Value::as_str) == Some(source_path.as_str());
+                    !(same_id || same_file)
+                });
+                if let Ok(json) = serde_json::to_string_pretty(&index) {
+                    let _ = target.write_text_atomic(&index_path, &json).await;
+                }
+            }
+            target.remove_file(&source_path).await?;
             Ok(true)
         }
         other => Err(format!("远程会话管理暂不支持应用 {other}")),

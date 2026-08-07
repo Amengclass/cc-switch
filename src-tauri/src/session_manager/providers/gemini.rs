@@ -173,6 +173,141 @@ fn parse_session(path: &Path) -> Option<SessionMeta> {
     })
 }
 
+/// 纯解析：Gemini session JSON 文本 → SessionMeta（本机/远端共用，新增 2026-08-07）。
+pub fn parse_session_from_json_text(path: &str, text: &str) -> Option<SessionMeta> {
+    let value: Value = serde_json::from_str(text).ok()?;
+
+    let session_id = value.get("sessionId").and_then(Value::as_str)?.to_string();
+
+    let created_at = value.get("startTime").and_then(parse_timestamp_to_ms);
+    let last_active_at = value.get("lastUpdated").and_then(parse_timestamp_to_ms);
+
+    // Derive title from first user message
+    let title = value
+        .get("messages")
+        .and_then(Value::as_array)
+        .and_then(|msgs| {
+            msgs.iter()
+                .find(|m| m.get("type").and_then(Value::as_str) == Some("user"))
+                .and_then(|m| m.get("content").and_then(Value::as_str))
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| truncate_summary(s, 160))
+        });
+
+    Some(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: session_id.clone(),
+        title: title.clone(),
+        summary: title,
+        project_dir: None, // (optionally) populated later
+        created_at,
+        last_active_at: last_active_at.or(created_at),
+        source_path: Some(path.to_string()),
+        resume_command: Some(format!("gemini --resume {session_id}")),
+    })
+}
+
+/// 纯解析：Gemini session JSON 文本 → 消息（本机/远端共用，新增 2026-08-07）。
+pub fn parse_messages_from_json_text(text: &str) -> Result<Vec<SessionMessage>, String> {
+    let value: Value =
+        serde_json::from_str(text).map_err(|e| format!("Failed to parse session JSON: {e}"))?;
+
+    let messages = value
+        .get("messages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "No messages array found".to_string())?;
+
+    let mut result = Vec::new();
+    for msg in messages {
+        let role = match msg.get("type").and_then(Value::as_str) {
+            Some("gemini") => "assistant",
+            Some("user") => "user",
+            Some("info") | Some("error") => continue,
+            Some(_) | None => continue,
+        };
+
+        // Gemini content may be a plain string or an array of {text: ...} objects
+        let mut content = match msg.get("content") {
+            Some(Value::String(s)) => s.to_string(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(|item| item.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => String::new(),
+        };
+
+        // Append tool call names from the optional toolCalls array
+        if let Some(Value::Array(calls)) = msg.get("toolCalls") {
+            for call in calls {
+                if let Some(name) = call.get("name").and_then(Value::as_str) {
+                    if !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str(&format!("[Tool: {name}]"));
+                }
+            }
+        }
+
+        if content.trim().is_empty() {
+            continue;
+        }
+
+        let ts = msg.get("timestamp").and_then(parse_timestamp_to_ms);
+
+        result.push(SessionMessage {
+            role: role.to_string(),
+            content,
+            ts,
+        });
+    }
+
+    Ok(result)
+}
+
+/// FileOps 版扫描（远端复用）：tmp/<project>/chats/session-*.json + .project_root。
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
+    // root = {home}/.gemini/tmp
+    let Ok(project_dirs) = fs.read_dir(root).await else {
+        return Vec::new();
+    };
+
+    let mut sessions = Vec::new();
+    for entry in project_dirs {
+        if !entry.is_dir {
+            continue;
+        }
+        let chats_dir = format!("{}/chats", entry.path);
+        let project_root_file = format!("{}/.project_root", entry.path);
+        let project_dir = fs
+            .read_text_optional(&project_root_file)
+            .await
+            .ok()
+            .flatten();
+
+        let Ok(chat_files) = fs.read_dir(&chats_dir).await else {
+            continue;
+        };
+        for file_entry in chat_files {
+            if !file_entry.name.ends_with(".json") {
+                continue;
+            }
+            if let Ok(Some(text)) = fs.read_text_optional(&file_entry.path).await {
+                if let Some(mut meta) =
+                    parse_session_from_json_text(&file_entry.path, &text)
+                {
+                    meta.project_dir = project_dir.clone();
+                    sessions.push(meta);
+                }
+            }
+        }
+    }
+    sessions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
