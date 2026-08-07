@@ -208,12 +208,14 @@ export async function listRemoteSessionsDetailed(
 export async function getRemoteSessionMessages(
   hostId: string,
   sourcePath: string,
+  sessionId: string,
   container?: string,
   app?: string,
 ): Promise<SessionMessage[]> {
   return invoke<SessionMessage[]>("get_remote_session_messages", {
     hostId,
     sourcePath,
+    sessionId,
     container: container ?? null,
     app: app ?? "claude",
   });

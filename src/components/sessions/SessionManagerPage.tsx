@@ -198,14 +198,16 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  // 远程会话支持 claude / grokbuild / codex / gemini / openclaw（纯文件源，
-  // 后端已实现 FileOps 扫描）；hermes/opencode 含 SQLite 主存储暂不支持
+  // 远程会话支持全部 7 个 app：claude/grokbuild/codex/gemini/openclaw 为纯文件源，
+  // hermes/opencode 经远端 sqlite-helper 查 SQLite 主存储
   const effectiveRemoteTargetId =
     appId === "claude" ||
     appId === "grokbuild" ||
     appId === "codex" ||
     appId === "gemini" ||
-    appId === "openclaw"
+    appId === "openclaw" ||
+    appId === "hermes" ||
+    appId === "opencode"
       ? remoteTargetId
       : undefined;
   const { data, isLoading, isFetching, refetch } = useSessionsQuery(
@@ -347,6 +349,7 @@ export function SessionManagerPage({
     useSessionMessagesQuery(
       selectedSession?.providerId,
       selectedSession?.sourcePath,
+      selectedSession?.sessionId,
       effectiveRemoteTargetId,
       remoteContainerId,
       appId,

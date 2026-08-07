@@ -6,11 +6,139 @@ use serde_json::{json, Value};
 use std::str::FromStr;
 use tauri::State;
 
+use base64::Engine as _;
 use crate::fsops::FileOps as _;
 use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, credentials, AuthMethod, RemoteHost};
 use crate::store::AppState;
+
+/// 内嵌的远端 SQLite helper（musl 静态，x86_64 / aarch64）。
+const SQLITE_HELPER_X86_64: &[u8] = include_bytes!("../../resources/sqlite-helper-x86_64-linux");
+const SQLITE_HELPER_AARCH64: &[u8] =
+    include_bytes!("../../resources/sqlite-helper-aarch64-linux");
+
+/// 确保远端 `~/.cc-switch/sqlite-helper` 已部署（按远端架构从内嵌资源上传），
+/// 返回 helper 的绝对路径。仅首次上传（`test -x` 命中即跳过）。
+async fn ensure_remote_sqlite_helper(
+    session: &connection::RemoteSession,
+    container: Option<&str>,
+    root: &str,
+) -> Result<String, String> {
+    let path = format!("{root}/.cc-switch/sqlite-helper");
+    let check_cmd = match container {
+        None => format!("sh -c {}", connection::shell_quote(&format!("test -x {path}"))),
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            format!(
+                "docker exec {} sh -c {}",
+                ops.container,
+                connection::shell_quote(&format!("test -x {path}"))
+            )
+        }
+    };
+    if let Ok(out) = connection::exec_command(&session.channel, &check_cmd).await {
+        if out.trim().is_empty() {
+            return Ok(path);
+        }
+    }
+
+    // 探测远端架构，选择内嵌二进制
+    let uname = connection::exec_command(&session.channel, "uname -m").await?;
+    let arch = uname.trim();
+    let bytes: &'static [u8] = if arch == "x86_64" || arch == "amd64" {
+        SQLITE_HELPER_X86_64
+    } else if arch == "aarch64" || arch == "arm64" {
+        SQLITE_HELPER_AARCH64
+    } else {
+        return Err(format!("不支持的远端架构（sqlite-helper 未内置）: {arch}"));
+    };
+
+    // 上传：宿主机走 SFTP；容器走 stdin 管道（base64 解码落盘）
+    let tmp = format!("{path}.tmp");
+    match container {
+        None => {
+            use tokio::io::AsyncWriteExt;
+            let mut remote_file = session
+                .sftp
+                .create(&tmp)
+                .await
+                .map_err(|e| format!("创建远端 helper 临时文件失败: {e}"))?;
+            remote_file
+                .write_all(bytes)
+                .await
+                .map_err(|e| format!("写入远端 helper 失败: {e}"))?;
+            remote_file
+                .flush()
+                .await
+                .map_err(|e| format!("刷新远端 helper 失败: {e}"))?;
+            drop(remote_file);
+            let mv = format!(
+                "sh -c {}",
+                connection::shell_quote(&format!("mv {tmp} {path} && chmod +x {path}"))
+            );
+            connection::exec_command(&session.channel, &mv).await?;
+        }
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            let cmd = format!(
+                "docker exec -i {} sh -c {}",
+                ops.container,
+                connection::shell_quote(&format!(
+                    "base64 -d > {tmp} && mv {tmp} {path} && chmod +x {path}"
+                ))
+            );
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            connection::exec_command_with_stdin(&session.channel, &cmd, b64.as_bytes()).await?;
+        }
+    }
+    Ok(path)
+}
+
+/// 执行远端 sqlite-helper 并解析 stdout JSON。
+/// `params` 依次绑定到 SQL 的 `?1/?2/...`。
+async fn run_sqlite_helper(
+    session: &connection::RemoteSession,
+    container: Option<&str>,
+    helper_path: &str,
+    subcmd: &str,
+    db: &str,
+    sql: &str,
+    params: &[&str],
+) -> Result<Value, String> {
+    let mut inner = format!(
+        "{} {} {} {}",
+        connection::shell_quote(helper_path),
+        subcmd,
+        connection::shell_quote(db),
+        connection::shell_quote(sql)
+    );
+    for p in params {
+        inner.push(' ');
+        inner.push_str(&connection::shell_quote(p));
+    }
+    let cmd = match container {
+        None => format!("sh -c {}", connection::shell_quote(&inner)),
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            format!("docker exec -i {} sh -c {}", ops.container, connection::shell_quote(&inner))
+        }
+    };
+    let out = connection::exec_command(&session.channel, &cmd).await?;
+    let trimmed = out.trim();
+    // 输出可能是多行（最后一行才是 JSON）；取最后一行
+    let json_line = trimmed.lines().next_back().unwrap_or(trimmed);
+    let value: Value =
+        serde_json::from_str(json_line).map_err(|e| format!("解析 helper 输出失败: {e} → {json_line}"))?;
+    if value.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(value
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("helper 执行失败")
+            .to_string());
+    }
+    Ok(value)
+}
 
 /// 远程 Provider 连通性测试结果。
 #[derive(serde::Serialize)]
@@ -795,10 +923,65 @@ pub async fn list_remote_sessions_detailed(
         "codex" => format!("{home}/.codex"),
         "gemini" => format!("{home}/.gemini/tmp"),
         "openclaw" => format!("{home}/.openclaw/agents"),
+        "hermes" | "opencode" => home.clone(),
         other => {
             return Err(format!("远程会话管理暂不支持应用 {other}"));
         }
     };
+
+    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 查询（复用本机 provider SQL）
+    if app == "hermes" || app == "opencode" {
+        let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
+        let (db, sql) = if app == "hermes" {
+            (
+                format!("{home}/.hermes/state.db"),
+                "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500".to_string(),
+            )
+        } else {
+            (
+                format!("{home}/.local/share/opencode/opencode.db"),
+                "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC"
+                    .to_string(),
+            )
+        };
+        return match run_sqlite_helper(&session, container.as_deref(), &helper, "query", &db, &sql, &[])
+            .await
+        {
+            Ok(v) => {
+                let rows = v
+                    .get("rows")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                let mut out = Vec::new();
+                for row in rows {
+                    let meta = if app == "hermes" {
+                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
+                            &row,
+                            &format!("sqlite:{db}"),
+                        )
+                    } else {
+                        crate::session_manager::providers::opencode::opencode_row_to_session_meta(
+                            &row, &db,
+                        )
+                    };
+                    if let Some(m) = meta {
+                        out.push(m);
+                    }
+                }
+                Ok(out)
+            }
+            Err(e) => {
+                // db 不存在（该 app 在远端从未使用）→ 视为空列表
+                if e.contains("unable to open") || e.contains("open db") {
+                    Ok(Vec::new())
+                } else {
+                    Err(e)
+                }
+            }
+        };
+    }
+
     Ok(match app.as_str() {
         "claude" => crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await,
         "grokbuild" => crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await,
@@ -815,6 +998,7 @@ pub async fn get_remote_session_messages(
     state: State<'_, AppState>,
     host_id: String,
     source_path: String,
+    session_id: String,
     container: Option<String>,
     app: String,
 ) -> Result<Vec<crate::session_manager::SessionMessage>, String> {
@@ -826,6 +1010,70 @@ pub async fn get_remote_session_messages(
         &session.channel,
         container.as_deref(),
     )?;
+    let home = host.default_home();
+
+    // hermes / opencode：SQLite，经远端 sqlite-helper 查询
+    if app == "hermes" || app == "opencode" {
+        let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
+        if app == "hermes" {
+            let db = format!("{home}/.hermes/state.db");
+            let sql =
+                "SELECT role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC";
+            let v = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &db,
+                sql,
+                &[session_id.as_str()],
+            )
+            .await?;
+            let rows = v
+                .get("rows")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            return Ok(rows
+                .iter()
+                .filter_map(crate::session_manager::providers::hermes::sqlite_row_to_message)
+                .collect());
+        }
+        // opencode：message + part 两表，query-all 一次取两个结果集
+        let db = format!("{home}/.local/share/opencode/opencode.db");
+        let sql = "SELECT id, time_created, data FROM message WHERE session_id = ?1 ORDER BY time_created ASC; SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY time_created ASC";
+        let v = run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "query-all",
+            &db,
+            sql,
+            &[session_id.as_str()],
+        )
+        .await?;
+        let rowsets = v
+            .get("rowsets")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let message_rows = rowsets
+            .first()
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let part_rows = rowsets
+            .get(1)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        return Ok(
+            crate::session_manager::providers::opencode::assemble_opencode_messages(
+                &message_rows, &part_rows,
+            ),
+        );
+    }
+
     match app.as_str() {
         "claude" => {
             let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
@@ -877,6 +1125,7 @@ pub async fn delete_remote_session(
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
         &session.sftp,
         &session.channel,
@@ -1011,6 +1260,56 @@ pub async fn delete_remote_session(
                 }
             }
             target.remove_file(&source_path).await?;
+            Ok(true)
+        }
+        "hermes" | "opencode" => {
+            let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
+            let (db, sql) = if app == "hermes" {
+                (
+                    format!("{home}/.hermes/state.db"),
+                    "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
+                )
+            } else {
+                (
+                    format!("{home}/.local/share/opencode/opencode.db"),
+                    "DELETE FROM part WHERE session_id = ?1; DELETE FROM message WHERE session_id = ?1; DELETE FROM session WHERE id = ?1;",
+                )
+            };
+            // 写入前先校验会话存在（helper write 在事务内，删除 0 行也 ok；
+            // 对齐本机 delete_sqlite 的先校验语义）
+            let check_sql = if app == "hermes" {
+                "SELECT id FROM sessions WHERE id = ?1"
+            } else {
+                "SELECT id FROM session WHERE id = ?1"
+            };
+            let v = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &db,
+                check_sql,
+                &[session_id.as_str()],
+            )
+            .await?;
+            let exists = v
+                .get("rows")
+                .and_then(Value::as_array)
+                .map(|r| !r.is_empty())
+                .unwrap_or(false);
+            if !exists {
+                return Err(format!("远端会话不存在: {session_id}"));
+            }
+            run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "write",
+                &db,
+                sql,
+                &[session_id.as_str()],
+            )
+            .await?;
             Ok(true)
         }
         other => Err(format!("远程会话管理暂不支持应用 {other}")),

@@ -155,6 +155,44 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
     sessions
 }
 
+/// 纯映射：helper 返回的会话行 JSON（列 id/title/directory/time_created/time_updated）
+/// → SessionMeta（远端共用；db_source 形如 `/root/.local/share/opencode/opencode.db`）。
+pub(crate) fn opencode_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMeta> {
+    let session_id = row.get("id").and_then(Value::as_str)?.to_string();
+    let raw_title = row
+        .get("title")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let display_title = truncate_summary(
+        &raw_title,
+        crate::session_manager::providers::utils::TITLE_MAX_CHARS,
+    );
+    let directory = row
+        .get("directory")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let created = row.get("time_created").and_then(Value::as_i64).unwrap_or(0);
+    let updated = row.get("time_updated").and_then(Value::as_i64).unwrap_or(0);
+
+    Some(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: session_id.clone(),
+        title: Some(display_title.clone()),
+        summary: Some(display_title),
+        project_dir: if directory.is_empty() {
+            None
+        } else {
+            Some(directory)
+        },
+        created_at: Some(created),
+        last_active_at: Some(updated),
+        source_path: Some(format!("sqlite:{db_source}:{session_id}")),
+        resume_command: Some(format!("opencode -s {session_id}")),
+    })
+}
+
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     // `path` is the message directory: storage/message/{sessionID}/
     if !path.is_dir() {
@@ -311,6 +349,67 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     }
 
     Ok(messages)
+}
+
+/// 纯装配：helper `query-all` 返回的 message 行 + part 行 → 消息（远端共用）。
+/// message 行列：id/time_created/data；part 行列：message_id/data（data 为 JSON 字符串）。
+pub(crate) fn assemble_opencode_messages(
+    message_rows: &[Value],
+    part_rows: &[Value],
+) -> Vec<SessionMessage> {
+    let mut parts_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for part in part_rows {
+        let message_id = part.get("message_id").and_then(Value::as_str);
+        let data = part.get("data").and_then(Value::as_str);
+        if let (Some(id), Some(data)) = (message_id, data) {
+            parts_map.entry(id.to_string()).or_default().push(data.to_string());
+        }
+    }
+
+    let mut messages = Vec::new();
+    for row in message_rows {
+        let Some(data) = row.get("data").and_then(Value::as_str) else {
+            continue;
+        };
+        let msg_id = row.get("id").and_then(Value::as_str).unwrap_or("");
+        let ts = row.get("time_created").and_then(Value::as_i64);
+        let msg_value: Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let role = msg_value
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+
+        let mut texts = Vec::new();
+        if let Some(parts) = parts_map.get(msg_id) {
+            for part_data in parts {
+                let part_value: Value = match serde_json::from_str(part_data) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                if let Some(text) = extract_part_text(&part_value) {
+                    texts.push(text);
+                }
+            }
+        }
+
+        let content = texts.join("\n");
+        if content.trim().is_empty() {
+            continue;
+        }
+
+        messages.push(SessionMessage {
+            role,
+            content,
+            ts: ts.map(|v| v.max(0)),
+        });
+    }
+
+    messages
 }
 
 pub fn delete_session(storage: &Path, path: &Path, session_id: &str) -> Result<bool, String> {

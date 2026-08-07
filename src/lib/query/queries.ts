@@ -334,6 +334,7 @@ export const useSessionsQuery = (
 export const useSessionMessagesQuery = (
   providerId?: string,
   sourcePath?: string,
+  sessionId?: string,
   remoteTargetId?: string,
   remoteContainerId?: string,
   appId?: string,
@@ -346,6 +347,7 @@ export const useSessionMessagesQuery = (
           remoteTargetId,
           remoteContainerId ?? "__host__",
           sourcePath,
+          sessionId,
           appId ?? "claude",
         ]
       : ["sessionMessages", providerId, sourcePath],
@@ -354,6 +356,7 @@ export const useSessionMessagesQuery = (
         ? getRemoteSessionMessages(
             remoteTargetId,
             sourcePath!,
+            sessionId ?? "",
             remoteContainerId,
             appId,
           )
