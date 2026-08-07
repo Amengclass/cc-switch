@@ -309,6 +309,28 @@ pub async fn bulk_toggle_remote_mcp_app<F: FileOps>(
     Ok(RemoteBulkToggleResult { succeeded, failed })
 }
 
+/// 切换供应商后重投影该 app 已启用的远端 MCP（对齐本机
+/// `McpService::sync_enabled_for_app`：切换整文件覆盖了 live，必须把 SSOT 里
+/// 已启用的 MCP 补回，否则 codex/gemini/grok 等「MCP 与 live 同文件」的
+/// app 切换后 MCP 会失效）。
+///
+/// 读远端 SSOT `~/.cc-switch/mcp.json` → 筛出 `app` 启用的服务器 →
+/// `sync_mcp_to_app_many` 投影回 live（一次 exec）。无启用项或 SSOT 缺失时
+/// no-op；失败由调用方降级为警告（投影自愈：下次切换 / 任一 MCP 启停会重投影）。
+pub async fn reproject_remote_mcp_for_app<F: FileOps>(
+    fs: &F,
+    root: &str,
+    app: &str,
+) -> Result<(), String> {
+    let map = read_remote_mcp_ssot(fs, root).await?;
+    let enabled_specs: Vec<(String, Value)> = map
+        .iter()
+        .filter(|(_, server)| server.apps.enabled_apps().contains(&app))
+        .map(|(id, server)| (id.clone(), server.server.clone()))
+        .collect();
+    sync_mcp_to_app_many(fs, root, app, &enabled_specs).await
+}
+
 // ========================================================================
 // 从远端各 CLI live 配置导入到 SSOT（对齐本机 importFromApps）
 // ========================================================================

@@ -246,6 +246,30 @@ pub async fn switch_remote_provider(
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
+    // 切换整文件覆盖了该 app 的 live（codex/gemini/grok 的 MCP 与 live 同文件），
+    // 对齐本机 McpService::sync_enabled_for_app：把远端 SSOT 中已启用的 MCP
+    // 重新投影回 live，避免切换后 MCP 失效。失败降级为警告（投影自愈：
+    // 下次切换 / 任一 MCP 启停都会重新投影），不阻断已成功的切换。
+    let reproject = match container.as_deref() {
+        Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
+            Ok(ops) => {
+                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &host.default_home(), &app)
+                    .await
+            }
+            Err(e) => Err(e),
+        },
+        None => {
+            let ops = crate::fsops::RemoteSftpFileOps {
+                sftp: &session.sftp,
+            };
+            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &host.default_home(), &app)
+                .await
+        }
+    };
+    if let Err(e) = reproject {
+        log::warn!("[remote] 切换 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}");
+    }
+
     // 直接带上前端需要的当前供应商 id，避免前端再调一次 get_remote_current_provider
     let mut report = report;
     report.current_provider_id = Some(provider_id.clone());

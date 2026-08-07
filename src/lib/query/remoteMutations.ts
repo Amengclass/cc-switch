@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { switchRemoteProvider } from "@/lib/api/remote";
-import { notesList } from "@/lib/query/notesList";
 import { extractErrorMessage } from "@/utils/errorUtils";
 
 export interface SwitchRemoteProviderVars {
@@ -41,15 +40,32 @@ export const useSwitchRemoteProviderMutation = (
       void queryClient.invalidateQueries({
         queryKey: ["providers", vars.app],
       });
-      toast.success(
-        t("remote.switchDone", {
-          defaultValue: "已在 {{target}} 切换到 {{provider}}",
-          target:
-            report.target + (vars.container ? ` / ${vars.container}` : ""),
-          provider: report.providerName,
-        }),
-        { description: notesList(report.notes), closeButton: true },
-      );
+      // 成功提示对齐本机 useProviderActions.ts 的按 app 文案，并强调「远端」：
+      // codex / grokbuild 的 live 配置无热重载，需重启远端客户端才生效。
+      const target =
+        report.target + (vars.container ? ` / ${vars.container}` : "");
+      const provider = report.providerName;
+      let switchMessage = t("remote.switchDone", {
+        defaultValue: "已在远端 {{target}} 切换到 {{provider}}",
+        target,
+        provider,
+      });
+      if (vars.app === "codex") {
+        switchMessage = t("remote.switchDoneCodex", {
+          defaultValue:
+            "已在远端 {{target}} 切换到 {{provider}}，请重启远端 Codex 客户端以生效",
+          target,
+          provider,
+        });
+      } else if (vars.app === "grokbuild") {
+        switchMessage = t("remote.switchDoneGrok", {
+          defaultValue:
+            "已在远端 {{target}} 切换到 {{provider}}，请重启远端 Grok Build 以生效",
+          target,
+          provider,
+        });
+      }
+      toast.success(switchMessage, { closeButton: true });
     },
     onError: (error: Error) => {
       const detail = extractErrorMessage(error) || t("common.unknown");

@@ -72,7 +72,6 @@ import {
   switchRemoteProvider,
 } from "@/lib/api/remote";
 import { useSwitchRemoteProviderMutation } from "@/lib/query/remoteMutations";
-import { notesList } from "@/lib/query/notesList";
 import type { RemoteHost } from "@/types/remote";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
@@ -887,7 +886,7 @@ function App() {
             defaultValue: "已同步更新后的配置到远端 {{target}}",
             target: activeRemoteHost?.name ?? remoteTargetId,
           }),
-        { description: notesList(report.notes), closeButton: true },
+          { closeButton: true },
         );
       } catch (error) {
         console.error("Failed to sync edited provider to remote:", error);
