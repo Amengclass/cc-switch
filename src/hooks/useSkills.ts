@@ -186,6 +186,7 @@ export function useInstallSkill() {
 export function useInstallRemoteSkillFromDiscoverable(
   remoteTargetId?: string,
   remoteContainerId?: string,
+  appId?: AppId,
 ) {
   const queryClient = useQueryClient();
   const installedKey = remoteTargetId
@@ -206,6 +207,7 @@ export function useInstallRemoteSkillFromDiscoverable(
         remoteTargetId,
         skill,
         remoteContainerId,
+        appId ?? "claude",
       ).then((r) => remoteToInstalled({ ...r, path: "" }));
     },
     onSuccess: (installedSkill) => {
@@ -566,6 +568,7 @@ export function useInstallSkillsFromZip(
           remoteTargetId,
           filePath,
           remoteContainerId,
+          currentApp,
         );
         // 返回完整数据（含 description），与本机行为一致
         return records.map((r) => remoteToInstalled({ ...r, path: "" }));

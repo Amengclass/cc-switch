@@ -438,11 +438,13 @@ export async function installRemoteSkillsFromZip(
   hostId: string,
   zipPath: string,
   container?: string,
+  app?: string,
 ): Promise<RemoteSkillRecord[]> {
   return invoke<RemoteSkillRecord[]>("install_remote_skills_from_zip", {
     hostId,
     zipPath,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -473,11 +475,13 @@ export async function installRemoteSkillFromDiscoverable(
     repoBranch: string;
   },
   container?: string,
+  app?: string,
 ): Promise<RemoteSkillRecord> {
   return invoke<RemoteSkillRecord>("install_remote_skill_from_discoverable", {
     hostId,
     skill,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 
@@ -567,12 +571,14 @@ export async function importRemoteSkill(
   sourcePath: string,
   name: string,
   container?: string,
+  app?: string,
 ): Promise<RemoteSkillRecord> {
   return invoke<RemoteSkillRecord>("import_remote_skill", {
     hostId,
     sourcePath,
     name,
     container: container ?? null,
+    app: app ?? "claude",
   });
 }
 

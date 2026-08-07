@@ -171,6 +171,7 @@ export const SkillsPage = forwardRef<SkillsPageHandle, SkillsPageProps>(
     const remoteInstallMutation = useInstallRemoteSkillFromDiscoverable(
       remoteTargetId,
       remoteContainerId,
+      currentApp,
     );
     const addRepoMutation = useAddSkillRepo();
     const removeRepoMutation = useRemoveSkillRepo();

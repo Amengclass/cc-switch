@@ -1159,6 +1159,7 @@ pub async fn install_remote_skills_from_zip(
     host_id: String,
     zip_path: String,
     container: Option<String>,
+    app: String,
 ) -> Result<Vec<crate::remote::skill::RemoteSkillRecord>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1182,7 +1183,8 @@ pub async fn install_remote_skills_from_zip(
     // 对每个新安装的技能：写 skills.json + 创建 symlink，同时收集完整记录
     let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
     let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
-    let apps = crate::remote::skill::RemoteSkillApps { claude: true, ..Default::default() };
+    let mut apps = crate::remote::skill::RemoteSkillApps::default();
+    apps.set_enabled(&app, true);
     let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     let mut result: Vec<crate::remote::skill::RemoteSkillRecord> = Vec::new();
 
@@ -1225,6 +1227,7 @@ pub async fn install_remote_skill_from_discoverable(
     host_id: String,
     skill: crate::services::skill::DiscoverableSkill,
     container: Option<String>,
+    app: String,
 ) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1249,8 +1252,9 @@ pub async fn install_remote_skill_from_discoverable(
     // 2. 冲突检测（对齐本机 install 的 DB 检查：同仓库更新启用，不同仓库报错）。
     let mut records =
         crate::remote::skill::read_remote_skills_json(&target, &root).await?;
-    let apps =
-        crate::remote::skill::RemoteSkillApps { claude: true, ..Default::default() };
+    let mut apps =
+        crate::remote::skill::RemoteSkillApps::default();
+    apps.set_enabled(&app, true);
     if let Some(existing) = records
         .iter()
         .find(|r| r.directory.eq_ignore_ascii_case(&install_name))
@@ -1504,6 +1508,7 @@ pub async fn import_remote_skill(
     source_path: String,
     name: String,
     container: Option<String>,
+    app: String,
 ) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1513,10 +1518,8 @@ pub async fn import_remote_skill(
         &session.channel,
         container.as_deref(),
     )?;
-    let apps = crate::remote::skill::RemoteSkillApps {
-        claude: true,
-        ..Default::default()
-    };
+    let mut apps = crate::remote::skill::RemoteSkillApps::default();
+    apps.set_enabled(&app, true);
     let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     crate::remote::skill::import_remote_skill_local(
         &target,

@@ -472,6 +472,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                 imp.path || imp.directory,
                 imp.directory,
                 remoteContainerId || undefined,
+                currentApp,
               );
               installed.push({
                 id: record.id,
