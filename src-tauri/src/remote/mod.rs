@@ -20,6 +20,7 @@ pub mod mcp;
 pub mod openclaw;
 pub mod opencode;
 pub mod prompt;
+pub mod providers;
 pub mod sessions;
 pub mod settings;
 pub mod sftp_io;

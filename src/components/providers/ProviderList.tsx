@@ -22,14 +22,8 @@ import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { useDragSort } from "@/hooks/useDragSort";
-import {
-  useOpenClawLiveProviderIds,
-  useOpenClawDefaultModel,
-} from "@/hooks/useOpenClaw";
-import {
-  useHermesLiveProviderIds,
-  useHermesModelConfig,
-} from "@/hooks/useHermes";
+import { useOpenClawDefaultModel } from "@/hooks/useOpenClaw";
+import { useHermesModelConfig } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
 import { testRemoteProviderConnection } from "@/lib/api/remote";
 import { ProviderCard } from "@/components/providers/ProviderCard";
@@ -72,6 +66,8 @@ interface ProviderListProps {
   /** 远程目标：非空时「测试」按钮改为在远端探测连通性 */
   remoteTargetId?: string;
   remoteContainerId?: string;
+  /** 远端目标下的 live 供应商 ID 集合（来自 get_remote_providers 返回，additive 按钮态用） */
+  remoteLiveIds?: string[];
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider) => void; // OpenClaw: set as default model
 }
@@ -99,6 +95,7 @@ export function ProviderList({
   onSetAsDefault,
   remoteTargetId,
   remoteContainerId,
+  remoteLiveIds,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -107,19 +104,27 @@ export function ProviderList({
     appId,
   );
 
-  const { data: opencodeLiveIds } = useQuery({
+  const { data: opencodeLiveIds } = useQuery<string[]>({
     queryKey: ["opencodeLiveProviderIds"],
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode",
+    // 远端目标下 live ID 集来自 get_remote_providers 返回（remoteLiveIds prop），
+    // 避免本机查询与远端重复（per-target 独立）
+    enabled: appId === "opencode" && !remoteTargetId,
   });
 
   // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
-    appId === "openclaw",
-  );
+  const { data: openclawLiveIds } = useQuery<string[]>({
+    queryKey: ["openclaw", "liveProviderIds"],
+    queryFn: () => providersApi.getOpenClawLiveProviderIds(),
+    enabled: appId === "openclaw" && !remoteTargetId,
+  });
 
   // Hermes: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: hermesLiveIds } = useHermesLiveProviderIds(appId === "hermes");
+  const { data: hermesLiveIds } = useQuery<string[]>({
+    queryKey: ["hermes", "liveProviderIds"],
+    queryFn: () => providersApi.getHermesLiveProviderIds(),
+    enabled: appId === "hermes" && !remoteTargetId,
+  });
 
   // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
   const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
@@ -128,18 +133,20 @@ export function ProviderList({
   // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes）
   const isProviderInConfig = useCallback(
     (providerId: string): boolean => {
+      // 远端目标：live ID 集来自 get_remote_providers 返回（remoteLiveIds prop）
+      const liveIds = remoteTargetId ? (remoteLiveIds ?? []) : undefined;
       if (appId === "opencode") {
-        return opencodeLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? opencodeLiveIds)?.includes(providerId) ?? false;
       }
       if (appId === "openclaw") {
-        return openclawLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? openclawLiveIds)?.includes(providerId) ?? false;
       }
       if (appId === "hermes") {
-        return hermesLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? hermesLiveIds)?.includes(providerId) ?? false;
       }
       return true; // 其他应用始终返回 true
     },
-    [appId, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
+    [appId, remoteTargetId, remoteLiveIds, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
   );
 
   // OpenClaw: query default model to determine which provider is default
@@ -411,7 +418,10 @@ export function ProviderList({
       <ProviderEmptyState
         appId={appId}
         onCreate={onCreate}
+        // 远端目标下导入按钮置灰：导入语义是读本机 live 配置，远端目标下
+        // 会读到错误数据（应读远端 live）；待远端导入实现后再启用。
         onImport={() => importMutation.mutate()}
+        importDisabled={Boolean(remoteTargetId)}
       />
     );
   }

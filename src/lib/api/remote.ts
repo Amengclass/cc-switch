@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { McpServer, SessionMessage, SessionMeta } from "@/types";
+import type { McpServer, Provider, SessionMessage, SessionMeta } from "@/types";
 import type {
   EffectReport,
   RemoteConnectionInfo,
@@ -104,19 +104,136 @@ export interface RemoteProviderTestResult {
   reachable: boolean;
 }
 
-/** 从远端 live 配置移除某供应商（对齐本机 remove_from_live_config：仅 additive app 支持） */
-export async function removeRemoteProviderFromLive(
+/** 远端供应商面板数据源（per-target 独立：读该目标机器自己的 SSOT） */
+export interface RemoteProvidersView {
+  providers: Record<string, Provider>;
+  /** 非 additive：当前生效供应商；additive 为 null */
+  currentProviderId: string | null;
+  /** additive：远端 live 中的供应商 ID 集合（isInConfig 按钮态） */
+  liveIds: string[];
+}
+
+/** 后端原始视图（snake_case）→ 前端 camelCase 视图 */
+function toRemoteProvidersView(view: {
+  providers: Provider[];
+  current_provider_id: string | null;
+  live_ids: string[];
+}): RemoteProvidersView {
+  const providers: Record<string, Provider> = {};
+  for (const p of view.providers) {
+    providers[p.id] = p;
+  }
+  return {
+    providers,
+    currentProviderId: view.current_provider_id,
+    liveIds: view.live_ids,
+  };
+}
+
+/** 读远端目标的供应商列表（首次自动从该远端 live 导入，对齐本机启动导入语义） */
+export async function getRemoteProviders(
+  hostId: string,
+  app: string,
+  container?: string,
+): Promise<RemoteProvidersView> {
+  const view = await invoke<{
+    providers: Provider[];
+    current_provider_id: string | null;
+    live_ids: string[];
+  }>("get_remote_providers", {
+    hostId,
+    app,
+    container: container ?? null,
+  });
+  return toRemoteProvidersView(view);
+}
+
+/** 在远端目标添加供应商（写入该目标 SSOT；addToLive=true 时同时写入 live）。
+ *  返回最新视图，调用方 setQueryData 直接刷新（免第二次 SSH 往返）。 */
+export async function addRemoteProvider(
+  hostId: string,
+  app: string,
+  provider: Provider,
+  addToLive?: boolean,
+  container?: string,
+): Promise<RemoteProvidersView> {
+  const view = await invoke<{
+    providers: Provider[];
+    current_provider_id: string | null;
+    live_ids: string[];
+  }>("add_remote_provider", {
+    hostId,
+    app,
+    provider,
+    addToLive: addToLive ?? null,
+    container: container ?? null,
+  });
+  return toRemoteProvidersView(view);
+}
+
+/** 编辑远端目标的供应商（更新 SSOT；在生效位置时重写远端 live）。
+ *  返回最新视图，调用方 setQueryData 直接刷新。 */
+export async function updateRemoteProvider(
+  hostId: string,
+  app: string,
+  provider: Provider,
+  originalId?: string,
+  container?: string,
+): Promise<RemoteProvidersView> {
+  const view = await invoke<{
+    providers: Provider[];
+    current_provider_id: string | null;
+    live_ids: string[];
+  }>("update_remote_provider", {
+    hostId,
+    app,
+    provider,
+    originalId: originalId ?? null,
+    container: container ?? null,
+  });
+  return toRemoteProvidersView(view);
+}
+
+/** 删除远端目标的供应商（SSOT 移除；additive 且已写入 live 时同时移除 live）。
+ *  返回最新视图，调用方 setQueryData 直接刷新。 */
+export async function deleteRemoteProvider(
   hostId: string,
   app: string,
   providerId: string,
   container?: string,
-): Promise<void> {
-  return invoke("remove_remote_provider_from_live", {
+): Promise<RemoteProvidersView> {
+  const view = await invoke<{
+    providers: Provider[];
+    current_provider_id: string | null;
+    live_ids: string[];
+  }>("delete_remote_provider", {
     hostId,
     app,
     providerId,
     container: container ?? null,
   });
+  return toRemoteProvidersView(view);
+}
+
+/** 从远端 live 配置移除某供应商（对齐本机 remove_from_live_config：仅 additive app 支持）。
+ *  返回最新视图，调用方 setQueryData 直接刷新。 */
+export async function removeRemoteProviderFromLive(
+  hostId: string,
+  app: string,
+  providerId: string,
+  container?: string,
+): Promise<RemoteProvidersView> {
+  const view = await invoke<{
+    providers: Provider[];
+    current_provider_id: string | null;
+    live_ids: string[];
+  }>("remove_remote_provider_from_live", {
+    hostId,
+    app,
+    providerId,
+    container: container ?? null,
+  });
+  return toRemoteProvidersView(view);
 }
 
 /** 删除供应商后清理远端「当前供应商」记录（live 文件不动，对齐本机 delete 语义） */

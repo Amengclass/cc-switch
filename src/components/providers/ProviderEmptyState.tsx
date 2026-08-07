@@ -7,12 +7,15 @@ interface ProviderEmptyStateProps {
   appId: AppId;
   onCreate?: () => void;
   onImport?: () => void;
+  /** 导入按钮禁用（如远端目标下暂不支持导入） */
+  importDisabled?: boolean;
 }
 
 export function ProviderEmptyState({
   appId,
   onCreate,
   onImport,
+  importDisabled,
 }: ProviderEmptyStateProps) {
   const { t } = useTranslation();
   const showSnippetHint =
@@ -34,7 +37,17 @@ export function ProviderEmptyState({
       )}
       <div className="mt-6 flex flex-col gap-2">
         {onImport && (
-          <Button onClick={onImport}>
+          <Button
+            onClick={onImport}
+            disabled={importDisabled}
+            title={
+              importDisabled
+                ? t("provider.importDisabledRemote", {
+                    defaultValue: "远端目标下暂不支持从 live 导入",
+                  })
+                : undefined
+            }
+          >
             <Download className="mr-2 h-4 w-4" />
             {appId === "claude-desktop"
               ? t("provider.importFromClaude", {

@@ -66,14 +66,19 @@ import { APP_INSTALL_CMDS } from "@/config/appConfig";
 import {
   checkLocalCliInstalled,
   checkRemoteCliInstalled,
-  clearRemoteProviderRecord,
   getRemoteCurrentProvider,
   listDockerContainers,
   listRemoteHosts,
   removeRemoteProviderFromLive,
-  switchRemoteProvider,
+  addRemoteProvider,
+  updateRemoteProvider,
+  deleteRemoteProvider,
+  type RemoteProvidersView,
 } from "@/lib/api/remote";
-import { useSwitchRemoteProviderMutation } from "@/lib/query/remoteMutations";
+import {
+  useRemoteProvidersQuery,
+  useSwitchRemoteProviderMutation,
+} from "@/lib/query/remoteMutations";
 import type { RemoteHost } from "@/types/remote";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
@@ -440,14 +445,32 @@ function App() {
     return target?.provider_id;
   }, [proxyStatus?.active_targets, activeApp]);
 
-  const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
+  const { data, isLoading: localIsLoading, refetch } = useProvidersQuery(activeApp, {
     isProxyRunning,
   });
-  const providers = useMemo(() => data?.providers ?? {}, [data]);
+  // per-target 独立：远端目标下，供应商面板数据源是该目标机器自己的 SSOT
+  // （本机 DB 不参与）；本机目标保持现有模型完全不变。
+  const remoteProvidersQuery = useRemoteProvidersQuery(
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
+    sharedFeatureApp,
+  );
+  const providers = useMemo(
+    () =>
+      remoteTargetId
+        ? (remoteProvidersQuery.data?.providers ?? {})
+        : (data?.providers ?? {}),
+    [remoteTargetId, remoteProvidersQuery.data, data],
+  );
+  const isLoading = remoteTargetId
+    ? remoteProvidersQuery.isLoading
+    : localIsLoading;
   const currentProviderId = data?.currentProviderId ?? "";
-  // 选中服务器时，当前供应商高亮取自远端 settings.json 匹配
+  // 选中服务器时，当前供应商高亮取自该远端目标（SSOT current / 切换记录 / live 兜底）
   const effectiveCurrentProviderId = remoteTargetId
-    ? (remoteCurrentProviderId ?? "")
+    ? (remoteProvidersQuery.data?.currentProviderId ??
+      remoteCurrentProviderId ??
+      "")
     : currentProviderId;
   const isOpenClawView =
     activeApp === "openclaw" &&
@@ -850,6 +873,66 @@ function App() {
     }
   };
 
+  // 服务端返回权威最新视图 → 直接写入缓存（免第二次 SSH refetch；
+  // 语义与本机 invalidate 一致：操作成功后缓存 = 最新状态）
+  const setRemoteProvidersCache = (view: RemoteProvidersView) => {
+    queryClient.setQueryData<RemoteProvidersView>(
+      [
+        "remoteProviders",
+        remoteTargetId,
+        remoteContainerId || "__host__",
+        sharedFeatureApp,
+      ],
+      view,
+    );
+  };
+
+  // 远端目标下添加供应商：直接写该目标自己的 SSOT（本机 DB 不参与）。
+  // id 生成对齐本机 useAddProviderMutation：additive 用 providerKey，其余 UUID。
+  const handleAddRemoteProvider = async (
+    provider: Omit<Provider, "id"> & { providerKey?: string },
+  ) => {
+    try {
+      let id: string;
+      if (
+        sharedFeatureApp === "opencode" ||
+        sharedFeatureApp === "openclaw" ||
+        sharedFeatureApp === "hermes"
+      ) {
+        if (!provider.providerKey) {
+          throw new Error(`Provider key is required for ${sharedFeatureApp}`);
+        }
+        id = provider.providerKey;
+      } else {
+        id = crypto.randomUUID();
+      }
+      const newProvider: Provider = {
+        ...(provider as Omit<Provider, "id">),
+        id,
+        createdAt: Date.now(),
+      } as Provider;
+      const view = await addRemoteProvider(
+        remoteTargetId!,
+        sharedFeatureApp,
+        newProvider,
+        true,
+        remoteContainerId || undefined,
+      );
+      setRemoteProvidersCache(view);
+      toast.success(
+        t("remote.addDone", {
+          defaultValue: "已添加到远端 {{target}}",
+          target: activeRemoteHost?.name ?? remoteTargetId,
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      console.error("[App] Failed to add remote provider:", error);
+      toast.error(extractErrorMessage(error), { closeButton: true });
+      throw error;
+    }
+  };
+
   const handleEditProvider = async ({
     provider,
     originalId,
@@ -857,32 +940,19 @@ function App() {
     provider: Provider;
     originalId?: string;
   }) => {
-    // 与原生 cc switch 策略一致：仅当被编辑的供应商是「当前生效供应商」时，保存后
-    // 立即重写 live（原生 ProviderService::update 用 DB 的 is_current 判断）。
-    // 选中远端目标时，live 就是该远端的 settings.json → 原子写回。
-    // 「当前生效」用本地 DB 的 currentProviderId（SSOT）判定，而不是靠 base_url 猜
-    // 远端当前：用户改 base_url / 通用配置片段时，匹配必然失败，导致编辑推送被跳过
-    // （这是前几次反复失败的根因）。编辑非当前供应商 → 仅更新数据库，切换到它时再生效。
-    // 注意：EditProviderDialog 总是传 originalId（Claude 不支持改名），不能拿它当守卫。
-    let isRemoteCurrentProvider = false;
     if (remoteTargetId) {
-      isRemoteCurrentProvider = provider.id === currentProviderId;
-    }
-
-    await updateProvider(provider, originalId);
-
-    if (isRemoteCurrentProvider) {
+      // per-target 独立：远端目标的供应商编辑直接写该目标自己的 SSOT
+      // （后端按「是否在生效位置」决定是否重写远端 live，对齐本机 update 语义）；
+      // 本机 DB 不参与。
       try {
-        const container = remoteContainerId || undefined;
-        const report = await switchRemoteProvider(
-          remoteTargetId!,
-          provider.id,
+        const view = await updateRemoteProvider(
+          remoteTargetId,
           sharedFeatureApp,
-          container,
+          provider,
+          originalId,
+          remoteContainerId || undefined,
         );
-        // 后端已带回当前供应商 id，无需再调 get_remote_current_provider
-        setRemoteCurrentProviderId(report.currentProviderId ?? null);
-        await refetch();
+        setRemoteProvidersCache(view);
         toast.success(
           t("remote.editSynced", {
             defaultValue: "已同步更新后的配置到远端 {{target}}",
@@ -891,16 +961,19 @@ function App() {
           { closeButton: true },
         );
       } catch (error) {
-        console.error("Failed to sync edited provider to remote:", error);
+        console.error("Failed to update remote provider:", error);
         toast.error(
           t("remote.editSyncError", {
-            defaultValue: "供应商已更新，但同步远端失败",
+            defaultValue: "供应商更新失败",
           }),
           { description: extractErrorMessage(error) },
         );
       }
+      setEditingProvider(null);
+      return;
     }
 
+    await updateProvider(provider, originalId);
     setEditingProvider(null);
   };
 
@@ -909,16 +982,19 @@ function App() {
     const { provider, action } = confirmAction;
 
     if (remoteTargetId) {
-      // 远程目标：remove 走远端 live 移除；delete 删本机 DB + 清远端当前记录
-      // （live 文件不动，对齐本机 delete 语义）。
+      // 远程目标（per-target 独立）：remove 走远端 live 移除（SSOT 标记同步）；
+      // delete 删该远端目标自己的 SSOT（additive 且已写入 live 时同时移除 live）。
+      // 本机 DB 不参与。
       try {
         if (action === "remove") {
-          await removeRemoteProviderFromLive(
+          const view = await removeRemoteProviderFromLive(
             remoteTargetId,
-            activeApp,
+            sharedFeatureApp,
             provider.id,
-            remoteContainerId,
+            remoteContainerId || undefined,
           );
+          // 后端带回最新视图，直接写入缓存（按钮「移除」→「添加」立即翻转）
+          setRemoteProvidersCache(view);
           toast.success(
             t("notifications.removeFromConfigSuccess", {
               defaultValue: "已从远端配置移除",
@@ -926,8 +1002,13 @@ function App() {
             { closeButton: true },
           );
         } else {
-          await deleteProvider(provider.id);
-          await clearRemoteProviderRecord(remoteTargetId, activeApp);
+          const view = await deleteRemoteProvider(
+            remoteTargetId,
+            sharedFeatureApp,
+            provider.id,
+            remoteContainerId || undefined,
+          );
+          setRemoteProvidersCache(view);
           toast.success(
             t("notifications.providerDeleted", {
               defaultValue: "供应商删除成功",
@@ -996,6 +1077,41 @@ function App() {
   const handleDuplicateProvider = async (provider: Provider) => {
     const newSortIndex =
       provider.sortIndex !== undefined ? provider.sortIndex + 1 : undefined;
+
+    // 远端目标：复制到该目标自己的 SSOT（本机 DB 不参与）
+    if (remoteTargetId) {
+      const copyKey = generateUniqueProviderCopyKey(
+        provider.id,
+        Object.keys(providers),
+      );
+      const duplicated: Provider = {
+        ...provider,
+        id: copyKey,
+        name: `${provider.name} copy`,
+        sortIndex: newSortIndex,
+        createdAt: Date.now(),
+      } as Provider;
+      try {
+        const view = await addRemoteProvider(
+          remoteTargetId,
+          sharedFeatureApp,
+          duplicated,
+          true,
+          remoteContainerId || undefined,
+        );
+        setRemoteProvidersCache(view);
+        toast.success(
+          t("notifications.providerDuplicated", {
+            defaultValue: "供应商复制成功",
+          }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        console.error("[App] Failed to duplicate remote provider:", error);
+        toast.error(extractErrorMessage(error), { closeButton: true });
+      }
+      return;
+    }
 
     const duplicatedProvider: Omit<Provider, "id" | "createdAt"> & {
       providerKey?: string;
@@ -1296,6 +1412,11 @@ function App() {
                       }
                       remoteTargetId={remoteTargetId}
                       remoteContainerId={remoteContainerId}
+                      remoteLiveIds={
+                        remoteTargetId
+                          ? remoteProvidersQuery.data?.liveIds
+                          : undefined
+                      }
                       activeProviderId={activeProviderId}
                       onSwitch={handleProviderSwitch}
                       onEdit={(provider) => {
@@ -1961,15 +2082,17 @@ function App() {
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
-        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
-          <TargetBreadcrumb
-            remoteTargetId={remoteTargetId}
-            remoteContainerId={remoteContainerId}
-            setRemoteTargetId={setRemoteTargetId}
-            setRemoteContainerId={setRemoteContainerId}
-            servers={servers}
-            containers={containers}
-          />
+        {/* 设置页不需要目标选择器/远端状态栏（设置里无切换场景） */}
+        {currentView !== "settings" && (
+          <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
+            <TargetBreadcrumb
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId}
+              setRemoteTargetId={setRemoteTargetId}
+              setRemoteContainerId={setRemoteContainerId}
+              servers={servers}
+              containers={containers}
+            />
           {currentInstalled === true || currentInstalled === null ? (
             <span
               className={cn(
@@ -2026,7 +2149,8 @@ function App() {
             <RefreshCw className="h-3.5 w-3.5" />
             {t("remote.refreshStatus", { defaultValue: "刷新" })}
           </button>
-        </div>
+          </div>
+        )}
         <div className="flex-1 min-h-0 flex flex-col pt-2">
           {renderContent()}
         </div>
@@ -2036,7 +2160,7 @@ function App() {
         open={isAddOpen}
         onOpenChange={setIsAddOpen}
         appId={activeApp}
-        onSubmit={addProvider}
+        onSubmit={remoteTargetId ? handleAddRemoteProvider : addProvider}
       />
 
       <EditProviderDialog

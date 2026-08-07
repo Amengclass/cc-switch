@@ -21,13 +21,17 @@ pub enum RemoteTarget<'a> {
 }
 
 impl<'a> RemoteTarget<'a> {
-    /// 构造目标数据源。`container` 为 Some 时走容器内，否则走宿主机 SFTP。
+    /// 构造目标数据源。`container` 为 Some（非空）时走容器内，否则走宿主机 SFTP。
+    /// 空串/空白容器名按宿主机处理（前端可能以 `""` 表示宿主机）。
     pub fn new(
         sftp: &'a SftpSession,
         channel: &'a Handle<RemoteHandler>,
         container: Option<&str>,
     ) -> Result<Self, String> {
         match container {
+            Some(c) if c.trim().is_empty() => Ok(RemoteTarget::Sftp(
+                crate::fsops::RemoteSftpFileOps { sftp },
+            )),
             Some(c) => Ok(RemoteTarget::Docker(DockerExecFileOps::new(channel, c)?)),
             None => Ok(RemoteTarget::Sftp(crate::fsops::RemoteSftpFileOps {
                 sftp,

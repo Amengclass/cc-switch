@@ -70,7 +70,8 @@ pub async fn apply_opencode_provider_settings(
         providers.insert(provider_id.to_string(), config_to_write);
     }
 
-    let text = serde_json::to_string_pretty(&merged)
+    let sorted = crate::config::sort_json_keys(&merged);
+    let text = serde_json::to_string_pretty(&sorted)
         .map_err(|e| format!("序列化 opencode.json 失败: {e}"))?;
     session
         .write_settings_with_backup(&config_path, &text, container, None)

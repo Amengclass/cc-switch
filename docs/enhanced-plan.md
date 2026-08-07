@@ -251,6 +251,45 @@
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
 
+### 远端「live → 本机 DB」导入类能力对齐(2026-08-07 记录)
+
+> 本机有、远端无的反向同步能力。opencode 行为差异已清零,剩余三项均为「从远端 live 读回导入本机 DB」。空状态「导入」按钮已置灰兜底(`ProviderEmptyState importDisabled`)。
+
+| 事项 | 说明 |
+|---|---|
+| 远端空状态「导入」按钮(C3) | 本机:空列表「导入」读本机 live → DB。远端:按钮已置灰,待实现 `import_remote_opencode_providers_from_live` 等(读远端 opencode.json provider 段 → 导入本机 DB,标记 live_config_managed)后恢复启用;additive 3 app(opencode/openclaw/hermes)结构清晰优先做 |
+| 远端启动自动导入 | 本机每次启动 setup hook 幂等同步 live → DB(lib.rs:843,含 openclaw)。远端需:启动(或切换远端目标)时读远端 live → 导入本机 DB。**已黑盒验证本机行为**(手工加 provider → 重启出现) |
+| 远端批量同步(C4) | 本机 `sync_current_to_live` 在配置导入/云恢复时对 additive 同步全部 live-managed 供应商(live.rs:1281)。远端无对应命令;无独立按钮,属附带流程 |
+
+### per-target 独立供应商列表 + 切目标自动同步(2026-08-07 已实现 ✅)
+
+> 用户提出的架构方向：目标选择器指向哪，面板就显示哪的供应商列表。
+> 目标 = 本机(默认) / 远端宿主机 / 远端某容器，三类各自独立列表。
+
+**最终方案（2026-08-07 定稿并实现）**：
+- **全部 7 app** 远端目标独立；**本机保持现有模型完全不变**（本机 SQLite 候选池 + live current，零改动）。
+- **远端候选池 = 各目标机器自己的 SSOT**：`~/.cc-switch/providers/{app}.json`（宿主机放宿主机、容器放容器内），
+  存完整 `Provider` 记录数组 + `current_provider_id`（`remote/providers.rs`，`FileOps` 支持 SFTP/docker exec）。
+- **首次填充对齐本机启动导入**：SSOT 为空时从**该远端自己的 live** 导入——
+  additive 3 app 每次读 SSOT 幂等同步 live → SSOT；非 additive 仅空库导入一条 `default`
+  （对齐 `should_import_default_config_on_startup`）。本机 DB 的供应商**不会自动注入远端**（独立语义）。
+- **后端命令**（`remote/commands.rs` + `remote/providers.rs`）：`get_remote_providers`（列表+current+live_ids 一次返回）、
+  `add_remote_provider`（addToLive 对齐本机 add）、`update_remote_provider`（在生效位置才重写 live，additive 改名禁 live 内条目）、
+  `delete_remote_provider`（非 additive current 禁删；additive 先移 live）；`switch_remote_provider` 数据源改 SSOT（本机 DB 不参与），
+  `get_remote_current_provider` 判定顺序 = 切换记录 → SSOT current → live base_url 兜底（匹配 SSOT 而非本机 DB）；
+  `remove_remote_provider_from_live` 移除后同步 SSOT `live_config_managed=false`。
+- **前端**：远端目标下 `useRemoteProvidersQuery` 接管面板数据源（`providers`/`currentProviderId`/`liveIds`），
+  添加/编辑/删除/复制/切换全走远端命令；本机目标完全走原路径。
+
+| 决策点 | 定稿 |
+|---|---|
+| 改造范围 | **全部 7 app**（统一 SSOT，additive 与非 additive 一套逻辑；additive 的 live 仍为按钮态依据） |
+| 本机定位 | **本机保持现有模型完全不变**（符合第一要素） |
+| 候选池存储 | **远端 JSON SSOT**（非本机 DB 分桶；provider 定义即 JSON，与 prompts/skills SSOT 同构） |
+| 首次填充 | **对齐本机：从该远端自己的 live 导入**（additive 每次幂等 / 非 additive 空库一次）；不做本机→远端自动注入 |
+| 「添加」按钮语义 | 远端面板列表 = 该目标 SSOT；additive 的「添加/移除」由 live 集合（`live_ids`）驱动，对齐本机 |
+| 失败/加载态 | 远端目标不可达 → 面板加载态/报错由 `useRemoteProvidersQuery` 自然呈现 |
+
 ### 远程 per-app 扩展(2026-08-07 起,codex/gemini/grok/opencode/openclaw/hermes 已全部完成)
 
 | 事项 | 说明 |

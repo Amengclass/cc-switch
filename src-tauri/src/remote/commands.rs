@@ -373,13 +373,23 @@ pub async fn remove_remote_provider_from_live(
     app: String,
     provider_id: String,
     container: Option<String>,
-) -> Result<(), String> {
+) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
     let root = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    // live 移除成功后同步 SSOT：该供应商 live_config_managed → false（保留在候选池，
+    // 对齐本机 remove_from_live_config 语义——本机也是移除 live 后把 DB 标记置 false）
+    let mut ssot =
+        crate::remote::providers::read_remote_providers_ssot(&target, &root, &app).await?;
 
-    match app.as_str() {
+    // 按 app 分支移除 live 中的供应商；Result 显式丢弃（错误已在分支内处理/返回）
+    let _: Result<(), String> = match app.as_str() {
         "opencode" => {
             let config_path = format!("{root}/.config/opencode/opencode.json");
             let mut merged: Value = session
@@ -391,14 +401,16 @@ pub async fn remove_remote_provider_from_live(
                 .get_mut("provider")
                 .and_then(|v| v.as_object_mut())
                 .is_some_and(|p| p.remove(&provider_id).is_some());
+            // 对齐本机 remove_provider 语义：供应商本就不在配置里 → 静默成功（不写文件）
             if !removed {
-                return Err(format!("远端 opencode.json 中没有供应商 {provider_id}"));
+                log::debug!("远端 opencode.json 中没有供应商 {provider_id}，跳过 live 移除");
+            } else {
+                let text = serde_json::to_string_pretty(&merged)
+                    .map_err(|e| format!("序列化 opencode.json 失败: {e}"))?;
+                session
+                    .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+                    .await?;
             }
-            let text = serde_json::to_string_pretty(&merged)
-                .map_err(|e| format!("序列化 opencode.json 失败: {e}"))?;
-            session
-                .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
-                .await?;
             Ok(())
         }
         "openclaw" => {
@@ -465,10 +477,442 @@ pub async fn remove_remote_provider_from_live(
                 .await?;
             Ok(())
         }
-        other => Err(format!(
-            "应用 {other} 不支持从 live 配置移除（与本机语义一致）"
-        )),
+        other => {
+            return Err(format!("应用 {other} 不支持从 live 配置移除（与本机语义一致）"));
+        }
+    };
+
+    // 同步 SSOT：live_config_managed → false（无论 live 是否真的移除了，
+    // 对齐本机 remove_from_live_config 总是把 DB 标记置 false）
+    if let Some(p) = ssot.providers.iter_mut().find(|p| p.id == provider_id) {
+        if let Some(meta) = p.meta.as_mut() {
+            meta.live_config_managed = Some(false);
+        }
     }
+    crate::remote::providers::write_remote_providers_ssot(&target, &root, &app, &ssot).await?;
+
+    // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 移除 live 后
+    // 按钮态需要最新集合）
+    let live_ids = if crate::remote::providers::is_additive_app(&app) {
+        crate::remote::providers::read_remote_live_provider_ids(&target, &root, &app).await?
+    } else {
+        Vec::new()
+    };
+    build_remote_providers_view(
+        &state,
+        &host_id,
+        &target,
+        &root,
+        &app,
+        container.as_deref(),
+        &session,
+        ssot,
+        live_ids,
+    )
+    .await
+}
+
+/// 远端供应商面板数据源：读该目标机器自己的 SSOT（首次从 live 导入），
+/// 返回完整供应商列表 + 当前供应商 + additive live ID 集合（按钮态）。
+#[derive(serde::Serialize)]
+pub struct RemoteProvidersView {
+    pub providers: Vec<crate::provider::Provider>,
+    /// 非 additive：当前生效供应商（SSOT current / 切换记录 / live 兜底）；additive 为 None
+    pub current_provider_id: Option<String>,
+    /// additive：远端 live 中的供应商 ID 集合（isInConfig 按钮态）；其他 app 为空
+    pub live_ids: Vec<String>,
+}
+
+/// 远端供应商面板数据源（per-target 独立）。
+#[tauri::command]
+pub async fn get_remote_providers(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    container: Option<String>,
+) -> Result<RemoteProvidersView, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    // 首次（SSOT 空）从远端 live 导入（对齐本机启动导入语义）。
+    // additive 时同步函数顺带返回 live_ids（get 场景免对 live 文件重复读取）
+    let (_, live_ids) = crate::remote::providers::sync_remote_live_into_ssot(&target, &home, &app).await?;
+    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
+    build_remote_providers_view(
+        &state,
+        &host_id,
+        &target,
+        &home,
+        &app,
+        container.as_deref(),
+        &session,
+        ssot,
+        live_ids,
+    )
+    .await
+}
+
+/// 在已连接的会话上构建当前远端供应商视图（列表 + current + live_ids）。
+///
+/// 复用调用方已读到的内存 SSOT（操作命令改完直接传，不再重读文件）与
+/// live_ids（get 场景来自 sync 返回值，操作场景来自写 live 后的一次读取）。
+/// 前端 `setQueryData` 写入缓存，免「操作 + invalidate-refetch」的第二次
+/// SSH 建连（远端正向优化）。
+#[allow(clippy::too_many_arguments)]
+async fn build_remote_providers_view(
+    state: &AppState,
+    host_id: &str,
+    target: &crate::remote::docker::RemoteTarget<'_>,
+    home: &str,
+    app: &str,
+    container: Option<&str>,
+    session: &connection::RemoteSession,
+    ssot: crate::remote::providers::RemoteProvidersSsot,
+    live_ids: Vec<String>,
+) -> Result<RemoteProvidersView, String> {
+    let current_provider_id = resolve_remote_current_provider_id(
+        state,
+        host_id,
+        target,
+        home,
+        app,
+        container,
+        session,
+        &ssot,
+    )
+    .await?;
+    Ok(RemoteProvidersView {
+        providers: ssot.providers,
+        current_provider_id,
+        live_ids,
+    })
+}
+
+/// 操作命令入口：读该目标 SSOT；若为空则先按本机语义从该远端 live 导入
+/// （避免覆盖远端已有配置）。非空库不读 live（方案 A：容器场景省一次 docker exec）。
+async fn load_remote_ssot_for_mutation<F: crate::fsops::FileOps>(
+    target: &F,
+    home: &str,
+    app: &str,
+) -> Result<crate::remote::providers::RemoteProvidersSsot, String> {
+    let mut ssot =
+        crate::remote::providers::read_remote_providers_ssot(target, home, app).await?;
+    if ssot.providers.is_empty() {
+        let (changed, _) =
+            crate::remote::providers::sync_remote_live_into_ssot(target, home, app).await?;
+        if changed > 0 {
+            ssot = crate::remote::providers::read_remote_providers_ssot(target, home, app)
+                .await?;
+        }
+    }
+    Ok(ssot)
+}
+
+/// 在远端目标添加供应商：写入该目标自己的 SSOT；addToLive=true（或非 additive
+/// 且当前为空）时同时写入 live。对齐本机 `add_provider` 语义。
+#[tauri::command]
+pub async fn add_remote_provider(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    provider: crate::provider::Provider,
+    add_to_live: Option<bool>,
+    container: Option<String>,
+) -> Result<RemoteProvidersView, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    // 操作命令入口：SSOT 为空才从该远端 live 导入（避免覆盖远端已有配置）；
+    // 非空库不读 live（方案 A：容器场景省一次 docker exec）
+    let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let mut provider = provider;
+    let provider_id = provider.id.clone();
+    let additive = crate::remote::providers::is_additive_app(&app);
+    let mut write_live = false;
+
+    if additive {
+        // 对齐本机 add：additive 下 addToLive 决定是否写入 live（meta.live_config_managed）
+        let add_to_live = add_to_live.unwrap_or(true);
+        // 对齐本机 add：OMO/OMO-slim 添加不自动写入 live（用户显式切换才激活）
+        let is_omo = app == "opencode"
+            && matches!(provider.category.as_deref(), Some("omo") | Some("omo-slim"));
+        if is_omo {
+            write_live = false;
+            if let Some(meta) = provider.meta.as_mut() {
+                meta.live_config_managed = Some(false);
+            }
+        } else {
+            if let Some(meta) = provider.meta.as_mut() {
+                meta.live_config_managed = Some(add_to_live);
+            }
+            write_live = add_to_live;
+        }
+    } else {
+        // 非 additive：仅当该目标尚无当前供应商才设为 current 并写 live
+        // （对齐本机「DB 无 current → set_current + 写 live」）
+        let has_current = ssot
+            .current_provider_id
+            .as_deref()
+            .is_some_and(|c| ssot.providers.iter().any(|p| p.id == c));
+        if !has_current {
+            ssot.current_provider_id = Some(provider_id.clone());
+            write_live = true;
+        }
+    }
+
+    crate::remote::providers::upsert_provider(&mut ssot.providers, provider);
+    crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot).await?;
+
+    if write_live {
+        let p = ssot
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .ok_or_else(|| "供应商写入 SSOT 后未找到".to_string())?;
+        crate::remote::providers::apply_remote_provider_to_live(
+            state.db.as_ref(),
+            &session,
+            container.as_deref(),
+            &home,
+            &host.name,
+            &app,
+            p,
+        )
+        .await?;
+        if !additive {
+            let _ =
+                crate::remote::current::save_current_provider(&host_id, &app, &provider_id);
+        }
+    }
+
+    // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
+    // 按钮态需要最新集合）
+    let live_ids = if crate::remote::providers::is_additive_app(&app) {
+        crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?
+    } else {
+        Vec::new()
+    };
+    build_remote_providers_view(
+        &state,
+        &host_id,
+        &target,
+        &home,
+        &app,
+        container.as_deref(),
+        &session,
+        ssot,
+        live_ids,
+    )
+    .await
+}
+
+/// 编辑远端目标的供应商：更新 SSOT 记录；若该供应商在生效位置
+/// （非 additive current / additive live_config_managed=true）则重写远端 live
+/// （对齐本机 `update_provider` 语义）。additive 改名且原名已在 live 中时报错。
+#[tauri::command]
+pub async fn update_remote_provider(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    provider: crate::provider::Provider,
+    original_id: Option<String>,
+    container: Option<String>,
+) -> Result<RemoteProvidersView, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    // 操作命令入口：SSOT 为空才从该远端 live 导入（避免覆盖远端已有配置）；
+    // 非空库不读 live（方案 A：容器场景省一次 docker exec）
+    let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let original_id = original_id.unwrap_or_else(|| provider.id.clone());
+    let existing = ssot.providers.iter().find(|p| p.id == original_id).cloned();
+    let mut provider = provider;
+    let additive = crate::remote::providers::is_additive_app(&app);
+
+    // 对齐本机 update：非 additive 不允许修改供应商 id（provider/mod.rs:2620）
+    if !additive && original_id != provider.id {
+        return Err(format!(
+            "应用 {app} 不支持修改供应商 id（{original_id} → {}）",
+            provider.id
+        ));
+    }
+
+    if additive && original_id != provider.id {
+        // 对齐本机：additive 改名，原名若已在 live 中则禁止（改 id 会破坏 live 引用）
+        let live_ids =
+            crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?;
+        if live_ids.iter().any(|id| id == &original_id) {
+            return Err(format!(
+                "供应商 '{original_id}' 已写入远端 live 配置，不支持改名（请先移除再添加）"
+            ));
+        }
+    }
+
+    let is_current = ssot.current_provider_id.as_deref() == Some(original_id.as_str());
+    if additive {
+        // additive：live_config_managed 保留原值（「添加/移除」按钮控制，编辑不改）
+        if let Some(meta) = provider.meta.as_mut() {
+            meta.live_config_managed = existing
+                .as_ref()
+                .and_then(|ex| ex.meta.as_ref())
+                .and_then(|m| m.live_config_managed);
+        }
+    } else if is_current {
+        // 非 additive：编辑当前供应商后 current 指向新 id
+        ssot.current_provider_id = Some(provider.id.clone());
+    }
+
+    let need_live_rewrite = if additive {
+        provider
+            .meta
+            .as_ref()
+            .and_then(|m| m.live_config_managed)
+            .unwrap_or(false)
+    } else {
+        is_current
+    };
+    let provider_id_after = provider.id.clone();
+
+    crate::remote::providers::upsert_provider(&mut ssot.providers, provider);
+    // additive 改名：移除旧 id 条目（对齐本机 update 改名后删除原 id）
+    if original_id != provider_id_after {
+        ssot.providers.retain(|p| p.id != original_id);
+    }
+    crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot).await?;
+
+    if need_live_rewrite {
+        let p = ssot
+            .providers
+            .iter()
+            .find(|p| p.id == provider_id_after)
+            .ok_or_else(|| "编辑后的供应商未找到".to_string())?;
+        crate::remote::providers::apply_remote_provider_to_live(
+            state.db.as_ref(),
+            &session,
+            container.as_deref(),
+            &home,
+            &host.name,
+            &app,
+            p,
+        )
+        .await?;
+        let _ = crate::remote::current::save_current_provider(&host_id, &app, &provider_id_after);
+    }
+
+    // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
+    // 按钮态需要最新集合）
+    let live_ids = if crate::remote::providers::is_additive_app(&app) {
+        crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?
+    } else {
+        Vec::new()
+    };
+    build_remote_providers_view(
+        &state,
+        &host_id,
+        &target,
+        &home,
+        &app,
+        container.as_deref(),
+        &session,
+        ssot,
+        live_ids,
+    )
+    .await
+}
+
+/// 删除远端目标的供应商：从 SSOT 移除；非 additive 的当前供应商拒绝删除
+/// （对齐本机 delete 语义）；additive 且该供应商在 live 中时先移除 live。
+#[tauri::command]
+pub async fn delete_remote_provider(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    provider_id: String,
+    container: Option<String>,
+) -> Result<RemoteProvidersView, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    // 操作命令入口：SSOT 为空才从该远端 live 导入（避免覆盖远端已有配置）；
+    // 非空库不读 live（方案 A：容器场景省一次 docker exec）
+    let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let additive = crate::remote::providers::is_additive_app(&app);
+
+    if !additive && ssot.current_provider_id.as_deref() == Some(provider_id.as_str()) {
+        return Err(format!(
+            "当前生效的供应商 '{provider_id}' 不能删除，请先切换其他供应商"
+        ));
+    }
+
+    // additive：若该供应商在 live 中，先移除（对齐本机 delete：additive 删除会同时移除 live）
+    if additive {
+        let live_ids =
+            crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?;
+        if live_ids.iter().any(|id| id == &provider_id) {
+            remove_remote_provider_from_live(
+                state.clone(),
+                host_id.clone(),
+                app.clone(),
+                provider_id.clone(),
+                container.clone(),
+            )
+            .await?;
+        }
+    }
+
+    ssot.providers.retain(|p| p.id != provider_id);
+    crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot).await?;
+
+    // 清理该远端「当前供应商」持久化记录（对齐本机 delete 后前端清 current）
+    let _ = crate::remote::current::delete_current_provider_for_app(&host_id, &app);
+
+    // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
+    // 按钮态需要最新集合）
+    let live_ids = if crate::remote::providers::is_additive_app(&app) {
+        crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?
+    } else {
+        Vec::new()
+    };
+    build_remote_providers_view(
+        &state,
+        &host_id,
+        &target,
+        &home,
+        &app,
+        container.as_deref(),
+        &session,
+        ssot,
+        live_ids,
+    )
+    .await
 }
 
 /// 删除供应商后清理远端「当前供应商」持久化记录（remote_current_providers.json）。
@@ -483,12 +927,12 @@ pub async fn clear_remote_provider_record(
     crate::remote::current::delete_current_provider_for_app(&host_id, &app)
 }
 
-/// 对远程主机执行供应商切换：将本地供应商配置原子写回远端对应 app 的 live 文件，
-/// 返回「生效方式」报告。
+/// 对远程主机执行供应商切换：将该远端目标（宿主机/容器）SSOT 中保存的供应商定义
+/// 原子写回远端对应 app 的 live 文件，返回「生效方式」报告。
 ///
-/// - `app = "claude"`：整文件覆盖远端 settings.json env 块（历史行为）
-/// - `app = "codex"`：读-改-写远端 config.toml（复用本机 codex_config 纯变换 +
-///   sha256 脏写防护 + 原子写回；auth.json 按本机语义处理）
+/// per-target 独立：供应商定义取自该目标自己的 `~/.cc-switch/providers/{app}.json`
+/// （SSOT），本机 DB 不参与。SSOT 为空时先按本机语义从远端 live 导入
+/// （additive 幂等同步 / 非 additive 空库导入 default）。
 #[tauri::command]
 pub async fn switch_remote_provider(
     state: State<'_, AppState>,
@@ -499,130 +943,53 @@ pub async fn switch_remote_provider(
 ) -> Result<EffectReport, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-
-    let providers = state
-        .db
-        .get_all_providers(&app)
-        .map_err(|e| e.to_string())?;
-    let provider = providers
-        .get(&provider_id)
-        .ok_or_else(|| "供应商不存在，可能已被删除".to_string())?;
-
     let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
 
-    let report = match app.as_str() {
-        // Claude：整文件覆盖 settings.json env 块（复用本机「生效配置」构建，保持历史行为）
-        "claude" => {
-            // 复用本机切换的构建逻辑：provider env + 通用配置片段 + 供应商默认值，
-            // 保证远端产出的 settings.json 与本机「启用」完全一致。
-            let effective =
-                crate::services::provider::live::build_effective_settings_with_common_config(
-                    &state.db,
-                    &crate::app_config::AppType::Claude,
-                    provider,
-                )
-                .map_err(|e| e.to_string())?;
-            // 与本机 write_live_snapshot 一致：剔除内部字段
-            let sanitized =
-                crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
-            settings::apply_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &sanitized,
-            )
-            .await?
-        }
-        // Codex：远端切齐本机 codex_config 全部变换（catalog/unified/bearer/auth 判定）
-        "codex" => {
-            crate::remote::codex::apply_codex_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                provider.category.as_deref(),
-                crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
-            )
-            .await?
-        }
-        // Grok Build：复用本机 grok_config 语义（config 字段即 TOML 文本，非官方形状校验）
-        "grokbuild" => {
-            crate::remote::grok::apply_grok_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                provider.category.as_deref(),
-            )
-            .await?
-        }
-        // Gemini：.env + settings.json 读-改-写（复用本机 gemini_config 纯变换，
-        // auth 类型检测与本机 write_gemini_live 同源）
-        "gemini" => {
-            crate::remote::gemini::apply_gemini_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                provider,
-            )
-            .await?
-        }
-        // OpenCode：additive，复用本机 live.rs OpenCode 分支语义（片段提取 + upsert）
-        "opencode" => {
-            crate::remote::opencode::apply_opencode_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await?
-        }
-        // OpenClaw：additive，models.providers upsert（JSON5 兼容读）
-        "openclaw" => {
-            crate::remote::openclaw::apply_openclaw_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await?
-        }
-        // Hermes：additive，custom_providers 序列 upsert（YAML）
-        "hermes" => {
-            crate::remote::hermes::apply_hermes_provider_settings(
-                &session,
-                container.as_deref(),
-                &host.default_home(),
-                &host.name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await?
-        }
-        other => {
-            return Err(format!("远程切换暂不支持应用: {other}"));
-        }
-    };
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
 
-    // 切换成功即持久化「该远端当前生效供应商」（per-app）。与原生 cc switch 的
-    // 「当前供应商」语义一致（判断当前不靠 base_url 匹配），这样编辑该供应商时
-    // 能可靠判定需要写回远端。
+    // 首次访问（SSOT 空）时从远端 live 导入（对齐本机启动导入语义）
+    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let provider = ssot
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "供应商 '{provider_id}' 不在远端「{}」的配置中，请先在远端面板添加后再切换",
+                host.name
+            )
+        })?;
+
+    let report = crate::remote::providers::apply_remote_provider_to_live(
+        state.db.as_ref(),
+        &session,
+        container.as_deref(),
+        &home,
+        &host.name,
+        &app,
+        &provider,
+    )
+    .await?;
+
+    // 切换成功即持久化「该远端当前生效供应商」：SSOT current（非 additive）+
+    // 本地记录（remote_current_providers.json）。与原生 cc switch 的「当前供应商」
+    // 语义一致（判断当前不靠 base_url 匹配）。
+    if !crate::remote::providers::is_additive_app(&app) {
+        let mut ssot = ssot;
+        ssot.current_provider_id = Some(provider_id.clone());
+        if let Err(e) =
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot)
+                .await
+        {
+            log::warn!("[remote] 写回远端 SSOT current 失败 host_id={host_id}: {e}");
+        }
+    }
     if let Err(e) = crate::remote::current::save_current_provider(&host_id, &app, &provider_id) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
@@ -634,8 +1001,7 @@ pub async fn switch_remote_provider(
     let reproject = match container.as_deref() {
         Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
             Ok(ops) => {
-                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &host.default_home(), &app)
-                    .await
+                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
             }
             Err(e) => Err(e),
         },
@@ -643,8 +1009,7 @@ pub async fn switch_remote_provider(
             let ops = crate::fsops::RemoteSftpFileOps {
                 sftp: &session.sftp,
             };
-            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &host.default_home(), &app)
-                .await
+            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
         }
     };
     if let Err(e) = reproject {
@@ -677,11 +1042,12 @@ pub async fn scan_remote_env_conflicts(
 }
 
 /// 读取远端「当前生效」的本地供应商 id（per-app）。
+/// 读取远端「当前生效」的供应商 id（per-app，per-target 独立）。
 ///
-/// 优先返回本应用切换时持久化的记录（`~/.cc-switch/remote_current_providers.json`，
-/// 与原生 cc switch 的「当前供应商」语义一致、不依赖 base_url 匹配）；
-/// 持久化缺失（如该供应商从未经本应用切换过、或记录被清理）时，才连 SSH 读远端
-/// live 文件按 base_url 兜底匹配（当前仅 claude 实现兜底）。
+/// 判定顺序（均以该远端目标自己的 SSOT 为准，本机 DB 不参与）：
+/// 1. 本应用切换时持久化的记录（`~/.cc-switch/remote_current_providers.json`）；
+/// 2. 非 additive：SSOT 的 `current_provider_id`（对齐本机 DB `is_current`）；
+/// 3. 兜底：读远端 live 按 base_url 匹配 SSOT 供应商（从未经本应用切换的老配置）。
 ///
 /// 用于目标选择器：选中服务器后，主界面供应商列表的当前高亮取自远端。
 #[tauri::command]
@@ -692,37 +1058,70 @@ pub async fn get_remote_current_provider(
     container: Option<String>,
 ) -> Result<Option<String>, String> {
     let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    resolve_remote_current_provider_id(
+        &state,
+        &host_id,
+        &target,
+        &home,
+        &app,
+        container.as_deref(),
+        &session,
+        &ssot,
+    )
+    .await
+}
 
-    // 1) 持久化记录优先：这是本应用上次「切换」写入的真实当前供应商，
-    //    不受用户后续编辑 base_url / 通用配置片段影响（那正是匹配法失效的场景）。
-    if let Some(persisted) = crate::remote::current::get_current_provider(&host_id, &app)? {
-        if state
-            .db
-            .get_provider_by_id(&persisted, &app)
-            .map_err(|e| e.to_string())?
-            .is_some()
-        {
+/// 远端当前供应商判定（`get_remote_providers` / `get_remote_current_provider` 共用）。
+async fn resolve_remote_current_provider_id(
+    state: &AppState,
+    host_id: &str,
+    target: &crate::remote::docker::RemoteTarget<'_>,
+    home: &str,
+    app: &str,
+    container: Option<&str>,
+    session: &connection::RemoteSession,
+    ssot: &crate::remote::providers::RemoteProvidersSsot,
+) -> Result<Option<String>, String> {
+    // 1) 持久化记录优先：本应用上次「切换」写入的真实当前供应商，不受用户后续
+    //    编辑 base_url / 通用配置片段影响（那正是匹配法失效的场景）。校验其仍
+    //    存在于该远端 SSOT（per-target 独立：本机 DB 里有没有不再相关）。
+    if let Some(persisted) = crate::remote::current::get_current_provider(host_id, app)? {
+        if ssot.providers.iter().any(|p| p.id == persisted) {
             return Ok(Some(persisted));
         }
     }
 
-    // 2) 兜底：读目标 live 匹配 base_url（对从未经本应用切换的老配置）。
-    //    仅「整文件覆盖式」app 有明确的 base_url 判定字段；additive 模式 app
-    //    （opencode/openclaw/hermes）无「当前供应商」概念，与本机一致跳过。
-    if !matches!(app.as_str(), "claude" | "codex" | "gemini" | "grokbuild") {
+    // 2) 非 additive：SSOT current_provider_id（对齐本机 DB is_current）。
+    //    additive（opencode/openclaw/hermes）无「当前供应商」概念，跳过。
+    if !crate::remote::providers::is_additive_app(app) {
+        if let Some(current) = ssot.current_provider_id.as_deref() {
+            if ssot.providers.iter().any(|p| p.id == current) {
+                return Ok(Some(current.to_string()));
+            }
+        }
+    }
+
+    // 3) 兜底：读远端 live 匹配 base_url（对从未经本应用切换的老配置）。
+    //    仅「整文件覆盖式」app 有明确的 base_url 判定字段。
+    if !matches!(app, "claude" | "codex" | "gemini" | "grokbuild") {
         return Ok(None);
     }
 
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-
     // 读远端 live 文件 → 提取当前 base_url（与本机各 app 判定字段一致）
-    let remote_base = match app.as_str() {
+    let remote_base = match app {
         "codex" => {
             let path = format!("{home}/.codex/config.toml");
             session
-                .read_remote_text(&path, container.as_deref())
+                .read_remote_text(&path, container)
                 .await?
                 .and_then(|t| crate::codex_config::extract_codex_base_url(&t))
                 .unwrap_or_default()
@@ -730,7 +1129,7 @@ pub async fn get_remote_current_provider(
         "gemini" => {
             let path = format!("{home}/.gemini/.env");
             session
-                .read_remote_text(&path, container.as_deref())
+                .read_remote_text(&path, container)
                 .await?
                 .map(|t| crate::gemini_config::parse_env_file(&t))
                 .and_then(|m| m.get("GOOGLE_GEMINI_BASE_URL").cloned())
@@ -739,19 +1138,14 @@ pub async fn get_remote_current_provider(
         "grokbuild" => {
             let path = format!("{home}/.grok/config.toml");
             session
-                .read_remote_text(&path, container.as_deref())
+                .read_remote_text(&path, container)
                 .await?
                 .and_then(|t| crate::grok_config::extract_base_url(&t))
                 .unwrap_or_default()
         }
         _ => {
             // claude：settings.json（FileOps，容器兼容）
-            let target = crate::remote::docker::RemoteTarget::new(
-                &session.sftp,
-                &session.channel,
-                container.as_deref(),
-            )?;
-            settings::read_remote_settings(&target, &home)
+            settings::read_remote_settings(target, home)
                 .await?
                 .pointer("/env/ANTHROPIC_BASE_URL")
                 .and_then(Value::as_str)
@@ -763,13 +1157,9 @@ pub async fn get_remote_current_provider(
         return Ok(None);
     }
 
-    let app_type = crate::app_config::AppType::from_str(&app)
+    let app_type = crate::app_config::AppType::from_str(app)
         .map_err(|_| format!("未知应用类型: {app}"))?;
-    let providers = state
-        .db
-        .get_all_providers(&app)
-        .map_err(|e| e.to_string())?;
-    for (id, p) in &providers {
+    for p in &ssot.providers {
         // 远端 live 里存的是「生效配置」——即合并通用配置片段后的结果，
         // 与 switch_remote_provider 写入时一致。因此这里必须用同一份生效配置的
         // base_url 去比对，否则开启了通用配置的供应商永远匹配不上，编辑推送会被跳过。
@@ -779,7 +1169,7 @@ pub async fn get_remote_current_provider(
             p,
         )
         .map_err(|e| e.to_string())?;
-        let local_base = match app.as_str() {
+        let local_base = match app {
             "codex" => effective
                 .get("config")
                 .and_then(Value::as_str)
@@ -802,9 +1192,10 @@ pub async fn get_remote_current_provider(
                 .to_string(),
         };
         if !local_base.is_empty() && local_base == remote_base {
-            return Ok(Some(id.clone()));
+            return Ok(Some(p.id.clone()));
         }
     }
+
     Ok(None)
 }
 

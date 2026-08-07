@@ -50,7 +50,7 @@ export const APP_INSTALL_CMDS: Record<
 > = {
   claude: {
     local: "npm i -g @anthropic-ai/claude-code",
-    remote: "curl -fsSL claude.ai/install.sh | bash",
+    remote: "npm i -g @anthropic-ai/claude-code",
   },
   codex: {
     local: "npm i -g @openai/codex",
