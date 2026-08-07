@@ -3,6 +3,8 @@
  * 主题：floating-main.tsx 会读主应用的 `cc-switch-theme`，在 <html> 上打
  * light/dark 类，这里用 CSS 变量切换面板配色，与主应用外观主题一致。
  * 注意：不要加 box-shadow —— 阴影羽化会溢出到透明窗口的四角，看起来像“底色”。
+ * 外轮廓（--fb-outline）比内部细线（--fb-border）更明显：悬浮窗浮在桌面/壁纸上，
+ * 轮廓必须清晰可辨，否则白色背景上会“融为一体”。
  */
 html,
 body {
@@ -42,12 +44,24 @@ body {
   justify-content: center;
 }
 
+/* 窗口级 hover 覆盖层：占满整个透明窗口（含四周 FLOATING_MARGIN 留白），
+ * 并居中内容。hover 判定绑在此层上，鼠标在窗口内（含球/面板边缘的透明区）
+ * 移动不会误触发 mouseleave；内容元素（.ball/.panel）自身不再绑 hover。 */
+.floating-hover-layer {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 /* ---- 主题变量 ---- */
 :root {
   --fb-bg: rgba(255, 255, 255, 0.97);
   --fb-fg: #18181b;
   --fb-muted: #71717a;
   --fb-border: rgba(24, 24, 27, 0.1);
+  --fb-outline: rgba(24, 24, 27, 0.28); /* 外轮廓：明显但中性，白色背景上清晰可辨 */
   --fb-hover: rgba(0, 0, 0, 0.07);
   --fb-primary: #1f8fff; /* 主应用 --primary 蓝色（HSL 210 100% 56%） */
   --fb-danger-bg: rgba(239, 68, 68, 0.12);
@@ -58,6 +72,7 @@ body {
   --fb-fg: #e4e4e7;
   --fb-muted: #a1a1aa;
   --fb-border: rgba(255, 255, 255, 0.12);
+  --fb-outline: rgba(255, 255, 255, 0.32);
   --fb-hover: rgba(255, 255, 255, 0.09);
   --fb-primary: #148aff; /* 主应用 dark --primary 蓝色 */
   --fb-danger-bg: rgba(239, 68, 68, 0.22);
@@ -73,7 +88,7 @@ body {
   flex-shrink: 0;
   border-radius: 20px;
   background: var(--fb-bg);
-  border: 1px solid var(--fb-border);
+  border: 1px solid var(--fb-outline);
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -209,7 +224,7 @@ body {
   width: 300px;
   height: 320px;
   background: var(--fb-bg);
-  border: 1px solid var(--fb-border);
+  border: 1px solid var(--fb-outline);
   border-radius: 12px;
   color: var(--fb-fg);
   display: flex;

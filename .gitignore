@@ -29,3 +29,6 @@ copilot-api
 .history
 CODEBUDDY.md
 mainWindow.js
+
+# Reasonix Desktop 本地会话元数据
+.reasonix/

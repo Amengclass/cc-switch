@@ -119,13 +119,8 @@ export function FloatingPanel() {
   return (
     <div
       className="panel"
-      onMouseEnter={() =>
-        void invoke("floating_set_hover", { source: "panel", active: true })
-      }
-      onMouseLeave={() =>
-        void invoke("floating_set_hover", { source: "panel", active: false })
-      }
-      // 面板是纯展示，右键不弹任何东西（含 WebView 默认菜单）
+      // hover 状态由 floating-main.tsx 的窗口级覆盖层统一上报（含透明留白区），
+      // 这里不再绑定 mouseenter/leave，避免移到面板边缘透明区时面板闪没。
       onContextMenu={(e) => e.preventDefault()}
     >
       <div className="panel-header">

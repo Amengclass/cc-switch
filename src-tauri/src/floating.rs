@@ -19,11 +19,31 @@ pub const BALL_LABEL: &str = "floating-ball";
 pub const PANEL_LABEL: &str = "floating-panel";
 /// 右键菜单窗口（与面板同款透明样式，自定义 HTML 菜单）
 pub const MENU_LABEL: &str = "floating-menu";
-/// 悬浮球窗口尺寸（方案C：横向胶囊条 180×40，无阴影所以窗口与胶囊同尺寸）
+/// 悬浮球窗口内容尺寸（方案C：横向胶囊条 180×40）。
+/// 窗口实际尺寸 = 内容 + 四周 FLOATING_MARGIN 留白（见 ball_window_size）。
 const BALL_WIDTH: f64 = 180.0;
 const BALL_HEIGHT: f64 = 40.0;
 const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;
+/// 球/面板内容四周留白（逻辑像素）：透明窗口必须比内容大一圈。
+/// 窗口与内容同尺寸时，DPI 缩放下的亚像素舍入会把贴窗口边缘的 1px 边框
+/// 裁掉（实测：上/左/右边框可见，唯独下边框消失）。留白让边框远离窗口边缘。
+/// 与 MENU_SHADOW_MARGIN 同理——菜单留 10px 是为阴影，这里只画 1px 边框，6px 足够。
+const FLOATING_MARGIN: f64 = 6.0;
+/// 球窗口实际尺寸 = 内容尺寸 + 四周留白（创建时用窗口尺寸，定位/吸附时用内容尺寸）
+fn ball_window_size() -> (f64, f64) {
+    (
+        BALL_WIDTH + FLOATING_MARGIN * 2.0,
+        BALL_HEIGHT + FLOATING_MARGIN * 2.0,
+    )
+}
+/// 面板窗口实际尺寸 = 内容尺寸 + 四周留白
+fn panel_window_size() -> (f64, f64) {
+    (
+        PANEL_WIDTH + FLOATING_MARGIN * 2.0,
+        PANEL_HEIGHT + FLOATING_MARGIN * 2.0,
+    )
+}
 /// 右键菜单窗口尺寸（瘦高样式，与 .floating-menu CSS 保持一致：
 /// padding 2+2、2×28 项、2×2 gap、1 分隔线、1 边框；带图标列。
 /// 比最窄内容（项内容 53 + padding 4 + 边框 2 = 59）留一些余量，取 80）
@@ -243,11 +263,15 @@ fn finish_drag(app: &tauri::AppHandle) {
 
 /// 计算边缘吸附后的目标位置（物理像素，全局坐标）。
 /// 全部用物理像素（窗口位置 / 显示器尺寸 / 阈值统一），避免 scale 不一致导致右/下不吸附。
+/// 球内容相对窗口居中（CSS #floating-root flex 居中），吸附判断以**内容**边缘为准，
+/// 返回的窗口位置 = 内容位置 − 留白，保证视觉上球内容贴屏幕边缘。
 fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
     let scale = ball.scale_factor().ok()?;
     let pos = ball.outer_position().ok()?;
-    let mut px = pos.x as f64;
-    let mut py = pos.y as f64;
+    let margin_px = FLOATING_MARGIN * scale;
+    // 内容左缘/顶缘（物理像素）：窗口位置 + 留白
+    let mut cx = pos.x as f64 + margin_px;
+    let mut cy = pos.y as f64 + margin_px;
     let ball_w = BALL_WIDTH * scale;
     let ball_h = BALL_HEIGHT * scale;
     let thresh_px = SNAP_THRESHOLD * scale;
@@ -264,23 +288,24 @@ fn compute_snap_target(ball: &WebviewWindow) -> Option<(f64, f64)> {
         let right = left + work.size.width as f64;
         let bottom = top + work.size.height as f64;
 
-        if px - left <= thresh_px {
-            px = left + gap_px;
-        } else if right - (px + ball_w) <= thresh_px {
-            px = right - ball_w - gap_px;
+        if cx - left <= thresh_px {
+            cx = left + gap_px;
+        } else if right - (cx + ball_w) <= thresh_px {
+            cx = right - ball_w - gap_px;
         }
-        if py - top <= thresh_px {
-            py = top + gap_px;
-        } else if bottom - (py + ball_h) <= thresh_px {
-            py = bottom - ball_h - gap_px;
+        if cy - top <= thresh_px {
+            cy = top + gap_px;
+        } else if bottom - (cy + ball_h) <= thresh_px {
+            cy = bottom - ball_h - gap_px;
         }
-        px = px.max(left).min(right - ball_w);
-        py = py.max(top).min(bottom - ball_h);
+        cx = cx.max(left).min(right - ball_w);
+        cy = cy.max(top).min(bottom - ball_h);
         log::info!(
-            "[Floating] 吸附计算: pos=({px:.0},{py:.0}) work_area=({left:.0},{top:.0},{right:.0},{bottom:.0}) gap={gap_px:.0} scale={scale}"
+            "[Floating] 吸附计算: content=({cx:.0},{cy:.0}) work_area=({left:.0},{top:.0},{right:.0},{bottom:.0}) gap={gap_px:.0} scale={scale}"
         );
     }
-    Some((px, py))
+    // 窗口位置 = 内容位置 − 留白
+    Some((cx - margin_px, cy - margin_px))
 }
 
 /// 松手吸附：按设置的动画速度平滑吸附到边缘。
@@ -414,9 +439,10 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
     let ball_exists = app.get_webview_window(BALL_LABEL).is_some();
     let panel_exists = app.get_webview_window(PANEL_LABEL).is_some();
 
-    // 创建小球窗口（含坐标初始化）
+    // 创建小球窗口（含坐标初始化）。窗口尺寸 = 内容 + 四周留白（边框渲染留白）
     if !ball_exists {
-        let Ok(ball) = build_floating_window(app, BALL_LABEL, BALL_WIDTH, BALL_HEIGHT) else {
+        let (bw, bh) = ball_window_size();
+        let Ok(ball) = build_floating_window(app, BALL_LABEL, bw, bh) else {
             return;
         };
         apply_saved_ball_position(&ball);
@@ -427,7 +453,8 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
 
     // 创建面板窗口（保持隐藏，悬停时才显示）
     if !panel_exists {
-        if let Ok(panel) = build_floating_window(app, PANEL_LABEL, PANEL_WIDTH, PANEL_HEIGHT) {
+        let (pw, ph) = panel_window_size();
+        if let Ok(panel) = build_floating_window(app, PANEL_LABEL, pw, ph) {
             let _ = panel.set_position(tauri::LogicalPosition::new(-20000.0, -20000.0));
             log::info!("[Floating] 面板窗口已创建");
         }
@@ -469,8 +496,8 @@ fn default_ball_position(ball: &WebviewWindow) -> tauri::LogicalPosition<f64> {
     let w = work.size.width as f64 / scale;
     let h = work.size.height as f64 / scale;
     tauri::LogicalPosition::new(
-        work.position.x as f64 / scale + (w - BALL_WIDTH - 24.0).max(0.0),
-        work.position.y as f64 / scale + (h - BALL_HEIGHT - 48.0).max(0.0),
+        work.position.x as f64 / scale + (w - BALL_WIDTH - 24.0 - FLOATING_MARGIN).max(0.0),
+        work.position.y as f64 / scale + (h - BALL_HEIGHT - 48.0 - FLOATING_MARGIN).max(0.0),
     )
 }
 
@@ -545,10 +572,10 @@ fn current_ball_position(app: &tauri::AppHandle) -> Option<(f64, f64)> {
     Some((pos.x as f64 / scale, pos.y as f64 / scale))
 }
 
-/// 读取小球当前逻辑尺寸（宽/高）。面板/菜单位位时**不直接用 BALL_WIDTH/HEIGHT
-/// 常量**，而是读球窗口当前实际尺寸：WebView2 加载内容后可能把窗口临时撑宽
-/// （on_page_load 已兜底设回 180×40），这里实时读取可保证弹出位置始终贴着球
-/// 的真实外缘；球尺寸日后调整时，面板/菜单位置自动跟随，无需再同步改常量。
+/// 读取小球当前**内容**逻辑尺寸（宽/高）。面板/菜单位位时**不直接用 BALL_WIDTH/HEIGHT
+/// 常量**，而是读球窗口当前实际尺寸换算（窗口尺寸 − 四周留白 = 内容尺寸）：
+/// WebView2 加载内容后可能把窗口临时撑宽（on_page_load 已兜底设回），这里实时读取
+/// 可保证弹出位置始终贴着球内容真实外缘；球尺寸日后调整时，面板/菜单位置自动跟随。
 fn ball_logical_size(app: &tauri::AppHandle) -> (f64, f64) {
     let Some(ball) = app.get_webview_window(BALL_LABEL) else {
         return (BALL_WIDTH, BALL_HEIGHT);
@@ -557,8 +584,9 @@ fn ball_logical_size(app: &tauri::AppHandle) -> (f64, f64) {
         return (BALL_WIDTH, BALL_HEIGHT);
     };
     let scale = ball.scale_factor().unwrap_or(1.0);
-    let w = size.width as f64 / scale;
-    let h = size.height as f64 / scale;
+    // 窗口 = 内容 + 四周留白（FLOATING_MARGIN），内容居中
+    let w = size.width as f64 / scale - FLOATING_MARGIN * 2.0;
+    let h = size.height as f64 / scale - FLOATING_MARGIN * 2.0;
     if w > 1.0 && h > 1.0 {
         (w, h)
     } else {
@@ -878,12 +906,14 @@ pub async fn get_floating_window_data(
 // 面板显示/隐藏与悬停协调
 // ============================================================
 
-/// 计算弹窗位置：**朝屏幕中央方向展开**，球贴在弹窗靠屏幕边缘侧的角上（角对齐，不居中）。
-/// - 水平：球偏左 → 弹窗向右展开，弹窗左缘 = 球左缘（球在弹窗左上/下角）；
-///   球偏右 → 弹窗向左展开，弹窗右缘 = 球右缘（球在弹窗右上/下角）。
+/// 计算弹窗位置：弹窗与球的水平关系按宽度决定——
+/// - **球宽 > 弹窗宽**（如右键菜单 80 < 球 180）：弹窗水平居中于球，即弹窗
+///   显示在球的正下方（球偏上时）/正上方（球偏下时），中心对齐。
+/// - **球宽 < 弹窗宽**（如面板 300 > 球 180）：保持**朝屏幕中央方向展开**，
+///   球贴在弹窗靠屏幕边缘侧的角上（角对齐，不居中）。
 /// - 垂直：球偏上 → 弹窗向下展开，弹窗顶缘 = 球底缘 + 间隙；
 ///   球偏下 → 弹窗向上展开，弹窗底缘 = 球顶缘 - 间隙。
-/// 两轴组合即「球在弹窗四角之一、弹窗朝屏幕中央展开」；某方向放不下翻转该轴。
+/// 某方向放不下翻转该轴。
 /// 面板与菜单共用同一个函数 → 弹出位置始终一致。
 fn position_for_ball(
     app: &tauri::AppHandle,
@@ -917,42 +947,56 @@ fn position_for_ball(
     let (ball_w, ball_h) = ball_logical_size(app);
     // 球相对所在显示器左上角的逻辑坐标
     let (bx, by) = (ball_pos.0 - origin_x, ball_pos.1 - origin_y);
+    // 球窗口比内容大一圈（四周 FLOATING_MARGIN 留白），可见边界 = 内容边界：
+    // 对齐/间距一律以内容边缘为基准，否则弹窗会整体偏 6px、上下间距不对称
+    // （向上展开间距 = PANEL_GAP + 留白 = 14px，向下 = 8px）。
+    let ball_content_left = bx + FLOATING_MARGIN;
+    let ball_content_top = by + FLOATING_MARGIN;
     let ball_cx = bx + ball_w / 2.0;
     let ball_cy = by + ball_h / 2.0;
 
-    // 水平：球偏左 → 弹窗左缘=球左缘（向右展开）；球偏右 → 弹窗右缘=球右缘（向左展开）
-    let mut px = if ball_cx < screen_w / 2.0 {
-        bx
+    // 水平：球宽 > 弹窗宽 → 弹窗水平居中于球（正下方/正上方中心对齐）；
+    // 否则保持“球偏左→弹窗右展（左缘=球左缘）、球偏右→弹窗左展（右缘=球右缘）”
+    let centered = ball_w > width;
+    let mut px = if centered {
+        ball_content_left + (ball_w - width) / 2.0
+    } else if ball_cx < screen_w / 2.0 {
+        ball_content_left
     } else {
-        bx + ball_w - width
+        ball_content_left + ball_w - width
     };
-    // 该方向放不下 → 翻到反方向对齐
-    if px + width > screen_w {
-        px = bx + ball_w - width;
-    } else if px < 0.0 {
-        px = bx;
+    // 该方向放不下 → 翻到反方向对齐（居中模式即使偏出也由下方 clamp 收进屏幕）
+    if !centered {
+        if px + width > screen_w {
+            px = ball_content_left + ball_w - width;
+        } else if px < 0.0 {
+            px = ball_content_left;
+        }
     }
     px = px.clamp(0.0, (screen_w - width).max(0.0)) + origin_x;
 
-    // 垂直：球偏上 → 弹窗顶缘=球底缘+间隙（向下展开）；球偏下 → 弹窗底缘=球顶缘-间隙（向上展开）
+    // 垂直：球偏上 → 弹窗顶缘=球底缘+间隙（向下展开）；球偏下 → 弹窗底缘=球顶缘-间隙（向上展开）。
+    // 上下都以球**内容**边缘为基准（见上），保证上/下方与球的间距一致（PANEL_GAP）。
     let mut py = if ball_cy < screen_h / 2.0 {
-        by + ball_h + PANEL_GAP
+        ball_content_top + ball_h + PANEL_GAP
     } else {
-        by - PANEL_GAP - height
+        ball_content_top - PANEL_GAP - height
     };
     if py + height > screen_h {
-        py = by - PANEL_GAP - height;
+        py = ball_content_top - PANEL_GAP - height;
     } else if py < 0.0 {
-        py = by + ball_h + PANEL_GAP;
+        py = ball_content_top + ball_h + PANEL_GAP;
     }
     py = py.clamp(0.0, (screen_h - height).max(0.0)) + origin_y;
 
     (px, py)
 }
 
-/// 面板位置
+/// 面板位置：内容按 position_for_ball 规则对齐球边缘（面板左/右缘=球相应缘），
+/// 窗口位置再整体平移留白，使窗口的透明留白区跟随内容一起定位。
 fn panel_position_for_ball(app: &tauri::AppHandle, ball_pos: (f64, f64)) -> (f64, f64) {
-    position_for_ball(app, ball_pos, PANEL_WIDTH, PANEL_HEIGHT)
+    let (px, py) = position_for_ball(app, ball_pos, PANEL_WIDTH, PANEL_HEIGHT);
+    (px - FLOATING_MARGIN, py - FLOATING_MARGIN)
 }
 
 /// 右键菜单位置：内容按 position_for_ball 规则对齐球边缘（菜单左/右缘=球相应缘），

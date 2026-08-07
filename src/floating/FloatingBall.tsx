@@ -189,10 +189,6 @@ export function FloatingBall() {
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
       onPointerCancel={() => void invoke("floating_drag_end")}
-      onMouseEnter={() => void invoke("show_floating_panel")}
-      onMouseLeave={() =>
-        void invoke("floating_set_hover", { source: "ball", active: false })
-      }
       onContextMenu={(e) => {
         e.preventDefault();
         void invoke("show_floating_context_menu").catch((err) =>

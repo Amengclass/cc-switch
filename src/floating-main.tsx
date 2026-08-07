@@ -63,15 +63,54 @@ function FloatingThemeSync() {
  * 后端用 `WebviewUrl::App("floating.html")` 加载本页，
  * 再按窗口 label 分派渲染小球或面板组件。
  */
+
+/**
+ * 窗口级 hover 覆盖层：占满整个透明窗口（含四周 FLOATING_MARGIN 留白）。
+ * hover 判定绑在窗口层而非内容元素（.ball/.panel）上——否则鼠标移到球/面板
+ * 边缘的透明留白区（视觉上仍在悬浮窗内）就会触发 mouseleave，面板随即消失。
+ * 球窗口 192×52 vs 球内容 180×40、面板窗口 312×332 vs 面板内容 300×320。
+ */
+function FloatingHoverLayer({
+  source,
+  onEnter,
+  children,
+}: {
+  source: "ball" | "panel";
+  onEnter?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="floating-hover-layer"
+      onMouseEnter={() => {
+        void invoke("floating_set_hover", { source, active: true });
+        onEnter?.();
+      }}
+      onMouseLeave={() =>
+        void invoke("floating_set_hover", { source, active: false })
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
 function FloatingApp() {
   const label = getCurrentWindow().label;
   return (
     <>
       <FloatingThemeSync />
       {label === "floating-ball" ? (
-        <FloatingBall />
+        <FloatingHoverLayer
+          source="ball"
+          onEnter={() => void invoke("show_floating_panel")}
+        >
+          <FloatingBall />
+        </FloatingHoverLayer>
       ) : label === "floating-panel" ? (
-        <FloatingPanel />
+        <FloatingHoverLayer source="panel">
+          <FloatingPanel />
+        </FloatingHoverLayer>
       ) : label === "floating-menu" ? (
         <FloatingContextMenu />
       ) : (
