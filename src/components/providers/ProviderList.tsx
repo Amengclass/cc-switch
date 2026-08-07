@@ -31,6 +31,7 @@ import {
   useHermesModelConfig,
 } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { testRemoteProviderConnection } from "@/lib/api/remote";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -68,6 +69,9 @@ interface ProviderListProps {
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
   /** 远程切换进行中：禁用切换按钮防连点 */
   isSwitching?: boolean;
+  /** 远程目标：非空时「测试」按钮改为在远端探测连通性 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider) => void; // OpenClaw: set as default model
 }
@@ -93,6 +97,8 @@ export function ProviderList({
   isSwitching = false,
   activeProviderId,
   onSetAsDefault,
+  remoteTargetId,
+  remoteContainerId,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -203,11 +209,44 @@ export function ProviderList({
   });
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
+  // 远程目标下改为经 SSH 在远端 curl base_url（真实反映远端到 API 的网络）。
   const handleTest = useCallback(
     (provider: Provider) => {
+      if (remoteTargetId) {
+        void (async () => {
+          try {
+            const result = await testRemoteProviderConnection(
+              remoteTargetId,
+              provider.id,
+              appId,
+              remoteContainerId,
+            );
+            if (result.reachable) {
+              toast.success(
+                t("remote.testOk", {
+                  defaultValue: "远端可达（HTTP {{code}}）",
+                  code: result.httpCode,
+                }),
+                { closeButton: true },
+              );
+            } else {
+              toast.error(
+                t("remote.testFail", {
+                  defaultValue: "远端不可达（HTTP {{code}}）",
+                  code: result.httpCode || t("remote.noResponse", { defaultValue: "无响应" }),
+                }),
+                { description: result.baseUrl, closeButton: true },
+              );
+            }
+          } catch (error) {
+            toast.error(extractErrorMessage(error), { closeButton: true });
+          }
+        })();
+        return;
+      }
       checkProvider(provider.id, provider.name);
     },
-    [checkProvider],
+    [checkProvider, remoteTargetId, remoteContainerId, appId, t],
   );
 
   // Import current live config as default provider

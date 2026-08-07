@@ -66,9 +66,11 @@ import { APP_INSTALL_CMDS } from "@/config/appConfig";
 import {
   checkLocalCliInstalled,
   checkRemoteCliInstalled,
+  clearRemoteProviderRecord,
   getRemoteCurrentProvider,
   listDockerContainers,
   listRemoteHosts,
+  removeRemoteProviderFromLive,
   switchRemoteProvider,
 } from "@/lib/api/remote";
 import { useSwitchRemoteProviderMutation } from "@/lib/query/remoteMutations";
@@ -906,6 +908,41 @@ function App() {
     if (!confirmAction) return;
     const { provider, action } = confirmAction;
 
+    if (remoteTargetId) {
+      // 远程目标：remove 走远端 live 移除；delete 删本机 DB + 清远端当前记录
+      // （live 文件不动，对齐本机 delete 语义）。
+      try {
+        if (action === "remove") {
+          await removeRemoteProviderFromLive(
+            remoteTargetId,
+            activeApp,
+            provider.id,
+            remoteContainerId,
+          );
+          toast.success(
+            t("notifications.removeFromConfigSuccess", {
+              defaultValue: "已从远端配置移除",
+            }),
+            { closeButton: true },
+          );
+        } else {
+          await deleteProvider(provider.id);
+          await clearRemoteProviderRecord(remoteTargetId, activeApp);
+          toast.success(
+            t("notifications.providerDeleted", {
+              defaultValue: "供应商删除成功",
+            }),
+            { closeButton: true },
+          );
+        }
+      } catch (error) {
+        console.error("Failed to handle remote provider action:", error);
+        toast.error(extractErrorMessage(error), { closeButton: true });
+      }
+      setConfirmAction(null);
+      return;
+    }
+
     if (action === "remove") {
       // Remove from live config only (for additive mode apps like OpenCode/OpenClaw)
       // Does NOT delete from database - provider remains in the list
@@ -1257,6 +1294,8 @@ function App() {
                           ? remoteSwitchMutation.isPending
                           : undefined
                       }
+                      remoteTargetId={remoteTargetId}
+                      remoteContainerId={remoteContainerId}
                       activeProviderId={activeProviderId}
                       onSwitch={handleProviderSwitch}
                       onEdit={(provider) => {

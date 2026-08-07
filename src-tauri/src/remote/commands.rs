@@ -3,6 +3,7 @@
 //! 注意：命令需要在 `lib.rs` 的 `invoke_handler` 中注册。
 
 use serde_json::{json, Value};
+use std::str::FromStr;
 use tauri::State;
 
 use crate::fsops::FileOps as _;
@@ -10,6 +11,71 @@ use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, credentials, AuthMethod, RemoteHost};
 use crate::store::AppState;
+
+/// 远程 Provider 连通性测试结果。
+#[derive(serde::Serialize)]
+pub struct RemoteProviderTestResult {
+    /// 探测的 base_url（与本机测试提取逻辑一致）
+    pub base_url: String,
+    /// 远端 curl 返回的 HTTP 状态码（空 = 无响应/网络错误）
+    pub http_code: String,
+    /// 是否可达（2xx/3xx）
+    pub reachable: bool,
+}
+
+/// 远程目标下测试 Provider 连通性：复用本机 `StreamCheckService::resolve_base_url`
+/// 提取探测地址（官方 provider 报错，前端已隐藏其测试按钮），经 SSH 在远端执行
+/// `curl -s -o /dev/null -w '%{http_code}' -m 10 <url>`——真实反映远端到 API 的网络。
+#[tauri::command]
+pub async fn test_remote_provider_connection(
+    state: State<'_, AppState>,
+    host_id: String,
+    provider_id: String,
+    app: String,
+    container: Option<String>,
+) -> Result<RemoteProviderTestResult, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+
+    let providers = state
+        .db
+        .get_all_providers(&app)
+        .map_err(|e| e.to_string())?;
+    let provider = providers
+        .get(&provider_id)
+        .ok_or_else(|| "供应商不存在，可能已被删除".to_string())?;
+
+    let app_type = crate::app_config::AppType::from_str(&app)
+        .map_err(|_| format!("未知应用类型: {app}"))?;
+    // 与本机连通性测试同一地址提取（官方 provider 会在此报错）
+    let base_url =
+        crate::services::stream_check::StreamCheckService::resolve_base_url(&app_type, provider)
+            .map_err(|e| e.to_string())?;
+
+    let session = connection::connect(&host, Some(&password)).await?;
+
+    // 在远端执行 curl（curl 缺失/无网络时报错由 exec 输出带出）
+    let curl = format!(
+        "curl -s -o /dev/null -w '%{{http_code}}' -m 10 {}",
+        connection::shell_quote(&base_url)
+    );
+    let cmd = match container.as_deref() {
+        None => format!("sh -c {}", connection::shell_quote(&curl)),
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            format!("docker exec {} sh -c {}", ops.container, connection::shell_quote(&curl))
+        }
+    };
+    let out = connection::exec_command(&session.channel, &cmd).await?;
+    let http_code = out.trim().to_string();
+    let reachable = http_code.starts_with('2') || http_code.starts_with('3');
+
+    Ok(RemoteProviderTestResult {
+        base_url,
+        http_code,
+        reachable,
+    })
+}
 
 /// 主机信息（给前端的列表项；不含密码）。
 #[tauri::command]
@@ -168,6 +234,127 @@ pub async fn read_remote_settings(
     settings::read_remote_settings(&target, &host.default_home()).await
 }
 
+/// 从远端 live 配置移除某供应商（对齐本机 `remove_from_live_config` 语义：
+/// 仅 additive 模式 app 支持——opencode 的 `provider.{id}`、openclaw 的
+/// `models.providers.{id}`、hermes 的 `custom_providers` 按 name 过滤；
+/// claude/codex/gemini/grok 与本机一致不支持，直接报错）。不清本机 DB。
+#[tauri::command]
+pub async fn remove_remote_provider_from_live(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    provider_id: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let root = host.default_home();
+
+    match app.as_str() {
+        "opencode" => {
+            let config_path = format!("{root}/.config/opencode/opencode.json");
+            let mut merged: Value = session
+                .read_remote_text(&config_path, container.as_deref())
+                .await?
+                .map(|t| serde_json::from_str(&t).unwrap_or_else(|_| json!({})))
+                .unwrap_or_else(|| json!({}));
+            let removed = merged
+                .get_mut("provider")
+                .and_then(|v| v.as_object_mut())
+                .is_some_and(|p| p.remove(&provider_id).is_some());
+            if !removed {
+                return Err(format!("远端 opencode.json 中没有供应商 {provider_id}"));
+            }
+            let text = serde_json::to_string_pretty(&merged)
+                .map_err(|e| format!("序列化 opencode.json 失败: {e}"))?;
+            session
+                .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+                .await?;
+            Ok(())
+        }
+        "openclaw" => {
+            let config_path = format!("{root}/.openclaw/openclaw.json");
+            let mut merged: Value = session
+                .read_remote_text(&config_path, container.as_deref())
+                .await?
+                .map(|t| json5::from_str(&t).unwrap_or_else(|_| json!({})))
+                .unwrap_or_else(|| json!({}));
+            let removed = merged
+                .get_mut("models")
+                .and_then(|m| m.get_mut("providers"))
+                .and_then(|v| v.as_object_mut())
+                .is_some_and(|p| p.remove(&provider_id).is_some());
+            if !removed {
+                return Err(format!(
+                    "远端 openclaw.json 中没有 models.providers.{provider_id}"
+                ));
+            }
+            let text = serde_json::to_string_pretty(&merged)
+                .map_err(|e| format!("序列化 openclaw.json 失败: {e}"))?;
+            session
+                .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+                .await?;
+            Ok(())
+        }
+        "hermes" => {
+            let config_path = format!("{root}/.hermes/config.yaml");
+            let mut root_yaml: serde_yaml::Value = match session
+                .read_remote_text(&config_path, container.as_deref())
+                .await?
+            {
+                Some(t) => serde_yaml::from_str(&t).unwrap_or_else(|_| serde_yaml::Value::Null),
+                None => serde_yaml::Value::Null,
+            };
+            if !root_yaml.is_mapping() {
+                return Err(format!("远端 {config_path} 不存在或不是 YAML 映射"));
+            }
+            let providers: Vec<serde_yaml::Value> = root_yaml
+                .get("custom_providers")
+                .and_then(|v| v.as_sequence())
+                .cloned()
+                .unwrap_or_default();
+            let original_len = providers.len();
+            let filtered: Vec<serde_yaml::Value> = providers
+                .into_iter()
+                .filter(|p| p.get("name").and_then(|n| n.as_str()) != Some(provider_id.as_str()))
+                .collect();
+            if filtered.len() == original_len {
+                return Err(format!(
+                    "远端 config.yaml 中没有 custom_providers 名为 {provider_id} 的条目"
+                ));
+            }
+            if let Some(root_map) = root_yaml.as_mapping_mut() {
+                root_map.insert(
+                    serde_yaml::Value::String("custom_providers".to_string()),
+                    serde_yaml::Value::Sequence(filtered),
+                );
+            }
+            let text = serde_yaml::to_string(&root_yaml)
+                .map_err(|e| format!("序列化 config.yaml 失败: {e}"))?;
+            session
+                .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+                .await?;
+            Ok(())
+        }
+        other => Err(format!(
+            "应用 {other} 不支持从 live 配置移除（与本机语义一致）"
+        )),
+    }
+}
+
+/// 删除供应商后清理远端「当前供应商」持久化记录（remote_current_providers.json）。
+/// 远端 live 文件不动（对齐本机 delete 语义：本机 delete 也只删 DB 不回写 live）。
+#[tauri::command]
+pub async fn clear_remote_provider_record(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+) -> Result<(), String> {
+    let _ = state;
+    crate::remote::current::delete_current_provider_for_app(&host_id, &app)
+}
+
 /// 对远程主机执行供应商切换：将本地供应商配置原子写回远端对应 app 的 live 文件，
 /// 返回「生效方式」报告。
 ///
@@ -231,6 +418,72 @@ pub async fn switch_remote_provider(
                 &provider.settings_config,
                 provider.category.as_deref(),
                 crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
+            )
+            .await?
+        }
+        // Grok Build：复用本机 grok_config 语义（config 字段即 TOML 文本，非官方形状校验）
+        "grokbuild" => {
+            crate::remote::grok::apply_grok_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                provider.category.as_deref(),
+            )
+            .await?
+        }
+        // Gemini：.env + settings.json 读-改-写（复用本机 gemini_config 纯变换，
+        // auth 类型检测与本机 write_gemini_live 同源）
+        "gemini" => {
+            crate::remote::gemini::apply_gemini_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                provider,
+            )
+            .await?
+        }
+        // OpenCode：additive，复用本机 live.rs OpenCode 分支语义（片段提取 + upsert）
+        "opencode" => {
+            crate::remote::opencode::apply_opencode_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await?
+        }
+        // OpenClaw：additive，models.providers upsert（JSON5 兼容读）
+        "openclaw" => {
+            crate::remote::openclaw::apply_openclaw_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await?
+        }
+        // Hermes：additive，custom_providers 序列 upsert（YAML）
+        "hermes" => {
+            crate::remote::hermes::apply_hermes_provider_settings(
+                &session,
+                container.as_deref(),
+                &host.default_home(),
+                &host.name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
             )
             .await?
         }

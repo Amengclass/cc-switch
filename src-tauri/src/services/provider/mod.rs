@@ -3,7 +3,7 @@
 //! Handles provider CRUD operations, switching, and configuration management.
 
 mod endpoints;
-mod gemini_auth;
+pub(crate) mod gemini_auth;
 pub(crate) mod live;
 mod usage;
 

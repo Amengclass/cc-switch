@@ -50,10 +50,28 @@ impl RemoteSession {
         exec_command_with_stdin(&self.channel, &cmd, stdin_data).await
     }
 
-    /// settings.json 一次 exec 原子写（宿主机 `sh -c` / 容器 `docker exec -i sh -c` 共用脚本）：
-    /// `[ -f path ] && cp path path.bak; mkdir -p parent && base64 -d > tmp && mv tmp path || rm -f tmp`
-    /// - 目标文件不存在 → 跳过备份、正常创建（与三端现状语义一致）
-    /// - 任一写环节失败走 `|| rm -f tmp` 清理临时文件（磁盘满/权限不足不留残）
+    /// 读取远端文件文本（不存在 / 为空时返回 None）。
+    /// 走 exec `cat`（宿主机 `sh -c` / 容器 `docker exec`），不依赖 SFTP
+    /// （容器目标无 SFTP）。供远端读-改-写类切换（gemini settings.json 等）使用。
+    pub async fn read_remote_text(
+        &self,
+        path: &str,
+        container: Option<&str>,
+    ) -> Result<Option<String>, String> {
+        let cat = format!("cat {} 2>/dev/null", shell_quote(path));
+        let cmd = match container {
+            None => format!("sh -c {}", shell_quote(&cat)),
+            Some(c) => {
+                let ops = super::docker::DockerExecFileOps::new(&self.channel, c)?;
+                format!("docker exec {} sh -c {}", ops.container, shell_quote(&cat))
+            }
+        };
+        let out = exec_command(&self.channel, &cmd).await?;
+        Ok(if out.is_empty() { None } else { Some(out) })
+    }
+
+    /// 写远端文件：目标存在才备份 `.bak`；`base64 -d > tmp && mv tmp path` 原子替换，
+    /// 任一环节失败走 `|| rm -f tmp` 清理临时文件（磁盘满/权限不足不留残）
     /// - 数据 base64 编码经 stdin 管道传入，不嵌入命令字符串，无大小限制
     ///
     /// `expected_hash` 为写前读到的文件 sha256（十六进制）：非 None 时在同一脚本内

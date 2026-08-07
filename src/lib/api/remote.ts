@@ -82,6 +82,51 @@ export async function switchRemoteProvider(
   });
 }
 
+/** 远程目标下测试 Provider 连通性（经 SSH 在远端 curl base_url，真实反映远端网络） */
+export async function testRemoteProviderConnection(
+  hostId: string,
+  providerId: string,
+  app: string,
+  container?: string,
+): Promise<RemoteProviderTestResult> {
+  return invoke<RemoteProviderTestResult>("test_remote_provider_connection", {
+    hostId,
+    providerId,
+    app,
+    container: container ?? null,
+  });
+}
+
+/** 远程 Provider 连通性测试结果 */
+export interface RemoteProviderTestResult {
+  baseUrl: string;
+  httpCode: string;
+  reachable: boolean;
+}
+
+/** 从远端 live 配置移除某供应商（对齐本机 remove_from_live_config：仅 additive app 支持） */
+export async function removeRemoteProviderFromLive(
+  hostId: string,
+  app: string,
+  providerId: string,
+  container?: string,
+): Promise<void> {
+  return invoke("remove_remote_provider_from_live", {
+    hostId,
+    app,
+    providerId,
+    container: container ?? null,
+  });
+}
+
+/** 删除供应商后清理远端「当前供应商」记录（live 文件不动，对齐本机 delete 语义） */
+export async function clearRemoteProviderRecord(
+  hostId: string,
+  app: string,
+): Promise<void> {
+  return invoke("clear_remote_provider_record", { hostId, app });
+}
+
 /** 扫描远端 shell 配置中的冲突环境变量 */
 export async function scanRemoteEnvConflicts(
   hostId: string,

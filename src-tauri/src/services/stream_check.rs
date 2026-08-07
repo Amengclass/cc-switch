@@ -165,7 +165,10 @@ impl StreamCheckService {
     /// 官方供应商（`category == "official"`）base_url 故意留空（走客户端默认/OAuth 端点），
     /// 没有 cc-switch 能可靠探测的目标——这类供应商的连通检测按钮在前端已隐藏
     /// （见 `ProviderCard.tsx`），故此处对其提取失败直接报错即可，不做官方端点回退。
-    fn resolve_base_url(app_type: &AppType, provider: &Provider) -> Result<String, AppError> {
+    ///
+    /// `pub(crate)`：远端连通性测试（`test_remote_provider_connection`）复用同一
+    /// 提取逻辑，保证远端探测的目标地址与本机测试一致。
+    pub(crate) fn resolve_base_url(app_type: &AppType, provider: &Provider) -> Result<String, AppError> {
         if provider.category.as_deref() == Some("official") {
             return Err(AppError::Message(
                 "Official providers do not expose a reachability-check target".to_string(),

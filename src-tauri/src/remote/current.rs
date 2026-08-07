@@ -41,6 +41,25 @@ pub fn delete_current_provider(host_id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 删除某主机、某 app 的当前供应商记录（删除/移除供应商时清理；
+/// app 记录删空则一并移除 host 键）。
+pub fn delete_current_provider_for_app(host_id: &str, app: &str) -> Result<(), String> {
+    let mut map = load_map()?;
+    let mut changed = false;
+    if let Some(apps) = map.get_mut(host_id) {
+        if apps.remove(app).is_some() {
+            changed = true;
+            if apps.is_empty() {
+                map.remove(host_id);
+            }
+        }
+    }
+    if changed {
+        write_map(&map)?;
+    }
+    Ok(())
+}
+
 /// 内部结构：host -> { app -> provider_id }
 type Store = HashMap<String, HashMap<String, String>>;
 
