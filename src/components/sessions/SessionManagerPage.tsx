@@ -198,8 +198,11 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  // 远程会话当前仅 claude 实现（远端 ~/.claude/projects）；其他 app 忽略远程目标走本机
+  const effectiveRemoteTargetId =
+    appId === "claude" ? remoteTargetId : undefined;
   const { data, isLoading, isFetching, refetch } = useSessionsQuery(
-    remoteTargetId,
+    effectiveRemoteTargetId,
     remoteContainerId,
   );
   const sessions = data ?? [];
@@ -336,7 +339,7 @@ export function SessionManagerPage({
     useSessionMessagesQuery(
       selectedSession?.providerId,
       selectedSession?.sourcePath,
-      remoteTargetId,
+      effectiveRemoteTargetId,
       remoteContainerId,
     );
   const deleteSessionMutation = useDeleteSessionMutation();
@@ -466,14 +469,14 @@ export function SessionManagerPage({
     }
 
     // 远端目标：逐个删除（走 FileOps 远端实现），再刷新远端会话缓存
-    if (remoteTargetId) {
+    if (effectiveRemoteTargetId) {
       setIsBatchDeleting(true);
       try {
         let deletedCount = 0;
         for (const target of targets) {
           try {
             await deleteRemoteSession(
-              remoteTargetId,
+              effectiveRemoteTargetId,
               target.sourcePath!,
               target.sessionId,
               remoteContainerId,
@@ -483,7 +486,7 @@ export function SessionManagerPage({
               queryKey: [
                 "sessionMessages",
                 "remote",
-                remoteTargetId,
+                effectiveRemoteTargetId,
                 remoteContainerId ?? "__host__",
                 target.sourcePath,
               ],

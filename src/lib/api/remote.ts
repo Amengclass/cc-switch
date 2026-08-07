@@ -67,15 +67,17 @@ export async function readRemoteSettings(
   });
 }
 
-/** 对远程主机执行供应商切换（写入远端 settings.json env 块），返回生效报告 */
+/** 对远程主机执行供应商切换（写入远端对应 app 的 live 文件），返回生效报告 */
 export async function switchRemoteProvider(
   hostId: string,
   providerId: string,
+  app: string,
   container?: string,
 ): Promise<EffectReport> {
   return invoke<EffectReport>("switch_remote_provider", {
     hostId,
     providerId,
+    app,
     container: container ?? null,
   });
 }
@@ -113,31 +115,35 @@ export async function listRemoteSessions(
   });
 }
 
-/** 读取远端 settings.json 并匹配出当前生效的本地供应商 id */
+/** 读取远端 settings.json 并匹配出当前生效的本地供应商 id（per-app） */
 export async function getRemoteCurrentProvider(
   hostId: string,
+  app: string,
   container?: string,
 ): Promise<string | null> {
   return invoke<string | null>("get_remote_current_provider", {
     hostId,
+    app,
     container: container ?? null,
   });
 }
 
-/** 检测远端是否安装 Claude Code（带超时）；true/false/null=未知 */
-export async function checkRemoteClaudeInstalled(
+/** 检测远端是否安装指定 app 的 CLI（带超时）；true/false/null=未知 */
+export async function checkRemoteCliInstalled(
   hostId: string,
+  app: string,
   container?: string,
 ): Promise<boolean | null> {
-  return invoke<boolean | null>("check_remote_claude_installed", {
+  return invoke<boolean | null>("check_remote_cli_installed", {
     hostId,
+    app,
     container: container ?? null,
   });
 }
 
-/** 检测本机是否安装 Claude Code */
-export async function checkLocalClaudeInstalled(): Promise<boolean> {
-  return invoke<boolean>("check_local_claude_installed");
+/** 检测本机是否安装指定 app 的 CLI */
+export async function checkLocalCliInstalled(app: string): Promise<boolean> {
+  return invoke<boolean>("check_local_cli_installed", { app });
 }
 
 /** 列出远端会话的完整元数据（复用本机 session_manager 解析逻辑） */

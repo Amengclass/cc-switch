@@ -62,15 +62,17 @@ import {
 import { AppSwitcher } from "@/components/AppSwitcher";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { InstallCommandPopover } from "@/components/remote/InstallCommandPopover";
+import { APP_INSTALL_CMDS } from "@/config/appConfig";
 import {
-  checkLocalClaudeInstalled,
-  checkRemoteClaudeInstalled,
+  checkLocalCliInstalled,
+  checkRemoteCliInstalled,
   getRemoteCurrentProvider,
   listDockerContainers,
   listRemoteHosts,
   switchRemoteProvider,
 } from "@/lib/api/remote";
 import { useSwitchRemoteProviderMutation } from "@/lib/query/remoteMutations";
+import { notesList } from "@/lib/query/notesList";
 import type { RemoteHost } from "@/types/remote";
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
@@ -218,12 +220,8 @@ function App() {
   const [remoteCurrentProviderId, setRemoteCurrentProviderId] = useState<
     string | null
   >(null);
-  const [remoteClaudeInstalled, setRemoteClaudeInstalled] = useState<
-    boolean | null
-  >(null);
-  const [localClaudeInstalled, setLocalClaudeInstalled] = useState<
-    boolean | null
-  >(null);
+  const [remoteInstalled, setRemoteInstalled] = useState<boolean | null>(null);
+  const [localInstalled, setLocalInstalled] = useState<boolean | null>(null);
   // 目标细化到 Docker 容器：选中服务器后可再选容器，所有远程操作作用于容器内。
   const [containers, setContainers] = useState<string[]>([]);
   const [remoteContainerId, setRemoteContainerId] = useState<string>(
@@ -241,10 +239,10 @@ function App() {
   // 每次切换视图时刷新服务器列表（远程页面增删后回到主界面能同步）；
   // 若当前选中的目标已被删除，自动重置回「本机」。
   useEffect(() => {
-    checkLocalClaudeInstalled()
-      .then(setLocalClaudeInstalled)
-      .catch(() => setLocalClaudeInstalled(null));
-  }, []);
+    checkLocalCliInstalled(sharedFeatureApp)
+      .then(setLocalInstalled)
+      .catch(() => setLocalInstalled(null));
+  }, [sharedFeatureApp]);
 
   useEffect(() => {
     listRemoteHosts()
@@ -257,7 +255,7 @@ function App() {
       .catch(() => {});
     // 注：切回主界面时刷新远端当前供应商 + 安装状态的工作，由下方依赖
     // `[remoteTargetId, remoteContainerId]` 的 effect 统一负责（它拿到最新容器）。
-    // 这里不重复刷新，避免两个 effect 用不同 container 并行覆盖 setRemoteClaudeInstalled。
+    // 这里不重复刷新，避免两个 effect 用不同 container 并行覆盖 setRemoteInstalled。
   }, [currentView]);
 
   // 选中服务器时：读取远端当前生效的供应商（按 base_url 匹配本地供应商）
@@ -266,26 +264,26 @@ function App() {
   useEffect(() => {
     if (!remoteTargetId) {
       setRemoteCurrentProviderId(null);
-      setRemoteClaudeInstalled(null);
+      setRemoteInstalled(null);
       setContainers([]);
       setRemoteContainerId("");
       return;
     }
     let active = true;
     const container = remoteContainerId || undefined;
-    getRemoteCurrentProvider(remoteTargetId, container)
+    getRemoteCurrentProvider(remoteTargetId, sharedFeatureApp, container)
       .then((id) => {
         if (active) setRemoteCurrentProviderId(id);
       })
       .catch(() => {
         if (active) setRemoteCurrentProviderId(null);
       });
-    checkRemoteClaudeInstalled(remoteTargetId, container)
+    checkRemoteCliInstalled(remoteTargetId, sharedFeatureApp, container)
       .then((s) => {
-        if (active) setRemoteClaudeInstalled(s);
+        if (active) setRemoteInstalled(s);
       })
       .catch(() => {
-        if (active) setRemoteClaudeInstalled(null);
+        if (active) setRemoteInstalled(null);
       });
     listDockerContainers(remoteTargetId)
       .then((list) => {
@@ -303,34 +301,32 @@ function App() {
     return () => {
       active = false;
     };
-  }, [remoteTargetId, remoteContainerId, currentView]);
+  }, [remoteTargetId, remoteContainerId, currentView, sharedFeatureApp]);
 
   const activeRemoteHost = servers.find((s) => s.id === remoteTargetId) ?? null;
   // 当前目标（本机/服务器）的 Claude Code 安装状态
-  const currentInstalled = remoteTargetId
-    ? remoteClaudeInstalled
-    : localClaudeInstalled;
+  const currentInstalled = remoteTargetId ? remoteInstalled : localInstalled;
 
-  // 刷新 Claude Code 安装状态：本机与当前远端目标共用同一策略。
+  // 刷新当前 app 的 CLI 安装状态：本机与当前远端目标共用同一策略。
   // 依赖必须含 remoteContainerId：否则切容器后 useCallback 缓存旧闭包，
   // 点刷新会用上一次的 container 检测，导致宿主机/容器状态串扰。
-  const refreshClaudeStatus = useCallback(() => {
-    checkLocalClaudeInstalled()
-      .then(setLocalClaudeInstalled)
-      .catch(() => setLocalClaudeInstalled(null));
+  const refreshInstallStatus = useCallback(() => {
+    checkLocalCliInstalled(sharedFeatureApp)
+      .then(setLocalInstalled)
+      .catch(() => setLocalInstalled(null));
     if (remoteTargetId) {
       const container = remoteContainerId || undefined;
-      checkRemoteClaudeInstalled(remoteTargetId, container)
-        .then(setRemoteClaudeInstalled)
-        .catch(() => setRemoteClaudeInstalled(null));
-      getRemoteCurrentProvider(remoteTargetId, container)
+      checkRemoteCliInstalled(remoteTargetId, sharedFeatureApp, container)
+        .then(setRemoteInstalled)
+        .catch(() => setRemoteInstalled(null));
+      getRemoteCurrentProvider(remoteTargetId, sharedFeatureApp, container)
         .then(setRemoteCurrentProviderId)
         .catch(() => setRemoteCurrentProviderId(null));
       listDockerContainers(remoteTargetId)
         .then(setContainers)
         .catch(() => setContainers([]));
     }
-  }, [remoteTargetId, remoteContainerId]);
+  }, [remoteTargetId, remoteContainerId, sharedFeatureApp]);
 
   // 窗口重新聚焦时自动刷新（如装完 Claude Code 切回应用即更新）
   useEffect(() => {
@@ -339,7 +335,7 @@ function App() {
       try {
         unlisten = await getCurrentWindow().onFocusChanged(
           ({ payload: focused }) => {
-            if (focused) refreshClaudeStatus();
+            if (focused) refreshInstallStatus();
           },
         );
       } catch (e) {
@@ -349,7 +345,7 @@ function App() {
     return () => {
       unlisten?.();
     };
-  }, [refreshClaudeStatus]);
+  }, [refreshInstallStatus]);
 
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, currentView);
@@ -500,6 +496,7 @@ function App() {
       await remoteSwitchMutation.mutateAsync({
         hostId: remoteTargetId,
         providerId: provider.id,
+        app: sharedFeatureApp,
         container: remoteContainerId || undefined,
       });
       return;
@@ -879,6 +876,7 @@ function App() {
         const report = await switchRemoteProvider(
           remoteTargetId!,
           provider.id,
+          sharedFeatureApp,
           container,
         );
         // 后端已带回当前供应商 id，无需再调 get_remote_current_provider
@@ -889,7 +887,7 @@ function App() {
             defaultValue: "已同步更新后的配置到远端 {{target}}",
             target: activeRemoteHost?.name ?? remoteTargetId,
           }),
-          { description: report.notes.join("；"), closeButton: true },
+        { description: notesList(report.notes), closeButton: true },
         );
       } catch (error) {
         console.error("Failed to sync edited provider to remote:", error);
@@ -1926,16 +1924,14 @@ function App() {
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
         <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
-          {activeApp === "claude" && (
-            <TargetBreadcrumb
-              remoteTargetId={remoteTargetId}
-              remoteContainerId={remoteContainerId}
-              setRemoteTargetId={setRemoteTargetId}
-              setRemoteContainerId={setRemoteContainerId}
-              servers={servers}
-              containers={containers}
-            />
-          )}
+          <TargetBreadcrumb
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
+            setRemoteTargetId={setRemoteTargetId}
+            setRemoteContainerId={setRemoteContainerId}
+            servers={servers}
+            containers={containers}
+          />
           {currentInstalled === true || currentInstalled === null ? (
             <span
               className={cn(
@@ -1946,28 +1942,30 @@ function App() {
               )}
             >
               {currentInstalled === true
-                ? t("remote.claudeInstalledBadge", {
-                    defaultValue: "Claude Code 已安装",
-                  })
-                : t("remote.claudeDetectFailed", {
+                ? `${t(`apps.${sharedFeatureApp}`)} ${t(
+                    "remote.cliInstalledBadge",
+                    { defaultValue: "已安装" },
+                  )}`
+                : t("remote.cliDetectFailed", {
                     defaultValue: "安装状态检测中/未知",
                   })}
             </span>
           ) : (
             <span className="inline-flex items-center gap-0.5">
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
-                {`⚠ ${t("remote.claudeNotInstalledBadge", {
-                  defaultValue: "Claude Code 未安装",
-                })}`}
+                {`⚠ ${t(`apps.${sharedFeatureApp}`)} ${t(
+                  "remote.cliNotInstalledBadge",
+                  { defaultValue: "未安装" },
+                )}`}
               </span>
               <span className="select-none text-amber-600/60 text-lg leading-none">
                 ·
               </span>
               <InstallCommandPopover
                 command={
-                  remoteTargetId
-                    ? "curl -fsSL claude.ai/install.sh | bash"
-                    : "npm i -g @anthropic-ai/claude-code"
+                  (remoteTargetId
+                    ? APP_INSTALL_CMDS[sharedFeatureApp]?.remote
+                    : APP_INSTALL_CMDS[sharedFeatureApp]?.local) ?? ""
                 }
               />
             </span>
@@ -1981,7 +1979,7 @@ function App() {
             </span>
           )}
           <button
-            onClick={refreshClaudeStatus}
+            onClick={refreshInstallStatus}
             title={t("remote.refreshStatus", {
               defaultValue: "刷新安装状态",
             })}
