@@ -230,7 +230,7 @@
 |---|---|
 | 中 | 远程 Sessions per-app(当前仅 claude 的 `~/.claude/projects`) |
 | 中 | 远程 Prompts per-app(当前仅 claude 的 CLAUDE.md) |
-| 低 | 远端 Skills 安装默认启用 app 硬编码 claude(跨 app 面板无 current_app 语义,安装后可手动勾选,暂缓) |
+| 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | `get_remote_current_provider` 兜底 per-app(当前仅 claude 有 base_url 兜底) |
 | 低 | `APP_INSTALL_CMDS` 包名校对(grok/openclaw/hermes 按官方文档核对) |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
