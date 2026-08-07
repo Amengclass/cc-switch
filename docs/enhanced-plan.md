@@ -220,16 +220,17 @@
 | per-app 扩展·codex(08-07) | `switch_remote_provider`/`get_remote_current_provider` 加 `app` 参数;`remote/codex.rs` 复用本机 `prepare_codex_catalog_plan` + `build_codex_live_config`(catalog/unified/bearer/auth 判定,产出逐字节一致)+ 无校验原子写;`remote_current_providers.json` 迁移 `host -> {app:id}`;auth.json 按本机语义 |
 | 目标选择器全 app(08-07) | `TargetBreadcrumb` 去掉 claude 限制,Sessions 非 claude 忽略远程目标 |
 | 安装检测全 app(08-07) | `check_remote_cli_installed(app)` / `check_local_cli_installed(app)` + `cli_binary_for_app` 映射;徽标动态「{App} 已安装/未安装」+ `APP_INSTALL_CMDS` 按 app 给安装命令 |
+| **全 app 远程切换(08-07)** | gemini(.env+settings.json 读-改-写)/grokbuild(TOML)/opencode(additive upsert)/openclaw(JSON5)/hermes(YAML) 五个分支,全部复用本机纯变换产出一致;connection 加 read_remote_text(exec cat,容器兼容) |
+| 功能按钮远端适配(08-07) | 卡片测试按钮经 SSH 在远端 curl base_url(复用 resolve_base_url);删除 remove 清远端 live(additive 3 app)/delete 只删 DB+清远端记录(对齐本机) |
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
 
 ### ⏳ 远程·待完成(优先级从高到低)
 
 | 优先级 | 事项 |
 |---|---|
-| 高 | **gemini 远程切换分支**(复用 codex 模式:纯变换 + 无校验原子写,与本机一致) |
-| 高 | **grok 远程切换分支**(`~/.grok/config.toml`) |
-| 中 | opencode / openclaw / hermes 远程切换分支 |
 | 中 | 远程 Sessions per-app(当前仅 claude 的 `~/.claude/projects`) |
+| 中 | 远程 Prompts per-app(当前仅 claude 的 CLAUDE.md) |
+| 低 | 远端 Skills 安装默认启用 app 硬编码 claude(跨 app 面板无 current_app 语义,安装后可手动勾选,暂缓) |
 | 中 | `get_remote_current_provider` 兜底 per-app(当前仅 claude 有 base_url 兜底) |
 | 低 | `APP_INSTALL_CMDS` 包名校对(grok/openclaw/hermes 按官方文档核对) |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
@@ -250,12 +251,12 @@
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
 
-### 远程 per-app 扩展(2026-08-07 起,阶段 1 已做 codex)
+### 远程 per-app 扩展(2026-08-07 起,codex/gemini/grok/opencode/openclaw/hermes 已全部完成)
 
 | 事项 | 说明 |
 |---|---|
-| 远程切换扩展到 gemini / grok | 复用 codex 模式:远端 live 文件路径(gemini `~/.gemini/settings.json`、grok `~/.grok/config.toml`)+ 本机纯变换函数 + 无校验原子写(与本机一致)。gemini / grok API 兼容性强,base_url/env 模式类似 claude |
-| 远程切换扩展到 opencode / openclaw / hermes | 同上,结构差异更大(自有 schema / 格式转换),放二期 |
+| ~~远程切换扩展到 gemini / grok~~ | ✅ 已完成(2026-08-07) |
+| ~~远程切换扩展到 opencode / openclaw / hermes~~ | ✅ 已完成(2026-08-07) |
 | 远程 Sessions per-app | 当前仅 claude(`~/.claude/projects`);codex 等按各自会话目录扩展 |
 | `get_remote_current_provider` 兜底 per-app | 当前仅 claude 有 base_url 兜底;其他 app 只有持久化记录,老数据(本应用切换前已生效的远端)恢复现场缺失 |
 | 安装命令 `APP_INSTALL_CMDS` 包名校对 | grok/openclaw/hermes 等包名按常见 npm 名填写,需按各 CLI 官方文档核对 |
