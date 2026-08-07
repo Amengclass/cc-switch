@@ -290,6 +290,38 @@
 | 「添加」按钮语义 | 远端面板列表 = 该目标 SSOT；additive 的「添加/移除」由 live 集合（`live_ids`）驱动，对齐本机 |
 | 失败/加载态 | 远端目标不可达 → 面板加载态/报错由 `useRemoteProvidersQuery` 自然呈现 |
 
+### 远程前端展示优化 + 容器提速(2026-08-08 已完成 ✅,提交 2d06a468)
+
+> per-target 独立后的体验优化：把「操作后要等第二次 SSH refetch 才刷新」的延迟压掉。
+
+**前端更新策略（对齐本机语义）**：
+- 本机 = `invalidateQueries`（refetch）——本地毫秒级无感；远端 = **操作命令在同一条 SSH 连接内
+  把最新视图（`RemoteProvidersView`）一次带回，前端 `setQueryData` 写入缓存**——语义与本机 invalidate
+  一致（操作成功后缓存 = 最新状态），但免掉第二次 SSH 建连（0.5~2s 大头）。**不是乐观更新**（无回滚风险，
+  用的是服务端返回的权威数据）。
+- **切换同时更新 current + liveIds**：additive 的「添加」按钮 = 切换（写 live 并启用），切换后
+  `liveIds` 追加该 id → 按钮态「添加」→「移除」立即翻转（修复"添加成功但前端不刷新"）。
+- **缓存 key 空串归一**：`remoteContainerId ?? "__host__"` → `|| "__host__"`（空串与 undefined 统一），
+  修复移除/删除后 invalidate 落空、面板不刷新。
+
+**容器/宿主机读取次数优化（方案 A）**：
+- 操作命令入口**空库才 sync**（`load_remote_ssot_for_mutation`：SSOT 非空零额外读取）；
+- `build_remote_providers_view` **复用内存 SSOT**（不再重读文件）；
+- `sync_remote_live_into_ssot` 改为返回 `(变更数, live_ids)`——`get_remote_providers` 读面板时
+  live 只读一次。
+- 效果：容器一次添加从 ~7 次 `docker exec` 降到 ~4 次；列表加载从 ~4 次降到 ~2 次。
+
+**UI 调整**：
+- 设置页隐藏目标选择器状态栏（`currentView === "settings"` 不渲染 sticky 条）；
+- claude 远端安装指令统一 npm（`npm i -g @anthropic-ai/claude-code`，状态栏仅展示/复制，不执行）；
+- 清理排查用 `console.log`。
+
+**已知待办**：
+- 方案 B：SSH 连接复用（连接池，按 `host_id + container` 缓存 `RemoteSession`，连续操作复用）——
+  收益最大（省每次 0.5~2s 握手认证）但风险高（连接生命周期/密码轮换/并发），待用户确认后做；
+- 远端 SSOT 读-改-写无并发锁（与 prompts/skills SSOT 同款，单用户 GUI 可接受）；
+- `delete_remote_provider` additive 分支多一次 SSH 建连（可复用外层连接）。
+
 ### 远程 per-app 扩展(2026-08-07 起,codex/gemini/grok/opencode/openclaw/hermes 已全部完成)
 
 | 事项 | 说明 |
