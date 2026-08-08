@@ -20,6 +20,10 @@ interface EditProviderDialogProps {
   }) => Promise<void> | void;
   appId: AppId;
   isProxyTakeover?: boolean; // 代理接管模式下不读取 live（避免显示被接管后的代理配置）
+  /** 远端目标下的 live 供应商 ID 集合（编辑时标识锁定用） */
+  remoteLiveIds?: string[];
+  /** 远端目标下已存在的供应商 key 集合（重复校验用） */
+  remoteExistingKeys?: string[];
 }
 
 export function EditProviderDialog({
@@ -29,6 +33,8 @@ export function EditProviderDialog({
   onSubmit,
   appId,
   isProxyTakeover = false,
+  remoteLiveIds,
+  remoteExistingKeys,
 }: EditProviderDialogProps) {
   const { t } = useTranslation();
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
@@ -248,6 +254,8 @@ export function EditProviderDialog({
         initialData={initialData}
         showButtons={false}
         isProxyTakeover={isProxyTakeover}
+        remoteLiveIds={remoteLiveIds}
+        remoteExistingKeys={remoteExistingKeys}
       />
     </FullScreenPanel>
   );

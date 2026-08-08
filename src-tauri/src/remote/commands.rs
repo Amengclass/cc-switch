@@ -793,7 +793,8 @@ pub async fn update_remote_provider(
     }
 
     if additive && original_id != provider.id {
-        // 对齐本机：additive 改名，原名若已在 live 中则禁止（改 id 会破坏 live 引用）
+        // 对齐本机 update 改名（provider/mod.rs:2649-2677）：原名已在 live 中则禁止改名
+        // （改 id 会破坏 live 引用）；新名已存在于 live 中也禁止。
         let live_ids =
             crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?;
         if live_ids.iter().any(|id| id == &original_id) {
@@ -801,31 +802,48 @@ pub async fn update_remote_provider(
                 "供应商 '{original_id}' 已写入远端 live 配置，不支持改名（请先移除再添加）"
             ));
         }
+        if live_ids.iter().any(|id| id == &provider.id) {
+            return Err(format!(
+                "供应商 '{}' 已存在于远端 live 配置中",
+                provider.id
+            ));
+        }
     }
 
     let is_current = ssot.current_provider_id.as_deref() == Some(original_id.as_str());
+    let need_live_rewrite = if additive {
+        // 对齐本机 check_live_config_exists（provider/mod.rs:2434）：以 live 文件为唯一
+        // 事实来源——读远端 live 确认该供应商是否在 live 中，而非只信 SSOT 标记。
+        // 这样从 live 导入的（无标记）/ 标记丢失的供应商编辑也能正确同步；
+        // 纯 SSOT 候选（未启用）编辑不自动写入 live。
+        let live_ids =
+            crate::remote::providers::read_remote_live_provider_ids(&target, &home, &app).await?;
+        let found = live_ids.iter().any(|id| id == original_id.as_str());
+        log::info!(
+            "[remote] update {app} additive original_id={original_id} live_ids={live_ids:?} found={found}"
+        );
+        found
+    } else {
+        is_current
+    };
+    // additive：标记写回判定结果（SSOT 标记 = live 的镜像）
     if additive {
-        // additive：live_config_managed 保留原值（「添加/移除」按钮控制，编辑不改）
-        if let Some(meta) = provider.meta.as_mut() {
-            meta.live_config_managed = existing
-                .as_ref()
-                .and_then(|ex| ex.meta.as_ref())
-                .and_then(|m| m.live_config_managed);
+        match provider.meta.as_mut() {
+            Some(meta) => meta.live_config_managed = Some(need_live_rewrite),
+            None => {
+                if need_live_rewrite {
+                    provider.meta = Some(crate::provider::ProviderMeta {
+                        live_config_managed: Some(true),
+                        ..Default::default()
+                    });
+                }
+            }
         }
     } else if is_current {
         // 非 additive：编辑当前供应商后 current 指向新 id
         ssot.current_provider_id = Some(provider.id.clone());
     }
 
-    let need_live_rewrite = if additive {
-        provider
-            .meta
-            .as_ref()
-            .and_then(|m| m.live_config_managed)
-            .unwrap_or(false)
-    } else {
-        is_current
-    };
     let provider_id_after = provider.id.clone();
 
     crate::remote::providers::upsert_provider(&mut ssot.providers, provider);
@@ -1022,6 +1040,27 @@ pub async fn switch_remote_provider(
                 .await
         {
             log::warn!("[remote] 写回远端 SSOT current 失败 host_id={host_id}: {e}");
+        }
+    } else {
+        // additive：切换（启用）已把供应商写入 live，SSOT 标记同步为 true
+        // （live 是唯一事实来源，标记只作镜像——对齐本机 set_provider_live_config_managed）
+        let mut ssot = ssot;
+        if let Some(p) = ssot.providers.iter_mut().find(|p| p.id == provider_id) {
+            match p.meta.as_mut() {
+                Some(meta) => meta.live_config_managed = Some(true),
+                None => {
+                    p.meta = Some(crate::provider::ProviderMeta {
+                        live_config_managed: Some(true),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+        if let Err(e) =
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot)
+                .await
+        {
+            log::warn!("[remote] 切换后同步 SSOT 标记失败 host_id={host_id}: {e}");
         }
     }
     if let Err(e) = crate::remote::current::save_current_provider(&host_id, &app, &provider_id) {
@@ -2579,6 +2618,43 @@ pub async fn probe_hosts_online(
         online.insert(id, ok);
     }
     Ok(online)
+}
+
+/// 设置远端 OpenClaw 的默认模型（对齐本机 `openclawApi.setDefaultModel`）。
+/// `default_model` 形如 `{"primary": "prov/模型id", "fallbacks": [...]}`。
+#[tauri::command]
+pub async fn set_remote_openclaw_default_model(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    default_model: serde_json::Value,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let mut merged: serde_json::Value = match session
+        .read_remote_text(&config_path, container.as_deref())
+        .await?
+    {
+        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
+        None => json!({}),
+    };
+    let mut models = merged
+        .get("models")
+        .cloned()
+        .unwrap_or_else(|| json!({ "mode": "merge", "providers": {} }));
+    models["defaultModel"] = default_model;
+    merged["models"] = models;
+
+    let text = serde_json::to_string_pretty(&merged)
+        .map_err(|e| format!("序列化 openclaw.json 失败: {e}"))?;
+    session
+        .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+        .await?;
+    Ok(())
 }
 
 /// 按 id 加载主机，不存在时报错。

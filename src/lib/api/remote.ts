@@ -37,6 +37,19 @@ export async function probeHostsOnline(
   return invoke<Record<string, boolean>>("probe_hosts_online", { hostIds });
 }
 
+/** 设置远端 OpenClaw 默认模型（对齐本机 setDefaultModel：{primary, fallbacks}） */
+export async function setRemoteOpenClawDefaultModel(
+  hostId: string,
+  container: string | undefined,
+  defaultModel: { primary: string; fallbacks: string[] },
+): Promise<void> {
+  return invoke("set_remote_openclaw_default_model", {
+    hostId,
+    container: container ?? null,
+    defaultModel,
+  });
+}
+
 /** 测试与远程主机的连接：探测当前 app 的主配置是否存在 + 该 app 的 CLI 是否安装 */
 export async function testRemoteConnection(
   hostId: string,

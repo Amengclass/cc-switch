@@ -70,6 +70,7 @@ import {
   listDockerContainers,
   listRemoteHosts,
   probeHostsOnline,
+  setRemoteOpenClawDefaultModel,
   removeRemoteProviderFromLive,
   addRemoteProvider,
   updateRemoteProvider,
@@ -605,6 +606,48 @@ function App() {
     }
     await switchProvider(provider);
   };
+
+  // 远端 OpenClaw「设为默认」：写该目标机器的 models.defaultModel（对齐本机 setAsDefaultModel）
+  const handleRemoteSetAsDefault = useCallback(
+    async (provider: Provider) => {
+      const config = provider.settingsConfig as { models?: { id?: string }[] };
+      const models = config?.models ?? [];
+      if (models.length === 0) {
+        toast.error(
+          t("notifications.openclawNoModels", {
+            defaultValue: "该供应商没有配置模型",
+          }),
+        );
+        return;
+      }
+      const model = {
+        primary: `${provider.id}/${models[0].id}`,
+        fallbacks: models.slice(1).map((m) => `${provider.id}/${m.id}`),
+      };
+      try {
+        await setRemoteOpenClawDefaultModel(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          model,
+        );
+        void remoteProvidersQuery.refetch();
+        toast.success(
+          t("notifications.openclawDefaultModelSet", {
+            defaultValue: "已设为默认模型",
+          }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        toast.error(
+          extractErrorMessage(error) ||
+            t("notifications.openclawDefaultModelSetFailed", {
+              defaultValue: "设置默认模型失败",
+            }),
+        );
+      }
+    },
+    [remoteTargetId, remoteContainerId, remoteProvidersQuery, t],
+  );
 
   const disableOmoMutation = useDisableCurrentOmo();
   const handleDisableOmo = () => {
@@ -1571,11 +1614,17 @@ function App() {
                       }
                       onCreate={() => setIsAddOpen(true)}
                       onSetAsDefault={
-                        activeApp === "openclaw"
-                          ? setAsDefaultModel
-                          : activeApp === "hermes"
-                            ? switchProvider
-                            : undefined
+                        remoteTargetId
+                          ? activeApp === "hermes"
+                            ? handleProviderSwitch
+                            : activeApp === "openclaw"
+                              ? handleRemoteSetAsDefault
+                              : undefined
+                          : activeApp === "openclaw"
+                            ? setAsDefaultModel
+                            : activeApp === "hermes"
+                              ? switchProvider
+                              : undefined
                       }
                     />
                   </motion.div>
@@ -2307,6 +2356,14 @@ function App() {
         onOpenChange={setIsAddOpen}
         appId={activeApp}
         onSubmit={remoteTargetId ? handleAddRemoteProvider : addProvider}
+        remoteExistingKeys={
+          remoteTargetId
+            ? [
+                ...Object.keys(remoteProvidersQuery.data?.providers ?? {}),
+                ...(remoteProvidersQuery.data?.liveIds ?? []),
+              ]
+            : undefined
+        }
       />
 
       <EditProviderDialog
@@ -2320,6 +2377,17 @@ function App() {
         onSubmit={handleEditProvider}
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
+        remoteLiveIds={
+          remoteTargetId ? remoteProvidersQuery.data?.liveIds : undefined
+        }
+        remoteExistingKeys={
+          remoteTargetId
+            ? [
+                ...Object.keys(remoteProvidersQuery.data?.providers ?? {}),
+                ...(remoteProvidersQuery.data?.liveIds ?? []),
+              ]
+            : undefined
+        }
       />
 
       {effectiveUsageProvider && (

@@ -239,6 +239,10 @@ export interface ProviderFormProps {
   };
   showButtons?: boolean;
   isProxyTakeover?: boolean;
+  /** 远端目标下的 live 供应商 ID 集合（远端编辑时标识锁定用；本机不传） */
+  remoteLiveIds?: string[];
+  /** 远端目标下已存在的供应商 key 集合（SSOT + live，添加/编辑重复校验用；本机不传） */
+  remoteExistingKeys?: string[];
 }
 
 export function ProviderForm(props: ProviderFormProps) {
@@ -262,6 +266,8 @@ function ProviderFormFull({
   onManageUniversalProviders,
   onSubmittingChange,
   initialData,
+  remoteLiveIds,
+  remoteExistingKeys,
   showButtons = true,
   isProxyTakeover = false,
 }: ProviderFormProps) {
@@ -927,6 +933,10 @@ function ProviderFormFull({
   } = useHermesLiveProviderIds(appId === "hermes");
 
   const additiveExistingProviderKeys = useMemo(() => {
+    // 远端目标：以该远端自己的 key 集合校验（SSOT + live），本机集合不适用
+    if (remoteExistingKeys) {
+      return remoteExistingKeys.filter((key) => key !== providerId);
+    }
     if (appId === "opencode" && !isAnyOmoCategory) {
       return Array.from(
         new Set(
@@ -969,6 +979,7 @@ function ProviderFormFull({
     openclawLiveProviderIds,
     opencodeLiveProviderIds,
     providerId,
+    remoteExistingKeys,
   ]);
 
   const isProviderKeyLockStateLoading = useMemo(() => {
@@ -994,14 +1005,16 @@ function ProviderFormFull({
 
   const isProviderKeyLocked = useMemo(() => {
     if (!isEditMode || !providerId) return false;
+    // 远端目标：以远端 live 集合判定（本机 live ids hooks 在远端下被禁用）；
+    // 本机：以本机 live ids 判定（对齐本机「已添加到应用配置 → 标识不可修改」）
     if (appId === "opencode" && !isAnyOmoCategory) {
-      return opencodeLiveProviderIds.includes(providerId);
+      return (remoteLiveIds ?? opencodeLiveProviderIds).includes(providerId);
     }
     if (appId === "openclaw") {
-      return openclawLiveProviderIds.includes(providerId);
+      return (remoteLiveIds ?? openclawLiveProviderIds).includes(providerId);
     }
     if (appId === "hermes") {
-      return hermesLiveProviderIds.includes(providerId);
+      return (remoteLiveIds ?? hermesLiveProviderIds).includes(providerId);
     }
     return false;
   }, [
@@ -1012,6 +1025,7 @@ function ProviderFormFull({
     openclawLiveProviderIds,
     opencodeLiveProviderIds,
     providerId,
+    remoteLiveIds,
   ]);
 
   const [isCommonConfigModalOpen, setIsCommonConfigModalOpen] = useState(false);
