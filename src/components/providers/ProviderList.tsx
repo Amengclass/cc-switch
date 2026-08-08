@@ -75,6 +75,8 @@ interface ProviderListProps {
   remoteError?: string;
   /** 远端加载失败的重试回调 */
   onRetryRemote?: () => void;
+  /** 远端有旧数据时的刷新中指示（isFetching 且非首次加载） */
+  remoteRefreshing?: boolean;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider) => void; // OpenClaw: set as default model
 }
@@ -106,6 +108,7 @@ export function ProviderList({
   remoteLoadingLabel,
   remoteError,
   onRetryRemote,
+  remoteRefreshing,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -481,6 +484,16 @@ export function ProviderList({
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
+          {remoteRefreshing && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
+              <span>
+                {t("remote.refreshing", {
+                  defaultValue: "正在刷新远端配置…",
+                })}
+              </span>
+            </div>
+          )}
           {filteredProviders.map((provider) => {
             const isOmo = provider.category === "omo";
             const isOmoSlim = provider.category === "omo-slim";

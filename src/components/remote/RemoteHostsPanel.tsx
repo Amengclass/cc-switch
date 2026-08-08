@@ -88,7 +88,23 @@ function formToDraft(f: HostFormState) {
   };
 }
 
-export function RemoteHostsPanel() {
+/** toast 多行信息分点显示（①②③…）：测试连接结果等多项说明用，与全局多条提示风格一致 */
+function bulletPoints(items: string[]) {
+  return (
+    <div className="space-y-0.5 text-left">
+      {items.map((item, i) => (
+        <div key={i} className="flex items-start gap-1.5">
+          <span className="shrink-0 text-muted-foreground">
+            {i < 10 ? "①②③④⑤⑥⑦⑧⑨⑩"[i] : `${i + 1}.`}
+          </span>
+          <span>{item}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function RemoteHostsPanel({ app }: { app: string }) {
   const { t } = useTranslation();
 
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
@@ -215,17 +231,21 @@ export function RemoteHostsPanel() {
   const handleTest = async (host: RemoteHost) => {
     setTestingId(host.id);
     try {
-      const info = await testRemoteConnection(host.id);
-      const claudeStatusText = info.claudeCodeInstalled
-        ? t("remote.claudeInstalled", {
-            defaultValue: "已检测到 Claude Code",
+      const info = await testRemoteConnection(host.id, app);
+      const appLabel = t(`apps.${app}`);
+      const cliStatusText = info.cliInstalled
+        ? t("remote.cliInstalled", {
+            defaultValue: "已检测到 {{app}}",
+            app: appLabel,
           })
-        : info.claudeCodeInstalled === false
-          ? t("remote.claudeNotInstalled", {
-              defaultValue: "未检测到 Claude Code（配置会预置，安装后生效）",
+        : info.cliInstalled === false
+          ? t("remote.cliNotInstalled", {
+              defaultValue: "未检测到 {{app}}（配置会预置，安装后生效）",
+              app: appLabel,
             })
-          : t("remote.claudeDetectFailed", {
-              defaultValue: "Claude Code 安装状态检测失败",
+          : t("remote.cliDetectFailed", {
+              defaultValue: "{{app}} 安装状态检测失败",
+              app: appLabel,
             });
       toast.success(
         t("remote.connected", {
@@ -234,16 +254,18 @@ export function RemoteHostsPanel() {
           home: info.home,
         }),
         {
-          description: [
+          description: bulletPoints([
             info.settingsExists
               ? t("remote.settingsExists", {
-                  defaultValue: "检测到远端 settings.json",
+                  defaultValue: "检测到远端 {{app}} 配置",
+                  app: appLabel,
                 })
               : t("remote.settingsMissing", {
-                  defaultValue: "远端尚未创建 settings.json",
+                  defaultValue: "远端尚未创建 {{app}} 配置",
+                  app: appLabel,
                 }),
-            claudeStatusText,
-          ].join(" · "),
+            cliStatusText,
+          ]),
         },
       );
     } catch (error) {
@@ -273,17 +295,22 @@ export function RemoteHostsPanel() {
         Math.max(1, Number(form.port) || 22),
         form.username.trim(),
         form.password,
+        app,
       );
-      const claudeStatusText = info.claudeCodeInstalled
-        ? t("remote.claudeInstalled", {
-            defaultValue: "已检测到 Claude Code",
+      const appLabel = t(`apps.${app}`);
+      const cliStatusText = info.cliInstalled
+        ? t("remote.cliInstalled", {
+            defaultValue: "已检测到 {{app}}",
+            app: appLabel,
           })
-        : info.claudeCodeInstalled === false
-          ? t("remote.claudeNotInstalled", {
-              defaultValue: "未检测到 Claude Code（配置会预置，安装后生效）",
+        : info.cliInstalled === false
+          ? t("remote.cliNotInstalled", {
+              defaultValue: "未检测到 {{app}}（配置会预置，安装后生效）",
+              app: appLabel,
             })
-          : t("remote.claudeDetectFailed", {
-              defaultValue: "Claude Code 安装状态检测失败",
+          : t("remote.cliDetectFailed", {
+              defaultValue: "{{app}} 安装状态检测失败",
+              app: appLabel,
             });
       toast.success(
         t("remote.connected", {
@@ -291,16 +318,18 @@ export function RemoteHostsPanel() {
           home: info.home,
         }),
         {
-          description: [
+          description: bulletPoints([
             info.settingsExists
               ? t("remote.settingsExists", {
-                  defaultValue: "检测到远端 settings.json",
+                  defaultValue: "检测到远端 {{app}} 配置",
+                  app: appLabel,
                 })
               : t("remote.settingsMissing", {
-                  defaultValue: "远端尚未创建 settings.json",
+                  defaultValue: "远端尚未创建 {{app}} 配置",
+                  app: appLabel,
                 }),
-            claudeStatusText,
-          ].join(" · "),
+            cliStatusText,
+          ]),
         },
       );
     } catch (error) {

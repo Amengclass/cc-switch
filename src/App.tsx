@@ -69,6 +69,7 @@ import {
   getRemoteCurrentProvider,
   listDockerContainers,
   listRemoteHosts,
+  probeHostsOnline,
   removeRemoteProviderFromLive,
   addRemoteProvider,
   updateRemoteProvider,
@@ -233,6 +234,40 @@ function App() {
   const [remoteContainerId, setRemoteContainerId] = useState<string>(
     () => localStorage.getItem("cc-switch-remote-container") ?? "",
   );
+  // 主机在线状态（host_id → 是否在线）：目标选择器下拉打开时批量实时探测。
+  // 不缓存：状态必须真实反映"此刻"（缓存会让用户看到假在线却连不进去）。
+  const [hostsOnline, setHostsOnline] = useState<Record<string, boolean>>({});
+  // 当前目标是否被探明离线（软信号：探活结果；重试可清除重新探测）
+  const targetKnownOffline = remoteTargetId
+    ? hostsOnline[remoteTargetId] === false
+    : false;
+  // 重试：清除当前目标的离线标记 → 查询重新启用 → 真正重新探测/连接
+  const retryRemoteTarget = useCallback(() => {
+    if (!remoteTargetId) return;
+    setHostsOnline((prev) => {
+      if (prev[remoteTargetId] !== false) return prev;
+      const next = { ...prev };
+      delete next[remoteTargetId];
+      return next;
+    });
+  }, [remoteTargetId]);
+  const probeHosts = useCallback(async () => {
+    if (servers.length === 0) return;
+    // 每次打开下拉都重新实时检测：先清空旧状态（全部转圈）
+    setHostsOnline({});
+    // 每台单独探测、就绪即更新：在线机器先返回先变绿，
+    // 离线机器最后（5 秒超时）才变灰——不互相拖累（后端批量接口是等最慢的才一起返回）
+    await Promise.allSettled(
+      servers.map(async (s) => {
+        try {
+          const ok = await probeHostsOnline([s.id]);
+          setHostsOnline((prev) => ({ ...prev, ...ok }));
+        } catch {
+          // 单台探测失败不影响其他台
+        }
+      }),
+    );
+  }, [servers]);
   // 设置开关：远端非 additive 面板是否每次自动读入当前 live 配置（default 卡）
   const [autoImportDefault, setAutoImportDefault] = useState<boolean>(() =>
     localStorage.getItem("cc-switch-remote-auto-import-default") !== "0",
@@ -280,13 +315,19 @@ function App() {
 
   // 选中服务器时：读取远端当前生效的供应商（按 base_url 匹配本地供应商）
   // 并检测远端 Claude Code 安装状态（用于主面板横幅徽标）。
-  // 同时加载该主机的 Docker 容器列表，供「目标 = 容器」选择。
   useEffect(() => {
     if (!remoteTargetId) {
       setRemoteCurrentProviderId(null);
       setRemoteInstalled(null);
       setContainers([]);
       setRemoteContainerId("");
+      return;
+    }
+    // 目标选择器已探明该主机离线：跳过连接型调用（不发起建连），直接置空
+    if (targetKnownOffline) {
+      setRemoteCurrentProviderId(null);
+      setRemoteInstalled(null);
+      setContainers([]);
       return;
     }
     let active = true;
@@ -305,6 +346,26 @@ function App() {
       .catch(() => {
         if (active) setRemoteInstalled(null);
       });
+    return () => {
+      active = false;
+    };
+  }, [
+    remoteTargetId,
+    remoteContainerId,
+    currentView,
+    sharedFeatureApp,
+    targetKnownOffline,
+  ]);
+
+  // 容器列表只与主机相关（与 app/容器无关）：独立 effect，仅换主机时重拉，
+  // 切 app / 切容器不白跑（D 修复）。
+  useEffect(() => {
+    if (!remoteTargetId || targetKnownOffline) {
+      setContainers([]);
+      setRemoteContainerId("");
+      return;
+    }
+    let active = true;
     listDockerContainers(remoteTargetId)
       .then((list) => {
         if (active) {
@@ -321,7 +382,7 @@ function App() {
     return () => {
       active = false;
     };
-  }, [remoteTargetId, remoteContainerId, currentView, sharedFeatureApp]);
+  }, [remoteTargetId, targetKnownOffline]);
 
   const activeRemoteHost = servers.find((s) => s.id === remoteTargetId) ?? null;
   // 当前目标（本机/服务器）的 Claude Code 安装状态
@@ -469,6 +530,8 @@ function App() {
     remoteContainerId || undefined,
     sharedFeatureApp,
     autoImportDefault,
+    // 目标选择器已探明当前主机离线 → 不再发起连接（秒显示离线）
+    targetKnownOffline || undefined,
   );
   const providers = useMemo(
     () =>
@@ -1381,7 +1444,7 @@ function App() {
             </div>
           );
         case "remote":
-          return <RemoteHostsPanel />;
+          return <RemoteHostsPanel app={sharedFeatureApp} />;
 
         case "sessions":
           return (
@@ -1437,29 +1500,44 @@ function App() {
                       remoteLoadingLabel={
                         remoteTargetId ? (
                           <>
-                            {"正在连接 "}
-                            <span className="font-medium text-foreground">
-                              {activeRemoteHost?.name ?? remoteTargetId}
-                            </span>
-                            {"("}
+                            {t("remote.readingConfigPrefix", {
+                              defaultValue: "正在读取 ",
+                            })}
                             <span className="font-medium text-primary">
-                              {remoteContainerId
-                                ? `${remoteContainerId} 容器`
-                                : "宿主机"}
+                              {t(`apps.${sharedFeatureApp}`)}
                             </span>
-                            {") 并读取配置…"}
+                            {t("remote.readingConfigSuffix", {
+                              defaultValue: " 配置…",
+                            })}
                           </>
                         ) : undefined
                       }
                       remoteError={
-                        remoteTargetId && remoteProvidersQuery.error
-                          ? extractErrorMessage(remoteProvidersQuery.error)
+                        remoteTargetId
+                          ? targetKnownOffline
+                            ? t("remote.hostOffline", {
+                                defaultValue:
+                                  "主机当前离线（探活未通过），点重试可重新探测",
+                              })
+                            : remoteProvidersQuery.error
+                              ? extractErrorMessage(remoteProvidersQuery.error)
+                              : undefined
                           : undefined
                       }
                       onRetryRemote={
                         remoteTargetId
-                          ? () => void remoteProvidersQuery.refetch()
+                          ? () => {
+                              // 清除离线标记 → 查询重新启用 → 真正重新探测/连接
+                              retryRemoteTarget();
+                              void remoteProvidersQuery.refetch();
+                            }
                           : undefined
+                      }
+                      remoteRefreshing={
+                        remoteTargetId
+                          ? remoteProvidersQuery.isFetching &&
+                            !remoteProvidersQuery.isLoading
+                          : false
                       }
                       activeProviderId={activeProviderId}
                       onSwitch={handleProviderSwitch}
@@ -1973,6 +2051,17 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("remote")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("remote.title", {
+                                  defaultValue: "远程主机",
+                                })}
+                              >
+                                <Server className="flex-shrink-0 w-4 h-4" />
+                              </Button>
                             </>
                           ) : activeApp === "openclaw" ? (
                             <>
@@ -2038,6 +2127,17 @@ function App() {
                                 title={t("mcp.title")}
                               >
                                 <McpIcon size={16} />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("remote")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("remote.title", {
+                                  defaultValue: "远程主机",
+                                })}
+                              >
+                                <Server className="flex-shrink-0 w-4 h-4" />
                               </Button>
                             </>
                           ) : (
@@ -2136,6 +2236,8 @@ function App() {
               setRemoteContainerId={setRemoteContainerId}
               servers={servers}
               containers={containers}
+              hostsOnline={hostsOnline}
+              onProbeHosts={probeHosts}
             />
           {currentInstalled === true || currentInstalled === null ? (
             <span

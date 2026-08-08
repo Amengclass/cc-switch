@@ -1616,6 +1616,7 @@ pub fn run() {
             remote::commands::delete_remote_host,
             remote::commands::test_remote_connection,
             remote::commands::test_remote_connection_info,
+            remote::commands::probe_hosts_online,
             remote::commands::test_remote_provider_connection,
             remote::commands::remove_remote_provider_from_live,
             remote::commands::clear_remote_provider_record,

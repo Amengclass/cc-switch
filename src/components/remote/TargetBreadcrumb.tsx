@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Container, Laptop, Server } from "lucide-react";
+import { ChevronRight, Container, Laptop, Loader2, Server } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +18,10 @@ interface TargetBreadcrumbProps {
   setRemoteContainerId: (value: string) => void;
   servers: RemoteHost[];
   containers: string[];
+  /** 主机在线状态（host_id → 是否在线）；打开下拉时探活填充 */
+  hostsOnline?: Record<string, boolean>;
+  /** 下拉打开时触发的批量探活回调 */
+  onProbeHosts?: () => void;
 }
 
 /**
@@ -35,6 +39,8 @@ export function TargetBreadcrumb({
   setRemoteContainerId,
   servers,
   containers,
+  hostsOnline,
+  onProbeHosts,
 }: TargetBreadcrumbProps) {
   const { t } = useTranslation();
   const isLocal = !remoteTargetId;
@@ -55,9 +61,31 @@ export function TargetBreadcrumb({
   const segmentCls =
     "inline-flex h-full items-center gap-1.5 px-2.5 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-foreground transition-colors focus-visible:outline-none";
 
+  // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
+  const statusDot = (hostId: string) => {
+    const online = hostsOnline?.[hostId];
+    if (online === undefined) {
+      return (
+        <Loader2
+          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
+          aria-label="检测中"
+        />
+      );
+    }
+    return (
+      <span
+        className={cn(
+          "inline-flex h-2 w-2 shrink-0 rounded-full",
+          online ? "bg-emerald-500" : "bg-muted-foreground/40",
+        )}
+        aria-hidden="true"
+      />
+    );
+  };
+
   return (
     <div className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-lg border border-border/80 bg-muted text-xs shadow-sm">
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => open && onProbeHosts?.()}>
         <DropdownMenuTrigger asChild>
           <button type="button" className={cn(segmentCls, "rounded-l-lg")}>
             {isLocal ? (
@@ -83,8 +111,13 @@ export function TargetBreadcrumb({
               <>
                 <DropdownMenuSeparator />
                 {servers.map((s) => (
-                  <DropdownMenuRadioItem key={s.id} value={s.id}>
-                    {s.name}
+                  <DropdownMenuRadioItem
+                    key={s.id}
+                    value={s.id}
+                    className="flex items-center justify-between gap-3 pr-2"
+                  >
+                    <span className="truncate">{s.name}</span>
+                    {statusDot(s.id)}
                   </DropdownMenuRadioItem>
                 ))}
               </>

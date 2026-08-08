@@ -18,9 +18,10 @@ export interface RemoteHost {
 export interface RemoteConnectionInfo {
   connected: boolean;
   home: string;
+  /** 当前 app 的主配置文件（settings.json / config.toml / .env…）是否存在 */
   settingsExists: boolean;
-  /** true=已安装,false=未安装,null=检测失败 */
-  claudeCodeInstalled: boolean | null;
+  /** 当前 app 的 CLI 是否安装：true=已安装,false=未安装,null=检测失败 */
+  cliInstalled: boolean | null;
 }
 
 /** 新增/编辑主机的表单（不含 id 的输入项） */

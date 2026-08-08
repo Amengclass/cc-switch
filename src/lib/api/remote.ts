@@ -30,14 +30,23 @@ export async function deleteRemoteHost(hostId: string): Promise<boolean> {
   return invoke<boolean>("delete_remote_host", { hostId });
 }
 
-/** 测试与远程主机的连接，并探测远端配置是否存在 */
+/** 批量探测主机在线状态（目标选择器打开时调用；在线=绿点，离线=灰点） */
+export async function probeHostsOnline(
+  hostIds: string[],
+): Promise<Record<string, boolean>> {
+  return invoke<Record<string, boolean>>("probe_hosts_online", { hostIds });
+}
+
+/** 测试与远程主机的连接：探测当前 app 的主配置是否存在 + 该 app 的 CLI 是否安装 */
 export async function testRemoteConnection(
   hostId: string,
+  app: string,
   container?: string,
 ): Promise<RemoteConnectionInfo> {
   return invoke<RemoteConnectionInfo>("test_remote_connection", {
     hostId,
     container: container ?? null,
+    app,
   });
 }
 
@@ -47,12 +56,14 @@ export async function testRemoteConnectionInfo(
   port: number,
   username: string,
   password: string,
+  app: string,
 ): Promise<RemoteConnectionInfo> {
   return invoke<RemoteConnectionInfo>("test_remote_connection_info", {
     host,
     port,
     username,
     password,
+    app,
   });
 }
 

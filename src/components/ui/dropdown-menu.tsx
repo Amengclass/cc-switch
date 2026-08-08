@@ -133,7 +133,17 @@ const DropdownMenuRadioItem = React.forwardRef<
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <DropdownMenuPrimitive.ItemIndicator>
-        <div className="h-2 w-2 rounded-full bg-current" />
+        <svg
+          className="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M16.704 5.292a1 1 0 0 1 .083 1.32l-.083.094-8 8a1 1 0 0 1-1.32.083l-.094-.083-4-4a1 1 0 0 1 1.32-1.497l.094.083L8 12.585l7.293-7.292a1 1 0 0 1 1.32-.083l.094.083Z"
+            fill="currentColor"
+          />
+        </svg>
       </DropdownMenuPrimitive.ItemIndicator>
     </span>
     {children}

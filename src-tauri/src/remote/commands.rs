@@ -273,10 +273,11 @@ pub async fn test_remote_connection(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
+    app: String,
 ) -> Result<serde_json::Value, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    probe_remote(&host, &password, container.as_deref()).await
+    probe_remote(&host, &password, container.as_deref(), &app).await
 }
 
 /// 用「未保存的连接信息」直接测试 SSH 连接（新增主机场景，不需要先保存）。
@@ -286,6 +287,7 @@ pub async fn test_remote_connection_info(
     port: u16,
     username: String,
     password: String,
+    app: String,
 ) -> Result<serde_json::Value, String> {
     let host_info = RemoteHost {
         id: "temp".to_string(),
@@ -298,14 +300,19 @@ pub async fn test_remote_connection_info(
         created_at: 0,
         updated_at: 0,
     };
-    probe_remote(&host_info, &password, None).await
+    probe_remote(&host_info, &password, None, &app).await
 }
 
-/// 共享探测逻辑：建连 + 探测远端 settings 是否存在 + 检测 Claude Code 安装。
+/// 共享探测逻辑：建连 + 探测「当前 app」主配置文件是否存在 + 检测该 app 的 CLI 安装。
+///
+/// 全部 per-app：不同 app 的远端主配置路径与 CLI 二进制不同
+/// （claude→settings.json、codex→config.toml、opencode→opencode.json…），
+/// 不再硬编码 Claude Code。
 async fn probe_remote(
     host: &RemoteHost,
     password: &str,
     container: Option<&str>,
+    app: &str,
 ) -> Result<serde_json::Value, String> {
     let session = connection::connect(host, Some(password)).await?;
     let home = host.default_home();
@@ -314,22 +321,25 @@ async fn probe_remote(
         &session.channel,
         container,
     )?;
-    let settings_path = settings::remote_settings_path(&home);
-    let settings_exists = target.exists(&settings_path).await;
 
-    // 通过 exec 通道检测是否安装 Claude Code（命中哨兵 = 已安装）
-    let claude_cmd = cli_installed_probe("claude", container)?;
-    let claude_installed = match connection::exec_command(&session.channel, &claude_cmd).await {
+    // 当前 app 的主配置文件是否存在（测试连接/环境检查用）
+    let settings_exists = match remote_app_config_path(app, &home) {
+        Some(path) => target.exists(&path).await,
+        None => false,
+    };
+
+    // 通过 exec 通道检测当前 app 的 CLI 是否安装（命中哨兵 = 已安装）
+    let cli_cmd = cli_installed_probe(app, container)?;
+    let cli_installed = match connection::exec_command(&session.channel, &cli_cmd).await {
         Ok(out) => {
-            // Info 级：默认日志等级可记录，用于确认探测命令的真实返回
             log::info!(
-                "[remote] claude 探测 cmd={claude_cmd:?} out={out:?} found={}",
+                "[remote] {app} 探测 cmd={cli_cmd:?} out={out:?} found={}",
                 out.contains(CLAUDE_INSTALLED_MARKER)
             );
             Some(out.contains(CLAUDE_INSTALLED_MARKER))
         }
         Err(e) => {
-            log::warn!("[remote] 检测 claude 安装状态失败: {e}");
+            log::warn!("[remote] 检测远端 {app} 安装状态失败: {e}");
             None
         }
     };
@@ -338,8 +348,24 @@ async fn probe_remote(
         "connected": true,
         "home": home,
         "settingsExists": settings_exists,
-        "claudeCodeInstalled": claude_installed,
+        "cliInstalled": cli_installed,
     }))
+}
+
+/// 各 app 在远端的主配置文件路径（测试连接的环境检查用），
+/// 与 SSOT 首次导入 / 远端切换写入的 live 路径保持一致。
+fn remote_app_config_path(app: &str, home: &str) -> Option<String> {
+    let path = match app {
+        "claude" => format!("{home}/.claude/settings.json"),
+        "codex" => format!("{home}/.codex/config.toml"),
+        "gemini" => format!("{home}/.gemini/.env"),
+        "grokbuild" => format!("{home}/.grok/config.toml"),
+        "opencode" => format!("{home}/.config/opencode/opencode.json"),
+        "openclaw" => format!("{home}/.openclaw/openclaw.json"),
+        "hermes" => format!("{home}/.hermes/config.yaml"),
+        _ => return None,
+    };
+    Some(path)
 }
 
 /// 读取远端 `~/.claude/settings.json`（原始 JSON，供前端展示/编辑）。
@@ -2513,6 +2539,46 @@ fn cli_installed_probe(app: &str, container: Option<&str>) -> Result<String, Str
         Some(c) => format!("docker exec {c} sh -c '{inner}'"),
         None => inner,
     })
+}
+
+/// 批量探测主机在线状态（目标选择器下拉打开时调用）。
+///
+/// 并行探活、每台 5 秒超时（覆盖内部 connect 的 10 秒总超时，保证下拉快速响应）。
+/// 复用连接池：池中已有连接秒回，且探活成功的同时为后续操作预热连接。
+#[tauri::command]
+pub async fn probe_hosts_online(
+    state: State<'_, AppState>,
+    host_ids: Vec<String>,
+) -> Result<std::collections::HashMap<String, bool>, String> {
+    use futures::future::join_all;
+
+    let mut tasks = Vec::with_capacity(host_ids.len());
+    for id in &host_ids {
+        let host = match load_host(&state, id) {
+            Ok(h) => h,
+            Err(_) => continue, // 已被删除的主机跳过
+        };
+        let password = match resolve_password(&host) {
+            Ok(p) => p,
+            Err(_) => continue, // 无密码（未保存）跳过
+        };
+        tasks.push(async move {
+            let ok = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                connection::connect(&host, Some(&password)),
+            )
+            .await
+            .map(|r| r.is_ok())
+            .unwrap_or(false);
+            (id.clone(), ok)
+        });
+    }
+
+    let mut online: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for (id, ok) in join_all(tasks).await {
+        online.insert(id, ok);
+    }
+    Ok(online)
 }
 
 /// 按 id 加载主机，不存在时报错。

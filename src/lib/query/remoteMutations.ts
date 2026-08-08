@@ -22,12 +22,14 @@ export const useRemoteProvidersQuery = (
   container?: string,
   app?: string,
   autoImportDefault?: boolean,
+  /** 目标选择器已探明该主机离线：跳过连接请求，直接用离线状态（不再尝试建连） */
+  knownOffline?: boolean,
 ) => {
   return useQuery({
     queryKey: ["remoteProviders", hostId, container || "__host__", app],
     queryFn: () =>
       getRemoteProviders(hostId!, app!, container, autoImportDefault ?? true),
-    enabled: Boolean(hostId && app),
+    enabled: Boolean(hostId && app && !knownOffline),
   });
 };
 
