@@ -11,9 +11,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, X } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -68,6 +69,12 @@ interface ProviderListProps {
   remoteContainerId?: string;
   /** 远端目标下的 live 供应商 ID 集合（来自 get_remote_providers 返回，additive 按钮态用） */
   remoteLiveIds?: string[];
+  /** 远端加载文案（仅远端目标首次加载时显示；本机不传）。支持带高亮的 JSX */
+  remoteLoadingLabel?: ReactNode;
+  /** 远端加载失败的错误信息（非空时显示错误分支 + 重试） */
+  remoteError?: string;
+  /** 远端加载失败的重试回调 */
+  onRetryRemote?: () => void;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider) => void; // OpenClaw: set as default model
 }
@@ -96,6 +103,9 @@ export function ProviderList({
   remoteTargetId,
   remoteContainerId,
   remoteLiveIds,
+  remoteLoadingLabel,
+  remoteError,
+  onRetryRemote,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -403,12 +413,46 @@ export function ProviderList({
   if (isLoading) {
     return (
       <div className="space-y-3">
+        {remoteLoadingLabel && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span>{remoteLoadingLabel}</span>
+          </div>
+        )}
         {[0, 1, 2].map((index) => (
           <div
             key={index}
             className="w-full border border-dashed rounded-lg h-28 border-muted-foreground/40 bg-muted/40"
           />
         ))}
+      </div>
+    );
+  }
+
+  // 远端目标加载失败：明确报错 + 重试（而非误显示空状态）
+  if (remoteError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-5 w-5 shrink-0" />
+          <p className="text-sm font-medium">
+            {t("remote.loadError", { defaultValue: "无法连接远端" })}
+          </p>
+        </div>
+        <p className="max-w-md break-all text-xs text-muted-foreground">
+          {remoteError}
+        </p>
+        {onRetryRemote && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetryRemote}
+            className="mt-1"
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            {t("common.retry", { defaultValue: "重试" })}
+          </Button>
+        )}
       </div>
     );
   }

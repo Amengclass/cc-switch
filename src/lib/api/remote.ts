@@ -130,11 +130,13 @@ function toRemoteProvidersView(view: {
   };
 }
 
-/** 读远端目标的供应商列表（首次自动从该远端 live 导入，对齐本机启动导入语义） */
+/** 读远端目标的供应商列表（首次自动从该远端 live 导入，对齐本机启动导入语义；
+ *  autoImportDefault 控制非 additive 是否每次刷新 default 卡——设置项，默认开） */
 export async function getRemoteProviders(
   hostId: string,
   app: string,
   container?: string,
+  autoImportDefault?: boolean,
 ): Promise<RemoteProvidersView> {
   const view = await invoke<{
     providers: Provider[];
@@ -144,6 +146,7 @@ export async function getRemoteProviders(
     hostId,
     app,
     container: container ?? null,
+    autoImportDefault: autoImportDefault ?? null,
   });
   return toRemoteProvidersView(view);
 }

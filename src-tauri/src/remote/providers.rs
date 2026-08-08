@@ -100,12 +100,16 @@ pub fn upsert_provider(providers: &mut Vec<Provider>, provider: Provider) -> boo
 ///
 /// 返回 `(变更条数, additive live 供应商 ID 集合)`。
 ///
+/// `auto_import_default`：仅非 additive 生效——true = 每次确保 SSOT 存在一条
+/// `default`（内容 = live 当前配置，幂等更新，用户可随时看到当前机器配置）；
+/// false = 仅空库才从 live 导入 default（旧行为，更快，方案 A 保留）。
 /// live_ids 仅在 additive 时返回本次读到的 live 内容（get 场景直接复用，
 /// 省一次对 live 文件的重复读取）；非 additive 恒为空 Vec。
 pub async fn sync_remote_live_into_ssot<F: FileOps>(
     fs: &F,
     root: &str,
     app: &str,
+    auto_import_default: bool,
 ) -> Result<(usize, Vec<String>), String> {
     if is_additive_app(app) {
         // additive：live 即完整集合，幂等 upsert（live_config_managed = true）
@@ -123,16 +127,29 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         let live_ids = live.iter().map(|p| p.id.clone()).collect();
         Ok((changed, live_ids))
     } else {
-        // 非 additive：仅 SSOT 为空才从 live 导入一条 default
+        // 非 additive：live 有内容时——
+        // - auto_import_default=true：确保 SSOT 中存在一条 `default`
+        //   （内容 = live 当前生效配置，幂等更新）——用户要求：远端要能随时看到
+        //   「当前机器实际在用什么配置」。已有候选池时不动 current 标记。
+        // - auto_import_default=false：仅空库才从 live 导入 default（旧行为）。
+        let Some(default) = parse_remote_live_default(fs, root, app).await? else {
+            return Ok((0, Vec::new())); // live 无内容 → 不导入
+        };
         let mut ssot = read_remote_providers_ssot(fs, root, app).await?;
-        if !ssot.providers.is_empty() {
+        if !auto_import_default && !ssot.providers.is_empty() {
             return Ok((0, Vec::new()));
         }
-        let Some(default) = parse_remote_live_default(fs, root, app).await? else {
+        let already_fresh = ssot.providers.iter().any(|p| {
+            p.id == "default" && p.settings_config == default.settings_config
+        });
+        if already_fresh {
             return Ok((0, Vec::new()));
-        };
-        ssot.current_provider_id = Some("default".to_string());
-        ssot.providers.push(default);
+        }
+        // 空库首导时把 default 设为 current；已有候选池时保留用户切换的记录
+        if ssot.providers.is_empty() {
+            ssot.current_provider_id = Some("default".to_string());
+        }
+        upsert_provider(&mut ssot.providers, default);
         write_remote_providers_ssot(fs, root, app, &ssot).await?;
         Ok((1, Vec::new()))
     }
@@ -604,7 +621,7 @@ mod tests {
         std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_string_pretty(&live).unwrap()).unwrap();
 
-        let (changed, live_ids) = sync_remote_live_into_ssot(&fs, &root, "opencode")
+        let (changed, live_ids) = sync_remote_live_into_ssot(&fs, &root, "opencode", false)
             .await
             .expect("sync");
         assert_eq!(changed, 2);
@@ -624,7 +641,7 @@ mod tests {
         assert_eq!(p2.name, "p2"); // 无 name 时回退 id
 
         // 幂等：再同步不新增
-        let (changed2, _) = sync_remote_live_into_ssot(&fs, &root, "opencode")
+        let (changed2, _) = sync_remote_live_into_ssot(&fs, &root, "opencode", false)
             .await
             .expect("sync2");
         assert_eq!(changed2, 0);
@@ -648,7 +665,7 @@ mod tests {
         std::fs::create_dir_all(std::path::Path::new(&path).parent().unwrap()).unwrap();
         std::fs::write(&path, serde_json::to_string_pretty(&live).unwrap()).unwrap();
 
-        let _ = sync_remote_live_into_ssot(&fs, &root, "opencode")
+        let _ = sync_remote_live_into_ssot(&fs, &root, "opencode", false)
             .await
             .expect("sync");
         let read = read_remote_providers_ssot(&fs, &root, "opencode")
@@ -671,7 +688,7 @@ mod tests {
         )
         .unwrap();
 
-        let (changed, _) = sync_remote_live_into_ssot(&fs, &root, "claude")
+        let (changed, _) = sync_remote_live_into_ssot(&fs, &root, "claude", true)
             .await
             .expect("sync");
         assert_eq!(changed, 1);
@@ -690,8 +707,46 @@ mod tests {
             Some("https://remote.example")
         );
 
-        // 非 additive：已有 SSOT 条目则不再导入（对齐 should_import_default_config_on_startup）
-        let (changed2, _) = sync_remote_live_into_ssot(&fs, &root, "claude")
+        // 非 additive：已有 SSOT 条目且 default 内容一致 → 不再写（幂等）
+        let (changed2, _) = sync_remote_live_into_ssot(&fs, &root, "claude", true)
+            .await
+            .expect("sync2");
+        assert_eq!(changed2, 0);
+    }
+
+    #[tokio::test]
+    async fn sync_non_additive_ensures_default_with_existing_candidates() {
+        let root = temp_root("noadditive-candidates");
+        let fs = LocalFileOps;
+        // 已有候选池（自定义供应商），但无 default
+        let mut ssot = RemoteProvidersSsot::default();
+        ssot.providers.push(sample_provider("my-vendor", "My Vendor"));
+        write_remote_providers_ssot(&fs, &root, "claude", &ssot)
+            .await
+            .expect("seed");
+        // live 有当前配置
+        let settings_path = format!("{root}/.claude/settings.json");
+        std::fs::create_dir_all(std::path::Path::new(&settings_path).parent().unwrap()).unwrap();
+        std::fs::write(
+            &settings_path,
+            r#"{"env":{"ANTHROPIC_BASE_URL":"https://remote.example"}}"#,
+        )
+        .unwrap();
+
+        let (changed, _) = sync_remote_live_into_ssot(&fs, &root, "claude", true)
+            .await
+            .expect("sync");
+        assert_eq!(changed, 1); // default 被 upsert（用户要求：随时可见当前机器配置）
+        let read = read_remote_providers_ssot(&fs, &root, "claude")
+            .await
+            .expect("read");
+        assert!(read.providers.iter().any(|p| p.id == "default"));
+        assert!(read.providers.iter().any(|p| p.id == "my-vendor")); // 候选池保留
+        // 已有候选池时不动 current 标记（空库首导才设 default 为 current）
+        assert_eq!(read.current_provider_id.as_deref(), None);
+
+        // 幂等：内容一致不再写
+        let (changed2, _) = sync_remote_live_into_ssot(&fs, &root, "claude", true)
             .await
             .expect("sync2");
         assert_eq!(changed2, 0);
@@ -701,7 +756,7 @@ mod tests {
     async fn sync_missing_live_is_noop() {
         let root = temp_root("nolive");
         let fs = LocalFileOps;
-        let (changed, _) = sync_remote_live_into_ssot(&fs, &root, "claude")
+        let (changed, _) = sync_remote_live_into_ssot(&fs, &root, "claude", true)
             .await
             .expect("sync no live");
         assert_eq!(changed, 0);

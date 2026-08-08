@@ -21,10 +21,12 @@ export const useRemoteProvidersQuery = (
   hostId?: string,
   container?: string,
   app?: string,
+  autoImportDefault?: boolean,
 ) => {
   return useQuery({
     queryKey: ["remoteProviders", hostId, container || "__host__", app],
-    queryFn: () => getRemoteProviders(hostId!, app!, container),
+    queryFn: () =>
+      getRemoteProviders(hostId!, app!, container, autoImportDefault ?? true),
     enabled: Boolean(hostId && app),
   });
 };

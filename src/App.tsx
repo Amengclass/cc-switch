@@ -233,6 +233,20 @@ function App() {
   const [remoteContainerId, setRemoteContainerId] = useState<string>(
     () => localStorage.getItem("cc-switch-remote-container") ?? "",
   );
+  // 设置开关：远端非 additive 面板是否每次自动读入当前 live 配置（default 卡）
+  const [autoImportDefault, setAutoImportDefault] = useState<boolean>(() =>
+    localStorage.getItem("cc-switch-remote-auto-import-default") !== "0",
+  );
+
+  // 开关切换后使远端面板查询失效（refetch 用新值），并持久化
+  const handleAutoImportDefaultChange = useCallback((next: boolean) => {
+    setAutoImportDefault(next);
+    localStorage.setItem(
+      "cc-switch-remote-auto-import-default",
+      next ? "1" : "0",
+    );
+    queryClient.invalidateQueries({ queryKey: ["remoteProviders"] });
+  }, [queryClient]);
 
   useEffect(() => {
     localStorage.setItem("cc-switch-remote-target", remoteTargetId);
@@ -454,6 +468,7 @@ function App() {
     remoteTargetId || undefined,
     remoteContainerId || undefined,
     sharedFeatureApp,
+    autoImportDefault,
   );
   const providers = useMemo(
     () =>
@@ -1303,6 +1318,8 @@ function App() {
               onOpenChange={() => setCurrentView("providers")}
               onImportSuccess={handleImportSuccess}
               defaultTab={settingsDefaultTab}
+              autoImportDefault={autoImportDefault}
+              onAutoImportDefaultChange={handleAutoImportDefaultChange}
             />
           );
         case "prompts":
@@ -1415,6 +1432,33 @@ function App() {
                       remoteLiveIds={
                         remoteTargetId
                           ? remoteProvidersQuery.data?.liveIds
+                          : undefined
+                      }
+                      remoteLoadingLabel={
+                        remoteTargetId ? (
+                          <>
+                            {"正在连接 "}
+                            <span className="font-medium text-foreground">
+                              {activeRemoteHost?.name ?? remoteTargetId}
+                            </span>
+                            {"("}
+                            <span className="font-medium text-primary">
+                              {remoteContainerId
+                                ? `${remoteContainerId} 容器`
+                                : "宿主机"}
+                            </span>
+                            {") 并读取配置…"}
+                          </>
+                        ) : undefined
+                      }
+                      remoteError={
+                        remoteTargetId && remoteProvidersQuery.error
+                          ? extractErrorMessage(remoteProvidersQuery.error)
+                          : undefined
+                      }
+                      onRetryRemote={
+                        remoteTargetId
+                          ? () => void remoteProvidersQuery.refetch()
                           : undefined
                       }
                       activeProviderId={activeProviderId}

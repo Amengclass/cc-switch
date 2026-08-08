@@ -530,6 +530,7 @@ pub async fn get_remote_providers(
     host_id: String,
     app: String,
     container: Option<String>,
+    #[allow(non_snake_case)] autoImportDefault: Option<bool>,
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -541,9 +542,15 @@ pub async fn get_remote_providers(
         container.as_deref(),
     )?;
 
-    // 首次（SSOT 空）从远端 live 导入（对齐本机启动导入语义）。
-    // additive 时同步函数顺带返回 live_ids（get 场景免对 live 文件重复读取）
-    let (_, live_ids) = crate::remote::providers::sync_remote_live_into_ssot(&target, &home, &app).await?;
+    // 首次（SSOT 空）从远端 live 导入（对齐本机启动导入语义）；
+    // 非 additive 的 default 刷新由设置开关控制（默认开：随时可见当前机器配置）
+    let (_, live_ids) = crate::remote::providers::sync_remote_live_into_ssot(
+        &target,
+        &home,
+        &app,
+        autoImportDefault.unwrap_or(true),
+    )
+    .await?;
     let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
     build_remote_providers_view(
         &state,
@@ -605,8 +612,9 @@ async fn load_remote_ssot_for_mutation<F: crate::fsops::FileOps>(
     let mut ssot =
         crate::remote::providers::read_remote_providers_ssot(target, home, app).await?;
     if ssot.providers.is_empty() {
+        // 操作命令不刷新 default 卡（开关只管读面板），仅空库时确保有数据
         let (changed, _) =
-            crate::remote::providers::sync_remote_live_into_ssot(target, home, app).await?;
+            crate::remote::providers::sync_remote_live_into_ssot(target, home, app, false).await?;
         if changed > 0 {
             ssot = crate::remote::providers::read_remote_providers_ssot(target, home, app)
                 .await?;

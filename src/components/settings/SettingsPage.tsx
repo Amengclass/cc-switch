@@ -51,6 +51,7 @@ import { ProxyTabContent } from "@/components/settings/ProxyTabContent";
 import { ConnectivityCheckConfigPanel } from "@/components/usage/ConnectivityCheckConfigPanel";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
+import { RemoteProviderSettings } from "@/components/settings/RemoteProviderSettings";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { CodexAuthSettings } from "@/components/settings/CodexAuthSettings";
 import { useInstalledSkills } from "@/hooks/useSkills";
@@ -64,6 +65,9 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   onImportSuccess?: () => void | Promise<void>;
   defaultTab?: string;
+  /** 远端非 additive 面板是否每次自动读入当前 live 配置（default 卡） */
+  autoImportDefault?: boolean;
+  onAutoImportDefaultChange?: (next: boolean) => void;
 }
 
 export function SettingsPage({
@@ -71,6 +75,8 @@ export function SettingsPage({
   onOpenChange,
   onImportSuccess,
   defaultTab = "general",
+  autoImportDefault = true,
+  onAutoImportDefaultChange,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
   const {
@@ -292,6 +298,10 @@ export function SettingsPage({
                       onChange={(terminal) =>
                         handleAutoSave({ preferredTerminal: terminal })
                       }
+                    />
+                    <RemoteProviderSettings
+                      value={autoImportDefault}
+                      onChange={(next) => onAutoImportDefaultChange?.(next)}
                     />
                   </motion.div>
                 ) : null}
