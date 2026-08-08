@@ -228,12 +228,41 @@
 
 | 优先级 | 事项 |
 |---|---|
-| 中 | ~~远程 Sessions per-app~~ 🔄 进行中:claude/grokbuild/codex/gemini/openclaw 已完成(抽纯解析 + FileOps 扫描器);hermes/opencode 含 SQLite 主存储,方案(hybrid,2026-08-07 记录)=① 远端 `command -v sqlite3` 探测→有则 exec `sqlite3 <db> "SELECT ..."` 查询(零下载);② 无则 SFTP 下载 db 回本机 rusqlite 读(复用本机 provider SQL 语句);③ db>50MB 拒绝下载报错(护栏);删除=下载-本机事务改-传回;提示「先退出远端 hermes/opencode 再刷新」(WAL 一致性) |
+| 中 | ~~远程 Sessions per-app~~ ✅ 已完成(2026-08-08 核实):claude/grokbuild/codex/gemini/openclaw + hermes/opencode(SQLite hybrid:远端 sqlite3 探测直查 / 下载 db 回本机读,commands.rs:1369-1538) |
 | 中 | ~~远程 Prompts per-app~~ ✅ 已完成(2026-08-07,按本机 prompt_files 矩阵映射 live 文件,claude 外 per-app SSOT) |
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |
-| 低 | `APP_INSTALL_CMDS` 包名校对(grok/openclaw/hermes 按官方文档核对) |
+| 低 | `APP_INSTALL_CMDS` 包名校对 ⚠️ 2026-08-08 核实:grokbuild 前端 `@grok/grok-cli`(npm 404,应为 `@xai-official/grok`)、hermes 前端 `hermes-cli`(无关包,应为 PyPI `hermes-agent`)——均需改,后端 misc.rs 已用正确包名 |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
+
+### 📋 功能按钮远端适配核查(2026-08-08 记录)
+
+> 顶栏各功能按钮在「远端目标(remoteTargetId 非空)」下的适配现状。结论来自逐面板代码核查(src/ 前端组件/hooks/api + src-tauri/remote/ 后端命令清单)。
+
+**适配情况总表:**
+
+| 功能 | 状态 | 说明 |
+|---|---|---|
+| Prompts(📖) | ✅ 完全适配 | 读/增/删/改/开关全走 `remote_*` 命令(App.tsx 传 remote props) |
+| MCP(Ⓜ️) | ✅ 完全适配 | 读/增删改/开关/导入全走远端(hooks 均带远端分支) |
+| Sessions(🕘) | ✅ 适配(1 处残留) | 读/删走远端;**resume 仍走本机 launchTerminal**(SessionManagerPage.tsx:447-469) |
+| Skills(🔧) | ⚠️ 部分适配 | 列表/toggle/卸载/导入/ZIP 走远端;备份/恢复/检查更新在远端下被禁用为 no-op(UnifiedSkillsPanel.tsx:770-773、918-929),无远端替代 |
+| openclaw 工作区(📁) | ❌ 未适配 | 纯本机 workspaceApi,App.tsx 未传 remote props(1502) |
+| openclaw 环境变量(🔑) | ❌ 未适配 | 纯本机 openclawApi(1504) |
+| openclaw 工具(🛡) | ❌ 未适配 | 纯本机 openclawApi(1506) |
+| openclaw Agents(⚙️) | ❌ 未适配 | 纯本机 openclawApi(1508) |
+| hermes 记忆(🧠) | ❌ 未适配 | 纯本机 hermesApi(App.tsx:1445 无 remote props) |
+| hermes WebUI(📊) | ❌ 未适配 | 纯本机 open_hermes_web_ui(App.tsx:2088) |
+
+**后端命令覆盖核对(src-tauri/src/remote/commands.rs):**
+- 已有远端命令:providers 全 CRUD/切换、sessions、MCP、prompts、skills、env 冲突扫描/清理、settings 读取、docker 容器列表、openclaw 默认模型、主机管理
+- **完全没有**:workspace 文件读写、hermes memory、openclaw env/tools/agents 配置的远端命令(`remote_workspace|remote_hermes|remote_openclaw_env|remote_openclaw_tools|remote_openclaw_agents` 全 src-tauri/src 无匹配)
+
+**缺口清单(按优先级):**
+1. **高**:openclaw 环境变量/工具/Agents + hermes 记忆 —— 远端下操作的是**本机**(静默错误:用户以为改了远端,实际改本机)
+2. **中**:openclaw 工作区(文件读写,工作量较大)
+3. **低**:hermes WebUI(远端无浏览器概念,建议远端下禁用/隐藏按钮)
+4. **低**:Skills 备份/恢复/更新(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
 
 ---
 
@@ -244,12 +273,14 @@
 | 事项 | 说明 |
 |---|---|
 | 广播模式 | 选中 N 台主机 + 本机,一键应用同一 Provider(真正的「一处配置、多机生效」) |
-| 密钥认证 | 支持私钥文件 `~/.ssh/id_*` / ssh-agent;数据模型已预留 `auth_method` 字段 |
+| 密钥认证 | 支持私钥文件 `~/.ssh/id_*` / ssh-agent;数据模型已预留 `auth_method` 字段(connection.rs Key 分支当前直接报错) |
 | `~/.ssh/config` 兼容 | 解析别名、ProxyJump/跳板机配置 |
-| 远端「发现」安装 Skills | skills.sh 市场搜索 → 安装到远端。**约束：远端不能连外网。**方案：cc-switch 本地下载 → 上传到远端 SSOT → `ln -s` |
-| 远端「从备份恢复」Skills | 本地备份 → 恢复到远端 SSOT |
+| ~~远端「发现」安装 Skills~~ | ✅ 已完成(2026-08-08 核实):`useInstallRemoteSkillFromDiscoverable`(useSkills.ts:186) + 后端 `install_remote_skill_from_discoverable`(commands.rs:2203) |
+| 远端「从备份恢复」Skills | 本地备份 → 恢复到远端 SSOT。**未完成**:前端 isRemote 时 no-op(UnifiedSkillsPanel.tsx:770-772) + 后端无 remote restore 命令 |
 | 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
-| 团队共享与审计 | 切换记录、操作日志、只读成员视图 |
+| 团队共享与审计 | 切换记录、操作日志、只读成员视图(host_switches 表未落地) |
+| ~~远程 Sessions per-app~~ | ✅ 已完成(2026-08-08 核实):hermes/opencode SQLite hybrid 已实现(commands.rs:1369-1457,直查远端 sqlite3) |
+| ~~get_remote_current_provider 兜底 per-app~~ | ✅ 已完成(2026-08-08 核实):claude/codex/gemini/grokbuild 四 app 均有 base_url 兜底(commands.rs:1188-1227) |
 
 ### 远端「live → 本机 DB」导入类能力对齐(2026-08-07 记录)
 
@@ -257,9 +288,9 @@
 
 | 事项 | 说明 |
 |---|---|
-| 远端空状态「导入」按钮(C3) | 本机:空列表「导入」读本机 live → DB。远端:按钮已置灰,待实现 `import_remote_opencode_providers_from_live` 等(读远端 opencode.json provider 段 → 导入本机 DB,标记 live_config_managed)后恢复启用;additive 3 app(opencode/openclaw/hermes)结构清晰优先做 |
-| 远端启动自动导入 | 本机每次启动 setup hook 幂等同步 live → DB(lib.rs:843,含 openclaw)。远端需:启动(或切换远端目标)时读远端 live → 导入本机 DB。**已黑盒验证本机行为**(手工加 provider → 重启出现) |
-| 远端批量同步(C4) | 本机 `sync_current_to_live` 在配置导入/云恢复时对 additive 同步全部 live-managed 供应商(live.rs:1281)。远端无对应命令;无独立按钮,属附带流程 |
+| ~~远端空状态「导入」按钮(C3)~~ | ✅ **已过时不需要**（2026-08-08 确认）：per-target 独立后远端面板数据源 = 远端 SSOT（读时自动从该远端 live 幂等同步），SSOT 不会空；按钮置灰是有意设计（自动导入已覆盖），无需实现"远端→本机 DB"导入 |
+| ~~远端启动自动导入~~ | ✅ **已完成**（2026-08-08 确认）：即 `sync_remote_live_into_ssot`（providers.rs:108）——每次读远端 SSOT 时自动从该远端 live 幂等同步（additive 全量 upsert / 非 additive 空库导入 default），对应本机启动导入语义 |
+| ~~远端批量同步(C4)~~ | ❌ **已过时不需要**（2026-08-08 确认）：per-target 独立后「把本机 current/live 同步到远端」违背独立语义（本机不自动注入远端，核心决策），无此需求 |
 
 ### per-target 独立供应商列表 + 切目标自动同步(2026-08-07 已实现 ✅)
 
@@ -344,12 +375,13 @@
 
 | 事项 | 说明 |
 |---|---|
-| `handleImport` 远端导入改用 `mergeImportedSkills` | 当前用 `[...old, ...installed]` 简单展开，本机用 `mergeImportedSkills` 按 id 去重；策略不一致 |
-| `useImportSkillsFromApps` 远端路径返回完整数据 | 当前只有 `{ name, path }`，缺少 description/directory 等；导致额外多了一次 `invalidateQueries`，本机不用 |
-| 远端「从市场安装」Skills | 功能缺失，本机有 `useInstallSkill` + `setQueryData` 即时更新 |
-| 远端「更新」Skill | 功能缺失，本机有 `useUpdateSkill` + `setQueryData` replace by id |
-| 技能安装/卸载 loading 提示多语言适配 | 当前硬编码中文 `"正在安装 skill..."` / `"正在卸载 skill..."`，英文/日文/繁中下也显示中文 |
-| 悬浮窗文案多语言 | 右键菜单「设置 / 隐藏悬浮窗」、设置页「固定当前位置」开关、悬浮窗面板硬编码中文（「刚刚 / x分钟前」「暂无数据」「从未更新」等）——统一 i18n，与其他改进一并处理（2026-08-06 用户要求先记录再统一做） |
+| ⚠️ **i18n 国际化未完成项（重点）** | 早期做了一部分（如技能安装/卸载 loading 已 i18n 化），**但仍有内容未完成、未走 t()**：① 悬浮窗全部文案硬编码中文（FloatingContextMenu「设置/隐藏」、FloatingPanel「刚刚/x分钟前/从未更新/暂无数据/已用/剩余/当前供应商/打开主界面/关闭悬浮窗」、FloatingBall「未设置」、FloatingWindowSettings「固定当前位置」）；② 主界面其他组件硬编码中文（toast/按钮/placeholder/tooltip 等，**具体残留位置待统一扫描确认**，2026-08-08 记录——用户反馈"早期做了一些没完成，具体内容忘了但确定有"）。处理方式：统一扫描 src/（含 src/floating/）全部硬编码中文 → 逐个走 t() + 四语 key |
+| `handleImport` 远端导入改用 `mergeImportedSkills` | ⚠️ 部分(2026-08-08 核实):hook onSuccess 已用 mergeImportedSkills,但 UnifiedSkillsPanel.tsx:509-510 远端分支仍 `[...old, ...installed]` 简单展开;远端数据仍缺 description(useSkills.ts:464-471) |
+| `useImportSkillsFromApps` 远端路径返回完整数据 | ⚠️ 部分(2026-08-08 核实):ZIP 路径已返回完整数据(useSkills.ts:566-591),目录导入仍缺 description,多余一次 invalidate |
+| ~~远端「从市场安装」Skills~~ | ✅ 已完成(2026-08-08 核实):`useInstallRemoteSkillFromDiscoverable` + `install_remote_skill_from_discoverable`,SkillsPage.tsx:171 已接入 |
+| 远端「更新」Skill | ❌ 未完成(2026-08-08 核实):无 updateRemoteSkill/update_remote_skill;前端远端隐藏更新入口(UnifiedSkillsPanel.tsx:1027) |
+| ~~技能安装/卸载 loading 提示多语言适配~~ | ✅ 已完成(2026-08-08 核实):已 i18n(UnifiedSkillsPanel.tsx:375/549 + 四语 key) |
+| 悬浮窗文案多语言 | ❌ 未完成(2026-08-08 核实):硬编码中文全部保留(FloatingContextMenu.tsx:33/38、FloatingPanel.tsx、FloatingBall.tsx:121、FloatingWindowSettings.tsx:48-49)——统一 i18n,与其他改进一并处理 |
 
 ### 模块④ 基座升级与工程 — 待完成
 
@@ -423,7 +455,7 @@
 | ✅ | 远程切换提速 + 前端对齐(2026-08-07) | 宿主机一次 exec 原子写(15~20 RTT→1)+ hash 机制预留 + mutation 同构 | 切换 ~10x 提速;isPending 防连点;EffectReport 一次返回当前供应商 |
 | ✅ | 远程 per-app 扩展·codex(2026-08-07) | switch_remote_provider 加 app 参数;codex 复用本机 catalog/unified/bearer/auth 全链路(产出逐字节一致);当前供应商记录 per-app | codex 远端切换生效,保留远端 auth.json 登录态;老记录兼容 |
 | ✅ | 目标选择器/安装检测全 app(2026-08-07) | TargetBreadcrumb 放开所有 app;check_local/remote_cli_installed(app) 参数化 | 所有 app 页可选服务器/容器;徽标动态显示「{App} 已安装/未安装」+ 按 app 安装命令 |
-| 🔄 | 悬浮窗样式与右键菜单 | 样式打磨 + 小球右键菜单 | 待做 |
+| ✅ | 悬浮窗样式与右键菜单 | 右键菜单已完成(FloatingContextMenu.tsx,2026-08-08 核实);样式打磨与「快捷切换/打开主界面」菜单增强待做 |
 | 🔄 | M6 | 打包测试(密钥认证延后) | 独立 exe + 前端运行 |
 
 ---
