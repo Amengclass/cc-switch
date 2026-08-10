@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use russh::client::{self, Handle};
+use russh::client::{self, ChannelOpenHandle, Handle, Msg};
+use russh::Channel;
 use russh_sftp::client::SftpSession;
 use tokio::io::AsyncReadExt;
 
@@ -23,6 +24,36 @@ impl client::Handler for RemoteHandler {
         _server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
         Ok(true)
+    }
+
+    /// 反向隧道：远端连上本机声明的 127.0.0.1:端口（即远端 localhost:15721）时，
+    /// 把该 SSH 通道桥接到本机对应端口（cc-switch 本地代理）。
+    /// 仅当本机对该连接发起过 tcpip_forward 时才会触发，不会干扰其他功能。
+    #[allow(clippy::too_many_arguments)]
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: Channel<Msg>,
+        connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        reply: ChannelOpenHandle,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        reply.accept().await;
+        let target = format!("{connected_address}:{connected_port}");
+        tokio::spawn(async move {
+            let upstream = match tokio::net::TcpStream::connect(&target).await {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("反向隧道桥接失败（本机 {target} 不可达: {e}）");
+                    return;
+                }
+            };
+            let (mut ssh_side, mut tcp_side) = (channel.into_stream(), upstream);
+            let _ = tokio::io::copy_bidirectional(&mut ssh_side, &mut tcp_side).await;
+        });
+        Ok(())
     }
 }
 
@@ -226,6 +257,19 @@ async fn connect_fresh(host: &RemoteHost, password: Option<&str>) -> Result<Arc<
         let sftp = SftpSession::new(stream)
             .await
             .map_err(|e| format!("初始化 SFTP 失败: {e}"))?;
+
+        // 走本机路由：在远端请求反向隧道（远端 localhost:15721 → 本机代理）。
+        // 失败不致命（远端可能禁用了端口转发），其余能力照常可用。
+        if host.route_through_local_proxy {
+            match channel.tcpip_forward("127.0.0.1", 15721).await {
+                Ok(port) => log::info!(
+                    "主机 {host_display} 已建立反向隧道：远端 127.0.0.1:{port} → 本机代理"
+                ),
+                Err(e) => log::warn!(
+                    "主机 {host_display} 反向隧道建立失败（本机路由不可用）: {e}"
+                ),
+            }
+        }
 
         Ok(Arc::new(RemoteSession { channel, sftp }))
     };

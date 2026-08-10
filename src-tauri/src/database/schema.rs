@@ -353,6 +353,7 @@ impl Database {
                 username TEXT NOT NULL,
                 auth_method TEXT NOT NULL DEFAULT 'password',
                 save_password BOOLEAN NOT NULL DEFAULT 1,
+                route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0,
                 created_at INTEGER,
                 updated_at INTEGER
             )",
@@ -409,6 +410,12 @@ impl Database {
         );
         let _ = conn.execute(
             "ALTER TABLE proxy_config ADD COLUMN non_streaming_timeout INTEGER NOT NULL DEFAULT 600",
+            [],
+        );
+
+        // 尝试添加"走本机路由"列到 remote_hosts 表（兼容旧库升级；新库建表已含该列）
+        let _ = conn.execute(
+            "ALTER TABLE remote_hosts ADD COLUMN route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0",
             [],
         );
 

@@ -14,7 +14,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, host, port, username, auth_method, save_password, created_at, updated_at
+                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at
                  FROM remote_hosts
                  ORDER BY created_at IS NULL, created_at, id",
             )
@@ -36,7 +36,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, host, port, username, auth_method, save_password, created_at, updated_at
+                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at
                  FROM remote_hosts WHERE id = ?1",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -57,8 +57,8 @@ impl Database {
         };
         conn.execute(
             "INSERT OR REPLACE INTO remote_hosts
-             (id, name, host, port, username, auth_method, save_password, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+             (id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 host.id,
                 host.name,
@@ -67,6 +67,7 @@ impl Database {
                 host.username,
                 auth,
                 host.save_password,
+                host.route_through_local_proxy,
                 host.created_at,
                 host.updated_at,
             ],
@@ -99,8 +100,9 @@ impl Database {
                 AuthMethod::Password
             },
             save_password: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
+            route_through_local_proxy: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     }
 }
@@ -118,6 +120,7 @@ mod tests {
             username: "root".to_string(),
             auth_method: AuthMethod::Password,
             save_password: true,
+            route_through_local_proxy: false,
             created_at: 1_000,
             updated_at: 1_000,
         }

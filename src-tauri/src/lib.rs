@@ -1623,6 +1623,7 @@ pub fn run() {
             remote::commands::clear_remote_provider_record,
             remote::commands::read_remote_settings,
             remote::commands::switch_remote_provider,
+        remote::commands::reapply_remote_provider,
             remote::commands::scan_remote_env_conflicts,
             remote::commands::clean_remote_env_conflicts,
             remote::commands::list_remote_sessions,

@@ -28,6 +28,8 @@ pub async fn apply_gemini_provider_settings(
     provider_name: &str,
     settings: &Value,
     provider: &Provider,
+    route_proxy: bool,
+    route_base: Option<&str>,
 ) -> Result<EffectReport, String> {
     let env_path = format!("{root}/.gemini/.env");
     let settings_path = format!("{root}/.gemini/settings.json");
@@ -36,7 +38,19 @@ pub async fn apply_gemini_provider_settings(
     let auth_type = detect_gemini_auth_type(provider);
 
     // ① .env：provider settings → env 键值 → .env 文本（复用本机纯函数）
-    let env_map = crate::gemini_config::json_to_env(settings).map_err(|e| e.to_string())?;
+    let mut env_map = crate::gemini_config::json_to_env(settings).map_err(|e| e.to_string())?;
+    if route_proxy {
+        // 走本机路由：与本机 gemini 接管逐字段一致（services::proxy 的
+        // takeover_live_config_strict gemini 分支）——base_url 指向远端隧道
+        // （宿主机=localhost；容器=网关 IP），token 用 PROXY_MANAGED 占位
+        // （本机代理转发时注入真实密钥）。
+        let base = route_base.unwrap_or("localhost");
+        env_map.insert(
+            "GOOGLE_GEMINI_BASE_URL".to_string(),
+            format!("http://{base}:15721"),
+        );
+        env_map.insert("GEMINI_API_KEY".to_string(), "PROXY_MANAGED".to_string());
+    }
     let env_text = crate::gemini_config::serialize_env_file(&env_map);
     match auth_type {
         GeminiAuthType::GoogleOfficial => {}

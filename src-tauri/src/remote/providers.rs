@@ -139,8 +139,11 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         if !auto_import_default && !ssot.providers.is_empty() {
             return Ok((0, Vec::new()));
         }
+        // live 当前生效配置已被 SSOT 里**任意一条**完全代表（含用户添加的
+        // 供应商，而非仅 id="default"）→ 幂等跳过，避免把「刚应用过的配置」
+        // 又重复导入出一条 default。
         let already_fresh = ssot.providers.iter().any(|p| {
-            p.id == "default" && p.settings_config == default.settings_config
+            p.settings_config == default.settings_config
         });
         if already_fresh {
             return Ok((0, Vec::new()));
@@ -375,6 +378,67 @@ async fn parse_remote_live_default<F: FileOps>(
     Ok(Some(provider))
 }
 
+/// 探测容器走本机路由所需的 base_url host：
+/// - host 网络 → `localhost`（容器共享宿主机回环，隧道直接可达）；
+/// - bridge / 自定义网络 → 返回网关 IP（容器访问宿主机的地址），并自动下发
+///   DNAT（docker0 进来的 15721 → 127.0.0.1:15721）让容器经网关打通隧道；
+/// - 探测失败 / 容器不存在 → `Ok(None)`（上层降级为直连）。
+async fn detect_container_route_base(
+    session: &crate::remote::connection::RemoteSession,
+    container: &str,
+) -> Result<Option<String>, String> {
+    let q = crate::remote::connection::shell_quote;
+    // 1. 网络模式（host / bridge / 自定义网络名）
+    let mode = crate::remote::connection::exec_command(
+        &session.channel,
+        &format!(
+            "docker inspect {} --format '{{{{.HostConfig.NetworkMode}}}}' 2>/dev/null || true",
+            q(container)
+        ),
+    )
+    .await?;
+    let mode = mode.trim();
+    if mode.is_empty() {
+        return Ok(None); // 容器不存在或 inspect 失败
+    }
+    if mode == "host" {
+        return Ok(Some("localhost".to_string()));
+    }
+    // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）
+    let net = if mode == "bridge" { "bridge" } else { mode };
+    let gw = crate::remote::connection::exec_command(
+        &session.channel,
+        &format!(
+            "docker network inspect {} --format '{{{{(index .IPAM.Config 0).Gateway}}}}' 2>/dev/null || true",
+            q(net)
+        ),
+    )
+    .await?;
+    let gw = gw.trim();
+    if gw.is_empty() || !gw.contains('.') {
+        return Ok(None);
+    }
+    // 3. 下发 DNAT（幂等），让容器经网关访问隧道
+    ensure_container_dnat(session).await?;
+    Ok(Some(gw.to_string()))
+}
+
+/// 在宿主机下发 DNAT：允许 docker0 网段经网关访问本机路由隧道（127.0.0.1:15721）。
+/// - `sysctl route_localnet=1`：允许 DNAT 到回环地址；
+/// - iptables PREROUTING（docker0 入口 15721 → 127.0.0.1:15721），`-C` 检查幂等。
+async fn ensure_container_dnat(
+    session: &crate::remote::connection::RemoteSession,
+) -> Result<(), String> {
+    crate::remote::connection::exec_command(
+        &session.channel,
+        "sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true",
+    )
+    .await?;
+    let rule = "iptables -t nat -C PREROUTING -i docker0 -p tcp --dport 15721 -j DNAT --to-destination 127.0.0.1:15721 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -p tcp --dport 15721 -j DNAT --to-destination 127.0.0.1:15721 >/dev/null 2>&1 || true";
+    crate::remote::connection::exec_command(&session.channel, rule).await?;
+    Ok(())
+}
+
 /// 把 provider 定义应用到远端对应 app 的 live 文件（复用各 remote::*::apply_*
 /// 纯变换，产出与本机切换逐字节一致）。claude 分支与本机一致走
 /// `build_effective_settings_with_common_config`（通用配置片段来自本机 DB）。
@@ -386,7 +450,27 @@ pub async fn apply_remote_provider_to_live(
     host_name: &str,
     app: &str,
     provider: &Provider,
+    route_proxy: bool,
 ) -> Result<crate::remote::effect::EffectReport, String> {
+    // 走本机路由的 base_url host 解析：
+    // - 宿主机目标：localhost（隧道监听在宿主机回环）；
+    // - 容器目标：探测网络模式——host → localhost（共享宿主机回环）；
+    //   bridge/自定义 → 网关 IP（容器访问宿主机的地址）+ 自动下发 DNAT
+    //   打通 docker0 → 隧道；探测失败则降级直连（避免写出无效 base_url）。
+    let route_base = if !route_proxy {
+        None
+    } else if let Some(c) = container.as_deref() {
+        match detect_container_route_base(session, c).await {
+            Ok(base) => base,
+            Err(e) => {
+                log::warn!("[remote] 容器 {c} 走本机路由探测失败: {e}，按直连写入");
+                None
+            }
+        }
+    } else {
+        Some("localhost".to_string())
+    };
+    let route_proxy = route_base.is_some();
     match app {
         "claude" => {
             let effective =
@@ -396,8 +480,30 @@ pub async fn apply_remote_provider_to_live(
                     provider,
                 )
                 .map_err(|e| e.to_string())?;
-            let sanitized =
+            let mut sanitized =
                 crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
+            if route_proxy {
+                // 走本机路由：远端 claude 的 live 与本机路由模式逐字节一致——
+                // base_url 指向远端隧道（宿主机=localhost；容器=网关 IP），
+                // token 用 PROXY_MANAGED 占位（本机代理转发时注入真实密钥）。
+                let obj = sanitized
+                    .as_object_mut()
+                    .ok_or_else(|| "sanitized settings 不是对象".to_string())?;
+                let env = obj
+                    .entry("env")
+                    .or_insert_with(|| serde_json::json!({}));
+                if let Some(e) = env.as_object_mut() {
+                    let base = route_base.as_deref().unwrap_or("localhost");
+                    e.insert(
+                        "ANTHROPIC_BASE_URL".to_string(),
+                        serde_json::json!(format!("http://{base}:15721")),
+                    );
+                    e.insert(
+                        "ANTHROPIC_AUTH_TOKEN".to_string(),
+                        serde_json::json!("PROXY_MANAGED"),
+                    );
+                }
+            }
             crate::remote::settings::apply_provider_settings(
                 session,
                 container,
@@ -409,26 +515,62 @@ pub async fn apply_remote_provider_to_live(
             .await
         }
         "codex" => {
+            let settings = if route_proxy {
+                // 走本机路由：base_url 指向远端隧道（宿主机=localhost；容器=网关 IP），
+                // 复用本机同一变换 apply_codex_official_proxy_route，保持与本机一致。
+                let mut s = provider.settings_config.clone();
+                if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
+                    let base = route_base.as_deref().unwrap_or("localhost");
+                    let routed = crate::codex_config::apply_codex_official_proxy_route(
+                        config,
+                        &format!("http://{base}:15721/v1"),
+                    )
+                    .map_err(|e| e.to_string())?;
+                    s["config"] = serde_json::json!(routed);
+                }
+                s
+            } else {
+                provider.settings_config.clone()
+            };
             crate::remote::codex::apply_codex_provider_settings(
                 session,
                 container,
                 home,
                 host_name,
                 &provider.name,
-                &provider.settings_config,
+                &settings,
                 provider.category.as_deref(),
                 crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
             )
             .await
         }
         "grokbuild" => {
+            let settings = if route_proxy {
+                // 走本机路由：直接复用本机代理接管的同一变换
+                // （base_url 指向远端隧道：宿主机=localhost；容器=网关 IP +
+                // api_key 占位 + api_backend=responses），与本机产物逐字段一致。
+                let mut s = provider.settings_config.clone();
+                if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
+                    let base = route_base.as_deref().unwrap_or("localhost");
+                    let routed = crate::grok_config::apply_proxy_takeover(
+                        config,
+                        &format!("http://{base}:15721/grokbuild/v1"),
+                        "PROXY_MANAGED",
+                    )
+                    .map_err(|e| e.to_string())?;
+                    s["config"] = serde_json::json!(routed);
+                }
+                s
+            } else {
+                provider.settings_config.clone()
+            };
             crate::remote::grok::apply_grok_provider_settings(
                 session,
                 container,
                 home,
                 host_name,
                 &provider.name,
-                &provider.settings_config,
+                &settings,
                 provider.category.as_deref(),
             )
             .await
@@ -442,6 +584,8 @@ pub async fn apply_remote_provider_to_live(
                 &provider.name,
                 &provider.settings_config,
                 provider,
+                route_proxy,
+                route_base.as_deref(),
             )
             .await
         }

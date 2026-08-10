@@ -11,6 +11,28 @@ use crate::fsops::FileOps as _;
 use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, credentials, AuthMethod, RemoteHost};
+
+/// 计算实际生效的 route_proxy：
+/// - DB 意图（route_through_local_proxy）为 false → false；
+/// - 意图为 true 但本机路由未运行 → 降级为直连（避免把 base_url 写成
+///   指向无接收方隧道的地址导致远端不可用），并记 warning；
+/// - 意图为 true 且本机路由运行中 → true。
+async fn effective_route_proxy(
+    proxy_service: &crate::services::proxy::ProxyService,
+    desired: bool,
+) -> bool {
+    if !desired {
+        return false;
+    }
+    if proxy_service.is_running().await {
+        true
+    } else {
+        log::warn!(
+            "[remote] 本机路由未运行，「走本机路由」不生效，本次切换按直连写入"
+        );
+        false
+    }
+}
 use crate::store::AppState;
 
 /// 内嵌的远端 SQLite helper（musl 静态，x86_64 / aarch64）。
@@ -297,6 +319,7 @@ pub async fn test_remote_connection_info(
         username,
         auth_method: AuthMethod::Password,
         save_password: false,
+        route_through_local_proxy: false,
         created_at: 0,
         updated_at: 0,
     };
@@ -725,6 +748,7 @@ pub async fn add_remote_provider(
             &host.name,
             &app,
             p,
+            effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
         )
         .await?;
         if !additive {
@@ -867,6 +891,7 @@ pub async fn update_remote_provider(
             &host.name,
             &app,
             p,
+            effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
         )
         .await?;
         let _ = crate::remote::current::save_current_provider(&host_id, &app, &provider_id_after);
@@ -1026,6 +1051,7 @@ pub async fn switch_remote_provider(
         &host.name,
         &app,
         &provider,
+        effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
     )
     .await?;
 
@@ -1093,6 +1119,100 @@ pub async fn switch_remote_provider(
     let mut report = report;
     report.current_provider_id = Some(provider_id.clone());
 
+    Ok(report)
+}
+
+/// 重新应用该远端目标「当前生效供应商」到 live（对齐本机「开关即生效」语义）。
+/// 用于「走本机路由」开关开启/关闭时，把当前供应商按新意图立即重写 live，
+/// 无需用户再手动切一次供应商（含容器网络探测/DNAT 下发）。
+#[tauri::command]
+pub async fn reapply_remote_provider(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    container: Option<String>,
+) -> Result<EffectReport, String> {
+    // additive 无「当前供应商」概念且不走路由改写，直接返回空报告
+    if crate::remote::providers::is_additive_app(&app) {
+        return Ok(EffectReport {
+            target: String::new(),
+            provider_name: String::new(),
+            current_provider_id: None,
+            conflicts_cleaned: 0,
+            notes: Vec::new(),
+        });
+    }
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    // 当前供应商：SSOT current 优先，fallback 本地持久化记录
+    let provider_id = ssot
+        .current_provider_id
+        .clone()
+        .or_else(|| {
+            crate::remote::current::get_current_provider(&host_id, &app)
+                .ok()
+                .flatten()
+        })
+        .ok_or_else(|| {
+            format!(
+                "远端「{}」的 {app} 当前没有生效供应商，无需重新应用",
+                host.name
+            )
+        })?;
+    let provider = ssot
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "当前供应商 '{provider_id}' 不在远端「{}」的配置中",
+                host.name
+            )
+        })?;
+
+    let report = crate::remote::providers::apply_remote_provider_to_live(
+        state.db.as_ref(),
+        &session,
+        container.as_deref(),
+        &home,
+        &host.name,
+        &app,
+        &provider,
+        effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
+    )
+    .await?;
+
+    // MCP 投影（与 switch 一致，避免整文件覆盖后 MCP 失效），失败降级为警告
+    let reproject = match container.as_deref() {
+        Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
+            Ok(ops) => crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await,
+            Err(e) => Err(e),
+        },
+        None => {
+            let ops = crate::fsops::RemoteSftpFileOps {
+                sftp: &session.sftp,
+            };
+            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
+        }
+    };
+    if let Err(e) = reproject {
+        log::warn!(
+            "[remote] 重新应用 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}"
+        );
+    }
+
+    let mut report = report;
+    report.current_provider_id = Some(provider_id);
     Ok(report)
 }
 

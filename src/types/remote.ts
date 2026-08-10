@@ -10,6 +10,7 @@ export interface RemoteHost {
   username: string;
   authMethod: RemoteAuthMethod;
   savePassword: boolean;
+  routeThroughLocalProxy: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -32,6 +33,7 @@ export interface RemoteHostDraft {
   username: string;
   authMethod: RemoteAuthMethod;
   savePassword: boolean;
+  routeThroughLocalProxy: boolean;
   password?: string;
 }
 

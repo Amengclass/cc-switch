@@ -92,6 +92,7 @@ import { UpdateBadge } from "@/components/UpdateBadge";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
 import { ProxyToggle } from "@/components/proxy/ProxyToggle";
 import { ClaudeDesktopRouteToggle } from "@/components/proxy/ClaudeDesktopRouteToggle";
+import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
 import { FailoverToggle } from "@/components/proxy/FailoverToggle";
 import UsageScriptModal from "@/components/UsageScriptModal";
 import UnifiedMcpPanel from "@/components/mcp/UnifiedMcpPanel";
@@ -1526,7 +1527,10 @@ function App() {
                       isLoading={isLoading}
                       isProxyRunning={isProxyRunning}
                       isProxyTakeover={
-                        isProxyRunning && isCurrentAppTakeoverActive
+                        !remoteTargetId &&
+                        !remoteContainerId &&
+                        isProxyRunning &&
+                        isCurrentAppTakeoverActive
                       }
                       isSwitching={
                         remoteTargetId
@@ -1860,7 +1864,31 @@ function App() {
                   className="flex shrink-0 items-center gap-1.5"
                   style={{ WebkitAppRegion: "no-drag" } as any}
                 >
-                  {activeApp === "claude-desktop" ? (
+                  {remoteContainerId ? (
+                    <RemoteRouteToggle
+                      container
+                      host={servers.find((s) => s.id === remoteTargetId)}
+                      activeApp={activeApp}
+                      appForApi={sharedFeatureApp}
+                      containerId={remoteContainerId}
+                      onUpdated={(h) =>
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        )
+                      }
+                    />
+                  ) : remoteTargetId ? (
+                    <RemoteRouteToggle
+                      host={servers.find((s) => s.id === remoteTargetId)}
+                      activeApp={activeApp}
+                      appForApi={sharedFeatureApp}
+                      onUpdated={(h) =>
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        )
+                      }
+                    />
+                  ) : activeApp === "claude-desktop" ? (
                     <ClaudeDesktopRouteToggle />
                   ) : (
                     settingsData?.enableLocalProxy && (

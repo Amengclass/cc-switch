@@ -64,6 +64,8 @@ pub struct RemoteHost {
     pub auth_method: AuthMethod,
     /// 是否把密码保存进系统钥匙串(用于下次一键连接)。
     pub save_password: bool,
+    /// 走本机路由：切换时把远端 base_url 指向本机代理（经 SSH 反向隧道）。
+    pub route_through_local_proxy: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

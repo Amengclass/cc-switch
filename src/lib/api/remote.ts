@@ -106,6 +106,22 @@ export async function switchRemoteProvider(
   });
 }
 
+/**
+ * 重新应用远端目标「当前生效供应商」到 live（对齐本机「开关即生效」语义）。
+ * 「走本机路由」开关开启/关闭时调用，立即按新意图重写 live，无需再手动切一次。
+ */
+export async function reapplyRemoteProvider(
+  hostId: string,
+  app: string,
+  container?: string,
+): Promise<EffectReport> {
+  return invoke<EffectReport>("reapply_remote_provider", {
+    hostId,
+    app,
+    container: container ?? null,
+  });
+}
+
 /** 远程目标下测试 Provider 连通性（经 SSH 在远端 curl base_url，真实反映远端网络） */
 export async function testRemoteProviderConnection(
   hostId: string,

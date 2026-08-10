@@ -64,6 +64,7 @@ interface HostFormState {
   username: string;
   password: string;
   savePassword: boolean;
+  routeThroughLocalProxy: boolean;
 }
 
 const EMPTY_FORM: HostFormState = {
@@ -73,6 +74,7 @@ const EMPTY_FORM: HostFormState = {
   username: "",
   password: "",
   savePassword: true,
+  routeThroughLocalProxy: false,
 };
 
 function formToDraft(f: HostFormState) {
@@ -84,6 +86,7 @@ function formToDraft(f: HostFormState) {
     username: f.username.trim(),
     authMethod: "password" as const,
     savePassword: f.savePassword,
+    routeThroughLocalProxy: f.routeThroughLocalProxy,
     password: f.password,
   };
 }
@@ -170,6 +173,7 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       username: host.username,
       password: "",
       savePassword: host.savePassword,
+      routeThroughLocalProxy: host.routeThroughLocalProxy,
     });
     setFormOpen(true);
   };
@@ -205,6 +209,7 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       username: draft.username,
       authMethod: draft.authMethod,
       savePassword: draft.savePassword,
+      routeThroughLocalProxy: draft.routeThroughLocalProxy,
       createdAt: editing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -812,6 +817,30 @@ export function RemoteHostsPanel({ app }: { app: string }) {
                   onCheckedChange={(v) => setForm({ ...form, savePassword: v })}
                   // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
                   disabled={!editing && !form.password}
+                />
+              </div>
+              {/* 走本机路由 - 轻量行内样式 */}
+              <div className="flex items-center justify-between py-2">
+                <div className="space-y-0.5">
+                  <Label
+                    className={`text-sm font-normal ${form.routeThroughLocalProxy ? "text-foreground/80" : "text-muted-foreground/60"}`}
+                  >
+                    {t("remote.routeThroughLocalProxy", {
+                      defaultValue: "走本机路由",
+                    })}
+                  </Label>
+                  <p className="text-xs text-muted-foreground/70">
+                    {t("remote.routeThroughLocalProxyHint", {
+                      defaultValue:
+                        "开启后，这台机器的 Claude / Codex / Gemini / Grok 供应商会经反向隧道使用你本机正在运行的代理；需本机路由已开启",
+                    })}
+                  </p>
+                </div>
+                <Switch
+                  checked={form.routeThroughLocalProxy}
+                  onCheckedChange={(v) =>
+                    setForm({ ...form, routeThroughLocalProxy: v })
+                  }
                 />
               </div>
             </div>
