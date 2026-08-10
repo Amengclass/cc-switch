@@ -112,5 +112,6 @@ pub async fn apply_hermes_provider_settings(
             format!("已更新远端 {config_path} 的 custom_providers.{provider_id}"),
             "新建的 Hermes 会话立即生效".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

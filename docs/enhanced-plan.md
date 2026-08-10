@@ -80,6 +80,25 @@
   `cli_binary_for_app` 映射(claude/codex/gemini/grokbuild→grok/opencode/openclaw/hermes);
   前端徽标动态显示「{App} 已安装/未安装」+ 按 app 给安装命令(`APP_INSTALL_CMDS`)
 
+### 远端路由/接管(走本机代理,2026-08-11)
+
+> 宿主机/容器上的 app 经 SSH 反向隧道走**本机**代理(模型映射/格式转换),与本机「接管」语义对齐。
+
+- **反向隧道对账(不重建连接)**:`tcpip_forward`/`cancel_tcpip_forward` 在**取连接时按宿主当前意图对账**——
+  开→补隧道、关→撤隧道,全程复用池内连接、不断线;开关命令立即对账 + 取连接兜底对账双保险
+- **隧道端口动态化**:读 `ProxyStatus.port`(默认 15721),隧道/base_url/DNAT 三处统一同一端口
+- **per-container DNAT**:容器走路由时按容器 IP(`-s <ip>`)下发独立 DNAT 规则,只影响该容器;
+  容器切回直连按 IP 精确删除;host 网络容器无需 DNAT(共享宿主机回环)
+- **容器×app 独立接管开关**:`remote_hosts.route_proxy_container_apps`(`{"<容器>":{"claude":true}}`),
+  宿主机/容器A/容器B 三者开关互不影响;切换按目标分流读取(`route_proxy_for_target`)
+- **隧道失败降级 + 回退 + 提示**:写 live 前检查 `session.tunnel_is_active()`——隧道未建立(如 sshd
+  禁了 `AllowTcpForwarding`)→ 按直连写入 + `EffectReport.warnings` 醒目提示 + **DB 开关回退为 false**
+  (reapply 与 switch 双路径一致)
+- **远端目标隐藏 Claude Desktop**:远端无此应用,AppSwitcher 过滤 claude-desktop tab + 切远端自动跳回 claude
+- **进程生命周期**:任一 app 远端接管(含容器)开启 → 自动拉起本机代理;全关 → 自动停止(any_route_consumer
+  含容器判断,stop_with_restore 连容器字段一起清空并异步重写远端直连)
+- **宿主机仅需开放 22 端口**:隧道复用 SSH 连接,15721 由 sshd 监听在回环,无需额外开放端口
+
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
 - 编辑当前供应商保存后原子写回远端
@@ -222,6 +241,7 @@
 | 安装检测全 app(08-07) | `check_remote_cli_installed(app)` / `check_local_cli_installed(app)` + `cli_binary_for_app` 映射;徽标动态「{App} 已安装/未安装」+ `APP_INSTALL_CMDS` 按 app 给安装命令 |
 | **全 app 远程切换(08-07)** | gemini(.env+settings.json 读-改-写)/grokbuild(TOML)/opencode(additive upsert)/openclaw(JSON5)/hermes(YAML) 五个分支,全部复用本机纯变换产出一致;connection 加 read_remote_text(exec cat,容器兼容) |
 | 功能按钮远端适配(08-07) | 卡片测试按钮经 SSH 在远端 curl base_url(复用 resolve_base_url);删除 remove 清远端 live(additive 3 app)/delete 只删 DB+清远端记录(对齐本机) |
+| 远端路由/接管(08-11) | 反向隧道按意图对账(不重建连接)+ 端口动态化;per-container DNAT(按容器 IP);容器×app 独立接管开关(`route_proxy_container_apps`);隧道失败降级直连 + warnings 提示 + 开关回退(reapply/switch 双路径);远端隐藏 claude-desktop;宿主机仅需 22 端口 |
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
 
 ### ⏳ 远程·待完成(优先级从高到低)

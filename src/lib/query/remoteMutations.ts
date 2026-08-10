@@ -110,6 +110,12 @@ export const useSwitchRemoteProviderMutation = (
         });
       }
       toast.success(switchMessage, { closeButton: true });
+      // 追加展示后端警告（如「远端接管已开启但隧道未建立，按直连写入」）
+      if (report.warnings && report.warnings.length > 0) {
+        report.warnings.forEach((warning) => {
+          toast.warning(warning, { closeButton: true, duration: 8000 });
+        });
+      }
     },
     onError: (error: Error) => {
       const detail = extractErrorMessage(error) || t("common.unknown");

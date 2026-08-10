@@ -1238,6 +1238,16 @@ pub async fn switch_remote_provider(
         log::warn!("[remote] 切换 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}");
     }
 
+    // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
+    revert_route_switch_on_tunnel_failure(
+        &state,
+        &report,
+        &host_id,
+        container.as_deref(),
+        &app,
+    )
+    .await;
+
     // 直接带上前端需要的当前供应商 id，避免前端再调一次 get_remote_current_provider
     let mut report = report;
     report.current_provider_id = Some(provider_id.clone());
@@ -1263,6 +1273,7 @@ pub async fn reapply_remote_provider(
             current_provider_id: None,
             conflicts_cleaned: 0,
             notes: Vec::new(),
+            warnings: Vec::new(),
         });
     }
     let host = load_host(&state, &host_id)?;
@@ -1335,9 +1346,47 @@ pub async fn reapply_remote_provider(
         );
     }
 
+    // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
+    revert_route_switch_on_tunnel_failure(
+        &state,
+        &report,
+        &host_id,
+        container.as_deref(),
+        &app,
+    )
+    .await;
+
     let mut report = report;
     report.current_provider_id = Some(provider_id);
     Ok(report)
+}
+
+/// 隧道未建立（report.warnings 非空）时回退该目标的远端接管开关（DB 置 false），
+/// 避免 UI 显示已开但实际按直连写入。reapply 与 switch 共用，行为一致。
+async fn revert_route_switch_on_tunnel_failure(
+    state: &AppState,
+    report: &crate::remote::effect::EffectReport,
+    host_id: &str,
+    container: Option<&str>,
+    app: &str,
+) {
+    if report.warnings.is_empty() {
+        return;
+    }
+    let Ok(Some(mut host)) = state.db.get_remote_host(host_id) else {
+        return;
+    };
+    if let Some(c) = container {
+        if let Some(m) = host.route_proxy_container_apps.get_mut(c) {
+            m.insert(app.to_string(), false);
+        }
+    } else {
+        host.route_proxy_apps.insert(app.to_string(), false);
+    }
+    host.updated_at = chrono::Utc::now().timestamp_millis();
+    if let Err(e) = state.db.upsert_remote_host(&host) {
+        log::warn!("[remote] 回退远端接管开关失败: {e}");
+    }
 }
 
 /// 扫描远端 shell 配置中的冲突环境变量（ANTHROPIC_* 名单）。

@@ -49,5 +49,6 @@ pub async fn apply_grok_provider_settings(
             format!("已整文件覆盖远端 {config_path}"),
             "新建的 Grok Build 会话立即生效".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

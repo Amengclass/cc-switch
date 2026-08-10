@@ -86,5 +86,6 @@ pub async fn apply_opencode_provider_settings(
             format!("已更新远端 {config_path} 的 provider.{provider_id}"),
             "新建的 OpenCode 会话立即生效".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

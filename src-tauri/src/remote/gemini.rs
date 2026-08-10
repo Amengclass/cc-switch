@@ -117,5 +117,6 @@ pub async fn apply_gemini_provider_settings(
             format!("已整文件覆盖远端 {settings_path}"),
             "新建的 Gemini 会话立即生效".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

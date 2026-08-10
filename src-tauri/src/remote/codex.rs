@@ -101,5 +101,6 @@ pub async fn apply_codex_provider_settings(
         current_provider_id: None,
         conflicts_cleaned: 0,
         notes,
+        warnings: Vec::new(),
     })
 }

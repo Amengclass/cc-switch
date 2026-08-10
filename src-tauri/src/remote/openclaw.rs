@@ -76,5 +76,6 @@ pub async fn apply_openclaw_provider_settings(
             format!("已更新远端 {config_path} 的 models.providers.{provider_id}"),
             "新建的 OpenClaw 会话立即生效".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

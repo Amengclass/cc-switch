@@ -18,4 +18,7 @@ pub struct EffectReport {
     pub conflicts_cleaned: usize,
     /// 面向用户的生效方式说明(每条一句,前端逐条展示)。
     pub notes: Vec<String>,
+    /// 需要用户注意的警告（如「隧道未建立，按直连写入」），前端以 warning 样式展示。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }

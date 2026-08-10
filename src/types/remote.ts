@@ -49,6 +49,8 @@ export interface EffectReport {
   currentProviderId?: string | null;
   conflictsCleaned: number;
   notes: string[];
+  /** 需要用户注意的警告（如「隧道未建立，按直连写入」），前端以 warning 样式展示 */
+  warnings?: string[];
 }
 
 /** 远端 shell 配置中的冲突环境变量 */

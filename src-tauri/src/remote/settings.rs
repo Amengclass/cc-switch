@@ -62,5 +62,6 @@ pub async fn apply_provider_settings(
             "新建的 Claude Code 会话立即生效".to_string(),
             "已在运行的会话按热重载生效；若远端 shell 存在冲突环境变量，建议清理后重新登录终端".to_string(),
         ],
+        warnings: Vec::new(),
     })
 }

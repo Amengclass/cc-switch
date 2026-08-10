@@ -521,6 +521,21 @@ pub async fn apply_remote_provider_to_live(
     // - 容器目标：探测网络模式——host → localhost（共享宿主机回环）；
     //   bridge/自定义 → 网关 IP（容器访问宿主机的地址）+ per-container DNAT
     //   打通 docker0 → 隧道；探测失败则降级直连（避免写出无效 base_url）。
+    // 隧道检查：意图走路由但反向隧道未建成（远端禁了端口转发等）→ 降级直连，
+    // 并追加提示 notes，让用户知道「开了接管但没走路由」。
+    let route_proxy_was = route_proxy;
+    let tunnel_ok = if route_proxy {
+        session.tunnel_is_active()
+    } else {
+        true
+    };
+    if route_proxy && !tunnel_ok {
+        log::warn!(
+            "[remote] 主机 {} 反向隧道未建立，「远端接管」不生效，本次按直连写入",
+            host_name
+        );
+    }
+    let route_proxy = route_proxy && tunnel_ok;
     let route_base = if !route_proxy {
         // 直连态：撤掉该容器先前走路由时下发的 per-container DNAT（幂等）
         if let Some(c) = container.as_deref() {
@@ -547,7 +562,7 @@ pub async fn apply_remote_provider_to_live(
         Some("localhost".to_string())
     };
     let route_proxy = route_base.is_some();
-    match app {
+    let report = match app {
         "claude" => {
             let effective =
                 crate::services::provider::live::build_effective_settings_with_common_config(
@@ -702,7 +717,15 @@ pub async fn apply_remote_provider_to_live(
             .await
         }
         other => Err(format!("远程切换暂不支持应用: {other}")),
+    }?;
+    // 隧道未建立而降级直连时，把原因追加进 warnings 让前端以醒目样式提示用户
+    let mut report = report;
+    if route_proxy_was && !tunnel_ok {
+        report.warnings.push(format!(
+            "「{host_name}」的远端接管已开启，但反向隧道未建立（远端可能禁用了端口转发），本次按直连写入；请检查远端 sshd 的 AllowTcpForwarding"
+        ));
     }
+    Ok(report)
 }
 
 /// 读远端 additive live 文件中的供应商 ID 集合（isInConfig 按钮态用）。

@@ -96,6 +96,15 @@ pub fn shell_quote(s: &str) -> String {
 }
 
 impl RemoteSession {
+    /// 反向隧道是否已成功建立（远端 127.0.0.1:port → 本机代理）。
+    /// 供切换判定用：意图走路由但隧道未建时，应降级直连并提示用户。
+    pub fn tunnel_is_active(&self) -> bool {
+        match self.tunnel_active.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
+    }
+
     /// 按宿主当前意图对账反向隧道（远端 127.0.0.1:15721 → 本机代理）：
     /// - 意图要隧道且未建 → 补发 tcpip_forward；
     /// - 意图不要隧道且已建 → 撤销 cancel_tcpip_forward；
