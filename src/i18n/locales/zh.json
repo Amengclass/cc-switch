@@ -344,8 +344,8 @@
       "proxy": {
         "title": "本地路由",
         "description": "控制路由服务开关、查看状态与端口信息",
-        "enableFeature": "在主页面显示本地路由开关",
-        "enableFeatureDescription": "开启后，主页面顶部将显示路由和故障转移开关",
+        "enableFeature": "在主页面显示应用接管开关",
+        "enableFeatureDescription": "开启后，主页面顶部将显示各应用的接管开关（让该应用请求走本地代理）",
         "enableFailoverToggle": "在主页面显示故障转移开关",
         "enableFailoverToggleDescription": "开启后，主页面顶部将独立显示故障转移开关",
         "running": "运行中",
@@ -2683,14 +2683,14 @@
     },
     "switchFailed": "切换失败: {{error}}",
     "takeover": {
-      "hint": "选择要路由的应用，启用后该应用的请求将通过本地路由转发",
-      "enabled": "{{app}} 路由已启用",
-      "disabled": "{{app}} 路由已关闭",
-      "failed": "切换路由状态失败: {{detail}}",
+      "hint": "仅影响本机应用。选择要路由的本机应用，启用后该应用的请求将通过本地路由转发；远端接管请在对应主机目标下配置",
+      "enabled": "{{app}} 接管已启用",
+      "disabled": "{{app}} 接管已关闭",
+      "failed": "切换接管状态失败: {{detail}}",
       "tooltip": {
-        "active": "{{appLabel}} 路由中 - {{address}}:{{port}}\n切换该应用供应商为热切换",
-        "broken": "{{appLabel}} 路由中，但路由服务未运行",
-        "inactive": "路由 {{appLabel}} 的请求，让该应用请求走本地路由"
+        "active": "{{appLabel}} 接管中 - {{address}}:{{port}}\n切换该应用供应商为热切换",
+        "broken": "{{appLabel}} 接管中，但代理服务未运行",
+        "inactive": "接管 {{appLabel}} 的请求，让该应用请求走本地代理"
       }
     },
     "failover": {
@@ -2782,7 +2782,7 @@
   },
   "proxyConfig": {
     "proxyEnabled": "路由总开关",
-    "appTakeover": "路由启用",
+    "appTakeover": "本机应用接管启用",
     "perAppConfig": "应用配置",
     "circuitBreaker": "熔断器配置",
     "circuitBreakerSettings": "熔断器设置",

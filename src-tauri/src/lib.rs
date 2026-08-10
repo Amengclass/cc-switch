@@ -1617,6 +1617,7 @@ pub fn run() {
             remote::commands::test_remote_connection,
             remote::commands::test_remote_connection_info,
             remote::commands::set_remote_openclaw_default_model,
+            remote::commands::set_remote_route_proxy_app,
             remote::commands::probe_hosts_online,
             remote::commands::test_remote_provider_connection,
             remote::commands::remove_remote_provider_from_live,

@@ -381,12 +381,16 @@ async fn parse_remote_live_default<F: FileOps>(
 /// 探测容器走本机路由所需的 base_url host：
 /// - host 网络 → `localhost`（容器共享宿主机回环，隧道直接可达）；
 /// - bridge / 自定义网络 → 返回网关 IP（容器访问宿主机的地址），并自动下发
-///   DNAT（docker0 进来的 15721 → 127.0.0.1:15721）让容器经网关打通隧道；
+///   **per-container DNAT**（`-s <容器IP>` 限定源，只影响该容器）让容器经网关
+///   打通隧道；
 /// - 探测失败 / 容器不存在 → `Ok(None)`（上层降级为直连）。
+///
+/// 返回 `(base_host, 容器IP)`；容器 IP 供后续按容器精确删除 DNAT。
 async fn detect_container_route_base(
     session: &crate::remote::connection::RemoteSession,
     container: &str,
-) -> Result<Option<String>, String> {
+    port: u16,
+) -> Result<Option<(String, String)>, String> {
     let q = crate::remote::connection::shell_quote;
     // 1. 网络模式（host / bridge / 自定义网络名）
     let mode = crate::remote::connection::exec_command(
@@ -402,7 +406,7 @@ async fn detect_container_route_base(
         return Ok(None); // 容器不存在或 inspect 失败
     }
     if mode == "host" {
-        return Ok(Some("localhost".to_string()));
+        return Ok(Some(("localhost".to_string(), String::new())));
     }
     // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）
     let net = if mode == "bridge" { "bridge" } else { mode };
@@ -418,24 +422,83 @@ async fn detect_container_route_base(
     if gw.is_empty() || !gw.contains('.') {
         return Ok(None);
     }
-    // 3. 下发 DNAT（幂等），让容器经网关访问隧道
-    ensure_container_dnat(session).await?;
-    Ok(Some(gw.to_string()))
+    // 3. 拿容器自身 IP（per-container DNAT 的源限定）
+    let ip = crate::remote::connection::exec_command(
+        &session.channel,
+        &format!(
+            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' 2>/dev/null || true",
+            q(container)
+        ),
+    )
+    .await?;
+    let ip = ip.trim();
+    if ip.is_empty() || !ip.contains('.') {
+        return Ok(None);
+    }
+    // 4. 下发 per-container DNAT（幂等），让该容器经网关访问隧道
+    ensure_container_dnat(session, ip, port).await?;
+    Ok(Some((gw.to_string(), ip.to_string())))
 }
 
-/// 在宿主机下发 DNAT：允许 docker0 网段经网关访问本机路由隧道（127.0.0.1:15721）。
+/// 取容器的 IP（用于 per-container DNAT 精确删除）。失败/无 IP 返回 None。
+async fn container_ip(
+    session: &crate::remote::connection::RemoteSession,
+    container: &str,
+) -> Option<String> {
+    let q = crate::remote::connection::shell_quote;
+    let out = crate::remote::connection::exec_command(
+        &session.channel,
+        &format!(
+            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' 2>/dev/null || true",
+            q(container)
+        ),
+    )
+    .await
+    .ok()?;
+    let ip = out.trim();
+    if ip.is_empty() || !ip.contains('.') {
+        None
+    } else {
+        Some(ip.to_string())
+    }
+}
+
+/// 在宿主机下发 **per-container** DNAT：仅把该容器（源 IP 限定）发往
+/// 网关端口的流量转到本机路由隧道（127.0.0.1:{port}）。
 /// - `sysctl route_localnet=1`：允许 DNAT 到回环地址；
-/// - iptables PREROUTING（docker0 入口 15721 → 127.0.0.1:15721），`-C` 检查幂等。
+/// - iptables PREROUTING（`-i docker0 -s <ip>` 入口 {port} → 127.0.0.1:{port}），`-C` 检查幂等。
 async fn ensure_container_dnat(
     session: &crate::remote::connection::RemoteSession,
+    container_ip: &str,
+    port: u16,
 ) -> Result<(), String> {
     crate::remote::connection::exec_command(
         &session.channel,
         "sysctl -w net.ipv4.conf.all.route_localnet=1 >/dev/null 2>&1 || true",
     )
     .await?;
-    let rule = "iptables -t nat -C PREROUTING -i docker0 -p tcp --dport 15721 -j DNAT --to-destination 127.0.0.1:15721 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -p tcp --dport 15721 -j DNAT --to-destination 127.0.0.1:15721 >/dev/null 2>&1 || true";
-    crate::remote::connection::exec_command(&session.channel, rule).await?;
+    let rule = format!(
+        "iptables -t nat -C PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} >/dev/null 2>&1 || true",
+        ip = container_ip,
+        port = port
+    );
+    crate::remote::connection::exec_command(&session.channel, &rule).await?;
+    Ok(())
+}
+
+/// 撤销某容器的 per-container DNAT（与 ensure_container_dnat 对称，幂等）：
+/// 按 `-s <ip>` 精确删除，只影响该容器；规则不存在时 `-D` 失败被 `|| true` 吞掉。
+pub async fn remove_container_dnat(
+    session: &crate::remote::connection::RemoteSession,
+    container_ip: &str,
+    port: u16,
+) -> Result<(), String> {
+    let rule = format!(
+        "iptables -t nat -D PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} 2>/dev/null || true",
+        ip = container_ip,
+        port = port
+    );
+    crate::remote::connection::exec_command(&session.channel, &rule).await?;
     Ok(())
 }
 
@@ -451,17 +514,30 @@ pub async fn apply_remote_provider_to_live(
     app: &str,
     provider: &Provider,
     route_proxy: bool,
+    port: u16,
 ) -> Result<crate::remote::effect::EffectReport, String> {
     // 走本机路由的 base_url host 解析：
     // - 宿主机目标：localhost（隧道监听在宿主机回环）；
     // - 容器目标：探测网络模式——host → localhost（共享宿主机回环）；
-    //   bridge/自定义 → 网关 IP（容器访问宿主机的地址）+ 自动下发 DNAT
+    //   bridge/自定义 → 网关 IP（容器访问宿主机的地址）+ per-container DNAT
     //   打通 docker0 → 隧道；探测失败则降级直连（避免写出无效 base_url）。
     let route_base = if !route_proxy {
+        // 直连态：撤掉该容器先前走路由时下发的 per-container DNAT（幂等）
+        if let Some(c) = container.as_deref() {
+            if let Some(ip) = container_ip(session, c).await {
+                if let Err(e) = remove_container_dnat(session, &ip, port).await {
+                    log::warn!("[remote] 容器 {c} 直连态清理 DNAT 失败: {e}");
+                }
+            }
+        }
         None
     } else if let Some(c) = container.as_deref() {
-        match detect_container_route_base(session, c).await {
-            Ok(base) => base,
+        match detect_container_route_base(session, c, port).await {
+            Ok(Some((base, _ip))) => Some(base),
+            Ok(None) => {
+                log::warn!("[remote] 容器 {c} 走本机路由探测失败，按直连写入");
+                None
+            }
             Err(e) => {
                 log::warn!("[remote] 容器 {c} 走本机路由探测失败: {e}，按直连写入");
                 None
@@ -496,7 +572,7 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or("localhost");
                     e.insert(
                         "ANTHROPIC_BASE_URL".to_string(),
-                        serde_json::json!(format!("http://{base}:15721")),
+                        serde_json::json!(format!("http://{base}:{port}")),
                     );
                     e.insert(
                         "ANTHROPIC_AUTH_TOKEN".to_string(),
@@ -523,7 +599,7 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or("localhost");
                     let routed = crate::codex_config::apply_codex_official_proxy_route(
                         config,
-                        &format!("http://{base}:15721/v1"),
+                        &format!("http://{base}:{port}/v1"),
                     )
                     .map_err(|e| e.to_string())?;
                     s["config"] = serde_json::json!(routed);
@@ -554,7 +630,7 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or("localhost");
                     let routed = crate::grok_config::apply_proxy_takeover(
                         config,
-                        &format!("http://{base}:15721/grokbuild/v1"),
+                        &format!("http://{base}:{port}/grokbuild/v1"),
                         "PROXY_MANAGED",
                     )
                     .map_err(|e| e.to_string())?;

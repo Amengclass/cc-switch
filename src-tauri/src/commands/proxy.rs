@@ -7,6 +7,7 @@ use crate::proxy::types::*;
 use crate::proxy::{CircuitBreakerConfig, CircuitBreakerStats};
 use crate::store::AppState;
 use std::str::FromStr;
+use tauri::Manager;
 
 /// 启动代理服务器（仅启动服务，不接管 Live 配置）
 #[tauri::command]
@@ -32,13 +33,99 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
         );
     }
 
+    // 远端仍可能有「远端接管」，其 live 依赖本机代理进程——同样阻止停止
+    let remote_has_route = state
+        .db
+        .list_remote_hosts()
+        .map(|hs| {
+            hs.iter().any(|h| {
+                h.route_proxy_apps.values().any(|&v| v)
+                    || h.route_proxy_container_apps
+                        .values()
+                        .any(|m| m.values().any(|&v| v))
+            })
+        })
+        .unwrap_or(false);
+    if remote_has_route {
+        return Err(
+            "仍有远端主机开启了远端接管，请先在对应主机关闭远端接管后再停止本地路由。"
+                .to_string(),
+        );
+    }
+
     state.proxy_service.stop().await
 }
 
-/// 停止代理服务器（恢复 Live 配置）
+/// 停止代理服务器（恢复 Live 配置）——总闸关闭：恢复本机所有接管 live，
+/// 清空所有远端主机接管意图，并异步重写远端 live 为直连（fire-and-forget）。
 #[tauri::command]
-pub async fn stop_proxy_with_restore(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.proxy_service.stop_with_restore().await
+pub async fn stop_proxy_with_restore(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    // service.stop_with_restore 会清空 route_proxy_apps 与 route_proxy_container_apps，
+    // 先记录当前开启的主机+目标+app（宿主机目标 container=None；容器目标带容器名）
+    let routed_targets: Vec<(String, Option<String>, Vec<String>)> = state
+        .db
+        .list_remote_hosts()
+        .map(|hosts| {
+            hosts
+                .iter()
+                .flat_map(|h| {
+                    let mut out = Vec::new();
+                    if h.route_proxy_apps.values().any(|&v| v) {
+                        let apps = h
+                            .route_proxy_apps
+                            .iter()
+                            .filter(|(_, &v)| v)
+                            .map(|(a, _)| a.clone())
+                            .collect::<Vec<_>>();
+                        out.push((h.id.clone(), None, apps));
+                    }
+                    for (container, m) in &h.route_proxy_container_apps {
+                        let apps = m
+                            .iter()
+                            .filter(|(_, &v)| v)
+                            .map(|(a, _)| a.clone())
+                            .collect::<Vec<_>>();
+                        if !apps.is_empty() {
+                            out.push((h.id.clone(), Some(container.clone()), apps));
+                        }
+                    }
+                    out
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    state.proxy_service.stop_with_restore().await?;
+
+    // 异步重写远端 live 为直连（不阻塞总开关；失败由下次切换的
+    // effective_route_proxy 降级直连自愈）
+    if !routed_targets.is_empty() {
+        let handle = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            for (host_id, container, apps) in routed_targets {
+                for app in apps {
+                    let Some(st) = handle.try_state::<AppState>() else {
+                        continue;
+                    };
+                    if let Err(e) = crate::remote::commands::reapply_remote_provider(
+                        st,
+                        host_id.clone(),
+                        app,
+                        container.clone(),
+                    )
+                    .await
+                    {
+                        log::warn!("[remote] 总开关关闭后重写远端直连失败: {e}");
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(())
 }
 
 /// 获取各应用接管状态

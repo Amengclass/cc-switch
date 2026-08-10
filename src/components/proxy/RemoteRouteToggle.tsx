@@ -3,8 +3,10 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
-import { useProxyStatus } from "@/hooks/useProxyStatus";
-import { reapplyRemoteProvider, saveRemoteHost } from "@/lib/api/remote";
+import {
+  reapplyRemoteProvider,
+  setRemoteRouteProxyApp,
+} from "@/lib/api/remote";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
 
@@ -41,9 +43,16 @@ export function RemoteRouteToggle({
 }: RemoteRouteToggleProps) {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
-  // 本机路由未运行时，远端走本机路由失去能力基础 → 禁用（不动 DB）
-  const { isRunning: localRouteRunning } = useProxyStatus();
-  const routeDisabled = !localRouteRunning;
+  // per-app 开关值（key = appForApi，即 claude/codex/gemini/grokbuild）
+  // 容器目标读 routeProxyContainerApps[containerId][app]（各自独立）；
+  // 宿主机目标读 routeProxyApps[app]。
+  const appKey = appForApi ?? activeApp;
+  const routeEnabled = Boolean(
+    appKey &&
+      (containerId
+        ? host?.routeProxyContainerApps?.[containerId]?.[appKey]
+        : host?.routeProxyApps?.[appKey]),
+  );
 
   // 与 ProxyToggle 相同的 app 显示名映射，保证文案统一
   const appLabel =
@@ -63,42 +72,46 @@ export function RemoteRouteToggle({
   }
 
   const handleToggle = async (checked: boolean) => {
-    if (saving) return;
+    if (saving || !appKey) return;
     setSaving(true);
     try {
-      const updated = await saveRemoteHost({
-        ...host,
-        routeThroughLocalProxy: checked,
-      });
+      const updated = await setRemoteRouteProxyApp(
+        host.id,
+        appKey,
+        checked,
+        containerId,
+      );
       onUpdated?.(updated);
       // 对齐本机「开关即生效」：立即把当前供应商按新意图重写 live，
       // 无需用户再手动切一次供应商（含容器网络探测/DNAT 下发）。
-      if (appForApi) {
-        try {
-          await reapplyRemoteProvider(host.id, appForApi, containerId);
-        } catch (error) {
-          console.error("[RemoteRouteToggle] reapply failed:", error);
-          toast.error(
-            t("remote.route.reapplyFailed", {
-              defaultValue: "开关已保存，但重新应用当前供应商到远端失败，请再切一次供应商",
-            }),
-          );
-        }
+      try {
+        await reapplyRemoteProvider(host.id, appKey, containerId);
+      } catch (error) {
+        console.error("[RemoteRouteToggle] reapply failed:", error);
+        toast.error(
+          t("remote.route.reapplyFailed", {
+            defaultValue: "开关已保存，但重新应用当前供应商到远端失败，请再切一次供应商",
+          }),
+        );
       }
       toast.success(
         checked
           ? t("remote.route.enabled", {
-              defaultValue: `已开启「${host.name}」走本机路由`,
+              name: host.name,
+              appLabel,
+              defaultValue: `已开启「${host.name}」的 ${appLabel} 远端接管`,
             })
           : t("remote.route.disabled", {
-              defaultValue: `已关闭「${host.name}」走本机路由`,
+              name: host.name,
+              appLabel,
+              defaultValue: `已关闭「${host.name}」的 ${appLabel} 远端接管`,
             }),
       );
     } catch (error) {
       console.error("[RemoteRouteToggle] toggle failed:", error);
       toast.error(
         t("remote.route.toggleFailed", {
-          defaultValue: "切换走本机路由失败，请重试",
+          defaultValue: "切换远端接管失败，请重试",
         }),
       );
     } finally {
@@ -106,41 +119,34 @@ export function RemoteRouteToggle({
     }
   };
 
-  const tooltipText = routeDisabled
-    ? t("remote.route.tooltip.localRouteOff", {
-        name: host.name,
-        appLabel,
-        defaultValue: `需先开启本机路由，「${host.name}」的 ${appLabel} 才能走本机路由`,
-      })
-    : host.routeThroughLocalProxy
-      ? container
-        ? t("remote.route.tooltip.containerActive", {
-            name: host.name,
-            appLabel,
-            defaultValue: `容器内 ${appLabel} 经「${host.name}」宿主机隧道走本机路由（需本机路由已开启）`,
-          })
-        : t("remote.route.tooltip.active", {
-            name: host.name,
-            appLabel,
-            defaultValue: `「${host.name}」的 ${appLabel} 已走本机路由（需本机路由已开启）`,
-          })
-      : container
-        ? t("remote.route.tooltip.containerInactive", {
-            name: host.name,
-            appLabel,
-            defaultValue: `开启后，容器内 ${appLabel} 经「${host.name}」宿主机隧道走本机路由（需本机路由已开启）`,
-          })
-        : t("remote.route.tooltip.inactive", {
-            name: host.name,
-            appLabel,
-            defaultValue: `开启后「${host.name}」的 ${appLabel} 走本机路由（需本机路由已开启）`,
-          });
+  const tooltipText = routeEnabled
+    ? container
+      ? t("remote.route.tooltip.containerActive", {
+          name: host.name,
+          appLabel,
+          defaultValue: `容器内 ${appLabel} 经「${host.name}」宿主机隧道走本机代理（本机代理未运行时自动启动）`,
+        })
+      : t("remote.route.tooltip.active", {
+          name: host.name,
+          appLabel,
+          defaultValue: `「${host.name}」的 ${appLabel} 已启用远端接管，请求经本机代理转发`,
+        })
+    : container
+      ? t("remote.route.tooltip.containerInactive", {
+          name: host.name,
+          appLabel,
+          defaultValue: `开启后，容器内 ${appLabel} 经「${host.name}」宿主机隧道走本机代理`,
+        })
+      : t("remote.route.tooltip.inactive", {
+          name: host.name,
+          appLabel,
+          defaultValue: `开启后「${host.name}」的 ${appLabel} 请求经本机代理转发（本机代理未运行时自动启动）`,
+        });
 
   return (
     <div
       className={cn(
         "flex items-center gap-1 px-1.5 h-8 rounded-lg bg-muted/50 transition-all",
-        routeDisabled && "opacity-60",
         className,
       )}
       title={tooltipText}
@@ -151,16 +157,16 @@ export function RemoteRouteToggle({
         <Radio
           className={cn(
             "h-4 w-4 transition-colors",
-            host.routeThroughLocalProxy && !routeDisabled
+            routeEnabled
               ? "text-emerald-500 status-heartbeat"
               : "text-muted-foreground",
           )}
         />
       )}
       <Switch
-        checked={host.routeThroughLocalProxy}
+        checked={routeEnabled}
         onCheckedChange={handleToggle}
-        disabled={saving || routeDisabled}
+        disabled={saving || !appKey}
       />
     </div>
   );

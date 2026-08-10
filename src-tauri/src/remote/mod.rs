@@ -66,8 +66,26 @@ pub struct RemoteHost {
     pub save_password: bool,
     /// 走本机路由：切换时把远端 base_url 指向本机代理（经 SSH 反向隧道）。
     pub route_through_local_proxy: bool,
+    /// per-app 远端接管开关（JSON：{"claude":true,"codex":false,...}）。
+    /// 兼容字段：旧库只有 route_through_local_proxy 布尔，迁移时展开为全 app。
+    #[serde(default = "default_route_proxy_apps")]
+    pub route_proxy_apps: std::collections::HashMap<String, bool>,
+    /// per-container × app 远端接管开关（JSON：{"<容器名>":{"claude":true,...}}）。
+    /// 容器目标各自独立：容器 A 开了路由不影响容器 B / 宿主机目标。
+    #[serde(default = "default_route_proxy_container_apps")]
+    pub route_proxy_container_apps:
+        std::collections::HashMap<String, std::collections::HashMap<String, bool>>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+fn default_route_proxy_apps() -> std::collections::HashMap<String, bool> {
+    std::collections::HashMap::new()
+}
+
+fn default_route_proxy_container_apps(
+) -> std::collections::HashMap<String, std::collections::HashMap<String, bool>> {
+    std::collections::HashMap::new()
 }
 
 impl RemoteHost {

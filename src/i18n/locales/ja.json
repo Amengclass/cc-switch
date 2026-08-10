@@ -344,8 +344,8 @@
       "proxy": {
         "title": "ローカルルーティング",
         "description": "ルーティングサービスの切り替え、ステータスとポート情報を表示",
-        "enableFeature": "メインページにルーティング切り替えを表示",
-        "enableFeatureDescription": "有効にすると、メインページ上部にルーティングとフェイルオーバーの切り替えが表示されます",
+        "enableFeature": "メインページにアプリ接管切り替えを表示",
+        "enableFeatureDescription": "有効にすると、メインページ上部に各アプリの接管切り替え（そのアプリのリクエストをローカルプロキシ経由で転送）が表示されます",
         "enableFailoverToggle": "メインページにフェイルオーバー切り替えを表示",
         "enableFailoverToggleDescription": "有効にすると、メインページ上部にフェイルオーバー切り替えが独立して表示されます",
         "running": "実行中",
@@ -2683,14 +2683,14 @@
     },
     "switchFailed": "切り替えに失敗しました: {{error}}",
     "takeover": {
-      "hint": "ルーティングするアプリを選択します。有効にすると、そのアプリのリクエストはローカルルーティング経由で転送されます",
-      "enabled": "{{app}} ルーティング有効",
-      "disabled": "{{app}} ルーティング無効",
-      "failed": "ルーティングの切り替えに失敗しました: {{detail}}",
+      "hint": "本機アプリのみに影響します。ルーティングする本機アプリを選択すると、そのアプリのリクエストはローカルルーティング経由で転送されます。リモート接管は対象ホストの目標選択またはホストフォームで設定します",
+      "enabled": "{{app}} 接管有効",
+      "disabled": "{{app}} 接管無効",
+      "failed": "接管の切り替えに失敗しました: {{detail}}",
       "tooltip": {
-        "active": "{{appLabel}} がルーティング中 - {{address}}:{{port}}\nホットスイッチングのためプロバイダを切り替え",
-        "broken": "{{appLabel}} がルーティング中ですが、ルーティングサービスが実行されていません",
-        "inactive": "{{appLabel}} のリクエストをローカルルーティング経由でルーティング"
+        "active": "{{appLabel}} が接管中 - {{address}}:{{port}}\nホットスイッチングのためプロバイダを切り替え",
+        "broken": "{{appLabel}} が接管中ですが、プロキシサービスが実行されていません",
+        "inactive": "{{appLabel}} のリクエストをローカルプロキシ経由で接管"
       }
     },
     "failover": {
@@ -2782,7 +2782,7 @@
   },
   "proxyConfig": {
     "proxyEnabled": "ルーティング総スイッチ",
-    "appTakeover": "ルーティング有効",
+    "appTakeover": "ローカルアプリ接管有効",
     "perAppConfig": "アプリ別設定",
     "circuitBreaker": "サーキットブレーカー",
     "circuitBreakerSettings": "サーキットブレーカー設定",

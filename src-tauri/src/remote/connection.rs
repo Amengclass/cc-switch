@@ -1,6 +1,7 @@
 //! SSH 连接与认证(russh 0.62,纯 Rust,无 C 工具链依赖)。
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -10,6 +11,21 @@ use russh_sftp::client::SftpSession;
 use tokio::io::AsyncReadExt;
 
 use super::{AuthMethod, RemoteHost};
+
+/// 反向隧道端口：默认 15721，随本机代理实际监听端口动态同步
+/// （`commands.rs` 在开关/切换前经 `set_tunnel_port` 更新）。
+static TUNNEL_PORT: AtomicU16 = AtomicU16::new(15721);
+
+/// 更新反向隧道端口（与 ProxyStatus.port 对齐）。幂等，可在任意时刻调用。
+pub fn set_tunnel_port(port: u16) {
+    if port != 0 {
+        TUNNEL_PORT.store(port, Ordering::Relaxed);
+    }
+}
+
+fn tunnel_port() -> u16 {
+    TUNNEL_PORT.load(Ordering::Relaxed)
+}
 
 /// 认证时接受任意主机密钥。
 /// TODO(M2):引入 known_hosts 校验,防止中间人攻击。
@@ -63,6 +79,9 @@ impl client::Handler for RemoteHandler {
 pub struct RemoteSession {
     pub channel: Handle<RemoteHandler>,
     pub sftp: SftpSession,
+    /// 反向隧道是否已建立（远端 15721 → 本机代理）。
+    /// 用互斥锁保护：取连接时按宿主当前意图对账（补建/取消），不重建连接。
+    tunnel_active: Mutex<bool>,
 }
 
 /// 把参数安全地包进单引号（shell 转义）：单引号内一切字面化，无需担心特殊字符。
@@ -77,6 +96,63 @@ pub fn shell_quote(s: &str) -> String {
 }
 
 impl RemoteSession {
+    /// 按宿主当前意图对账反向隧道（远端 127.0.0.1:15721 → 本机代理）：
+    /// - 意图要隧道且未建 → 补发 tcpip_forward；
+    /// - 意图不要隧道且已建 → 撤销 cancel_tcpip_forward；
+    /// - 其余情况（已一致）不动。
+    /// 全程复用现有连接，不重建。失败仅记日志（远端可能禁用了端口转发），不致命。
+    pub async fn sync_route_tunnel(&self, host_display: &str, wants_tunnel: bool) {
+        // 锁内只做状态判定（不跨 await）：决定动作后立即释放锁。
+        enum Action {
+            None,
+            Forward,
+            Cancel,
+        }
+        let action = {
+            let active = match self.tunnel_active.lock() {
+                Ok(g) => *g,
+                Err(p) => *p.into_inner(),
+            };
+            match (wants_tunnel, active) {
+                (true, false) => Action::Forward,
+                (false, true) => Action::Cancel,
+                _ => Action::None,
+            }
+        };
+        let port = tunnel_port();
+        match action {
+            Action::None => {}
+            Action::Forward => {
+                match self.channel.tcpip_forward("127.0.0.1", port as u32).await {
+                    Ok(port) => {
+                        if let Ok(mut g) = self.tunnel_active.lock() {
+                            *g = true;
+                        }
+                        log::info!(
+                            "主机 {host_display} 已建立反向隧道：远端 127.0.0.1:{port} → 本机代理"
+                        );
+                    }
+                    Err(e) => log::warn!(
+                        "主机 {host_display} 反向隧道建立失败（本机路由不可用）: {e}"
+                    ),
+                }
+            }
+            Action::Cancel => match self
+                .channel
+                .cancel_tcpip_forward("127.0.0.1", port as u32)
+                .await
+            {
+                Ok(()) => {
+                    if let Ok(mut g) = self.tunnel_active.lock() {
+                        *g = false;
+                    }
+                    log::info!("主机 {host_display} 已撤销反向隧道");
+                }
+                Err(e) => log::warn!("主机 {host_display} 反向隧道撤销失败: {e}"),
+            },
+        }
+    }
+
     /// 在已建立的 SSH 会话上执行一条 POSIX sh 脚本，并把数据流式传入 stdin。
     /// **强制 `sh -c`**：不依赖远端默认 login shell（zsh/fish 等语法差异防护）。
     /// 数据经 base64 编码后写入，脚本需自行 `base64 -d` 解码（见 write_settings_with_backup）。
@@ -258,20 +334,13 @@ async fn connect_fresh(host: &RemoteHost, password: Option<&str>) -> Result<Arc<
             .await
             .map_err(|e| format!("初始化 SFTP 失败: {e}"))?;
 
-        // 走本机路由：在远端请求反向隧道（远端 localhost:15721 → 本机代理）。
-        // 失败不致命（远端可能禁用了端口转发），其余能力照常可用。
-        if host.route_through_local_proxy {
-            match channel.tcpip_forward("127.0.0.1", 15721).await {
-                Ok(port) => log::info!(
-                    "主机 {host_display} 已建立反向隧道：远端 127.0.0.1:{port} → 本机代理"
-                ),
-                Err(e) => log::warn!(
-                    "主机 {host_display} 反向隧道建立失败（本机路由不可用）: {e}"
-                ),
-            }
-        }
-
-        Ok(Arc::new(RemoteSession { channel, sftp }))
+        // 反向隧道不在此处建立，统一由 pooled_connect 取连接时按宿主当前意图
+        // sync_route_tunnel 对账（补建/取消），避免开关变更后旧连接缺隧道。
+        Ok(Arc::new(RemoteSession {
+            channel,
+            sftp,
+            tunnel_active: Mutex::new(false),
+        }))
     };
 
     tokio::time::timeout(Duration::from_secs(10), connect_fut)
@@ -344,6 +413,10 @@ async fn pooled_connect(
         .map(|r| r.is_ok())
         .unwrap_or(false);
         if alive {
+            // 复用连接前按宿主当前意图对账隧道（开关变更后自动补建/撤销，不重建）
+            session
+                .sync_route_tunnel(&host_display, host_wants_tunnel(host))
+                .await;
             clear_connect_fail(&key);
             put_back(&key, session.clone());
             return Ok(session);
@@ -354,6 +427,9 @@ async fn pooled_connect(
 
     match connect_fresh(host, password).await {
         Ok(session) => {
+            session
+                .sync_route_tunnel(&host_display, host_wants_tunnel(host))
+                .await;
             clear_connect_fail(&key);
             put_back(&key, session.clone());
             Ok(session)
@@ -363,6 +439,17 @@ async fn pooled_connect(
             Err(e)
         }
     }
+}
+
+/// 该宿主是否「需要反向隧道」：任一 app 开了远端接管（宿主机目标），或任一容器
+/// 任一 app 开了接管（容器目标经隧道走 DNAT），或旧布尔兼容字段为 true。
+fn host_wants_tunnel(host: &RemoteHost) -> bool {
+    host.route_proxy_apps.values().any(|&v| v)
+        || host
+            .route_proxy_container_apps
+            .values()
+            .any(|m| m.values().any(|&v| v))
+        || host.route_through_local_proxy
 }
 
 /// 放回池（顺带惰性清理：过期 / 超量）。
@@ -385,6 +472,40 @@ fn put_back(key: &str, session: Arc<RemoteSession>) {
             last_used: Instant::now(),
         },
     );
+}
+
+/// 立即对该宿主的池连接（若存在且存活）对账一次反向隧道。
+/// 开关变更后调用：让「开→立即补隧道 / 关→立即撤隧道」即时生效，
+/// 不必等下一次取连接。无活跃连接则无事可做（下次取连接时兜底对账）。
+pub async fn sync_tunnel_now(host: &RemoteHost) {
+    let key = host.id.clone();
+    let host_display = format!("{}:{}", host.host, host.port);
+    let wants = host_wants_tunnel(host);
+
+    let candidate: Option<Arc<RemoteSession>> = {
+        let mut pool = pool();
+        let map = pool.get_or_insert_with(HashMap::new);
+        match map.remove(&key) {
+            Some(p) if p.last_used.elapsed() < POOL_IDLE_TIMEOUT => Some(p.session),
+            _ => None,
+        }
+    };
+    let Some(session) = candidate else {
+        return;
+    };
+    // 验活：连接可能已被远端/网络断开
+    let alive = tokio::time::timeout(
+        Duration::from_secs(3),
+        exec_command(&session.channel, POOL_PROBE_CMD),
+    )
+    .await
+    .map(|r| r.is_ok())
+    .unwrap_or(false);
+    if alive {
+        session.sync_route_tunnel(&host_display, wants).await;
+        put_back(&key, session);
+    }
+    // 不存活则丢弃（下次连接会重建并对账）
 }
 
 /// 在已建立的 SSH 会话上执行一条远端命令并返回其输出（trim 后）。

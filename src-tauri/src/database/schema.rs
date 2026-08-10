@@ -354,6 +354,8 @@ impl Database {
                 auth_method TEXT NOT NULL DEFAULT 'password',
                 save_password BOOLEAN NOT NULL DEFAULT 1,
                 route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0,
+                route_proxy_apps TEXT NOT NULL DEFAULT '{}',
+                route_proxy_container_apps TEXT NOT NULL DEFAULT '{}',
                 created_at INTEGER,
                 updated_at INTEGER
             )",
@@ -416,6 +418,24 @@ impl Database {
         // 尝试添加"走本机路由"列到 remote_hosts 表（兼容旧库升级；新库建表已含该列）
         let _ = conn.execute(
             "ALTER TABLE remote_hosts ADD COLUMN route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0",
+            [],
+        );
+
+        // 尝试添加 per-app 接管列 route_proxy_apps（JSON：{"claude":true,...}）。
+        // 旧数据迁移：route_through_local_proxy=1 的主机 → 4 个接管 app 全开（保留原意图）。
+        let _ = conn.execute(
+            "ALTER TABLE remote_hosts ADD COLUMN route_proxy_apps TEXT NOT NULL DEFAULT '{}'",
+            [],
+        );
+        let _ = conn.execute(
+            "UPDATE remote_hosts SET route_proxy_apps = '{\"claude\":true,\"codex\":true,\"gemini\":true,\"grokbuild\":true}' WHERE route_through_local_proxy = 1 AND route_proxy_apps = '{}'",
+            [],
+        );
+
+        // 尝试添加 per-container×app 接管列 route_proxy_container_apps
+        // （JSON：{"<容器名>":{"claude":true,...}}）。旧库升级后容器侧默认空 = 不接管。
+        let _ = conn.execute(
+            "ALTER TABLE remote_hosts ADD COLUMN route_proxy_container_apps TEXT NOT NULL DEFAULT '{}'",
             [],
         );
 

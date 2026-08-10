@@ -904,7 +904,7 @@ impl ProxyService {
             .map_err(|e| format!("清除 {app_type_str} 健康状态失败: {e}"))?;
 
         // 5) 若无其它接管，更新旧标志，并停止代理服务
-        // 检查是否还有其它 app 的 enabled = true
+        // 检查是否还有其它 app 的 enabled = true（本机接管）
         let any_enabled = self
             .db
             .is_live_takeover_active()
@@ -912,11 +912,27 @@ impl ProxyService {
             .map_err(|e| format!("检查接管状态失败: {e}"))?;
 
         if !any_enabled {
-            let _ = self.db.set_live_takeover_active(false).await;
+            // 远端可能仍有「远端接管」（route_proxy_apps / route_proxy_container_apps
+            // 任一 true），其 live 依赖本机代理进程——此时不能停进程（否则远端指向死隧道）。
+            let remote_has_route = self
+                .db
+                .list_remote_hosts()
+                .map(|hs| {
+                    hs.iter().any(|h| {
+                        h.route_proxy_apps.values().any(|&v| v)
+                            || h.route_proxy_container_apps
+                                .values()
+                                .any(|m| m.values().any(|&v| v))
+                    })
+                })
+                .unwrap_or(false);
+            if !remote_has_route {
+                let _ = self.db.set_live_takeover_active(false).await;
 
-            if self.is_running().await {
-                // 此时没有任何 app 处于接管状态，停止服务即可
-                let _ = self.stop().await;
+                if self.is_running().await {
+                    // 此时没有任何 app 处于接管状态，停止服务即可
+                    let _ = self.stop().await;
+                }
             }
         }
 
@@ -1331,6 +1347,30 @@ impl ProxyService {
             .delete_all_live_backups()
             .await
             .map_err(|e| format!("删除备份失败: {e}"))?;
+
+        // 5.1 清除所有远端主机的「远端接管」意图（route_proxy_apps 与
+        //     route_proxy_container_apps 清空）。
+        //     远端 live 的实际重写由命令层异步 fire-and-forget 完成（见
+        //     stop_proxy_with_restore 命令的 spawn）；即使失败，下次切换时
+        //     effective_route_proxy 也会按「本机路由未运行」降级写直连自愈。
+        match self.db.list_remote_hosts() {
+            Ok(hosts) => {
+                for mut h in hosts {
+                    if !h.route_proxy_apps.is_empty() || !h.route_proxy_container_apps.is_empty() {
+                        h.route_proxy_apps.clear();
+                        h.route_proxy_container_apps.clear();
+                        h.updated_at = chrono::Utc::now().timestamp_millis();
+                        if let Err(e) = self.db.upsert_remote_host(&h) {
+                            log::warn!(
+                                "[remote] 清除主机 {} 远端接管意图失败: {e}",
+                                h.name
+                            );
+                        }
+                    }
+                }
+            }
+            Err(e) => log::warn!("[remote] 读取远端主机列表失败（跳过意图清理）: {e}"),
+        }
 
         // 6. 重置健康状态（让健康徽章恢复为正常）
         self.db

@@ -293,6 +293,14 @@ function App() {
     localStorage.setItem("cc-switch-remote-container", remoteContainerId);
   }, [remoteContainerId]);
 
+  // 远端目标下没有 claude-desktop 应用：切到远端时若当前 tab 是
+  // claude-desktop，自动切回 claude（sharedFeatureApp 本就映射 claude）。
+  useEffect(() => {
+    if (remoteTargetId && activeApp === "claude-desktop") {
+      setActiveApp("claude");
+    }
+  }, [remoteTargetId, activeApp]);
+
   // 每次切换视图时刷新服务器列表（远程页面增删后回到主界面能同步）；
   // 若当前选中的目标已被删除，自动重置回「本机」。
   useEffect(() => {
@@ -1918,6 +1926,7 @@ function App() {
                   activeApp={activeApp}
                   onSwitch={setActiveApp}
                   visibleApps={visibleApps}
+                  hideApps={remoteTargetId ? ["claude-desktop"] : undefined}
                 />
               )}
             </div>

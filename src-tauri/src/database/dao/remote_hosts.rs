@@ -14,7 +14,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at
+                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, route_proxy_apps, route_proxy_container_apps, created_at, updated_at
                  FROM remote_hosts
                  ORDER BY created_at IS NULL, created_at, id",
             )
@@ -36,7 +36,7 @@ impl Database {
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
-                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at
+                "SELECT id, name, host, port, username, auth_method, save_password, route_through_local_proxy, route_proxy_apps, route_proxy_container_apps, created_at, updated_at
                  FROM remote_hosts WHERE id = ?1",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -57,8 +57,8 @@ impl Database {
         };
         conn.execute(
             "INSERT OR REPLACE INTO remote_hosts
-             (id, name, host, port, username, auth_method, save_password, route_through_local_proxy, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             (id, name, host, port, username, auth_method, save_password, route_through_local_proxy, route_proxy_apps, route_proxy_container_apps, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 host.id,
                 host.name,
@@ -68,6 +68,10 @@ impl Database {
                 auth,
                 host.save_password,
                 host.route_through_local_proxy,
+                serde_json::to_string(&host.route_proxy_apps)
+                    .unwrap_or_else(|_| "{}".to_string()),
+                serde_json::to_string(&host.route_proxy_container_apps)
+                    .unwrap_or_else(|_| "{}".to_string()),
                 host.created_at,
                 host.updated_at,
             ],
@@ -101,8 +105,16 @@ impl Database {
             },
             save_password: row.get(6)?,
             route_through_local_proxy: row.get(7)?,
-            created_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            route_proxy_apps: {
+                let s: String = row.get(8)?;
+                serde_json::from_str(&s).unwrap_or_default()
+            },
+            route_proxy_container_apps: {
+                let s: String = row.get(9)?;
+                serde_json::from_str(&s).unwrap_or_default()
+            },
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
         })
     }
 }
@@ -121,6 +133,8 @@ mod tests {
             auth_method: AuthMethod::Password,
             save_password: true,
             route_through_local_proxy: false,
+            route_proxy_apps: std::collections::HashMap::new(),
+            route_proxy_container_apps: std::collections::HashMap::new(),
             created_at: 1_000,
             updated_at: 1_000,
         }

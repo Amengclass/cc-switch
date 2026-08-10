@@ -65,6 +65,8 @@ interface HostFormState {
   password: string;
   savePassword: boolean;
   routeThroughLocalProxy: boolean;
+  /** per-app 远端接管（claude/codex/gemini/grokbuild） */
+  routeProxyApps: Record<string, boolean>;
 }
 
 const EMPTY_FORM: HostFormState = {
@@ -75,6 +77,12 @@ const EMPTY_FORM: HostFormState = {
   password: "",
   savePassword: true,
   routeThroughLocalProxy: false,
+  routeProxyApps: {
+    claude: false,
+    codex: false,
+    gemini: false,
+    grokbuild: false,
+  },
 };
 
 function formToDraft(f: HostFormState) {
@@ -87,6 +95,7 @@ function formToDraft(f: HostFormState) {
     authMethod: "password" as const,
     savePassword: f.savePassword,
     routeThroughLocalProxy: f.routeThroughLocalProxy,
+    routeProxyApps: f.routeProxyApps,
     password: f.password,
   };
 }
@@ -174,6 +183,7 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       password: "",
       savePassword: host.savePassword,
       routeThroughLocalProxy: host.routeThroughLocalProxy,
+      routeProxyApps: { ...host.routeProxyApps },
     });
     setFormOpen(true);
   };
@@ -210,6 +220,9 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       authMethod: draft.authMethod,
       savePassword: draft.savePassword,
       routeThroughLocalProxy: draft.routeThroughLocalProxy,
+      routeProxyApps: draft.routeProxyApps,
+      // 表单不编辑容器开关：编辑主机时保留已有容器开关，避免误清空
+      routeProxyContainerApps: editing?.routeProxyContainerApps,
       createdAt: editing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -819,29 +832,45 @@ export function RemoteHostsPanel({ app }: { app: string }) {
                   disabled={!editing && !form.password}
                 />
               </div>
-              {/* 走本机路由 - 轻量行内样式 */}
-              <div className="flex items-center justify-between py-2">
+              {/* 远端接管 per-app - 轻量行内样式 */}
+              <div className="space-y-2 py-2">
                 <div className="space-y-0.5">
-                  <Label
-                    className={`text-sm font-normal ${form.routeThroughLocalProxy ? "text-foreground/80" : "text-muted-foreground/60"}`}
-                  >
+                  <Label className="text-sm font-normal text-foreground/80">
                     {t("remote.routeThroughLocalProxy", {
-                      defaultValue: "走本机路由",
+                      defaultValue: "远端接管",
                     })}
                   </Label>
                   <p className="text-xs text-muted-foreground/70">
                     {t("remote.routeThroughLocalProxyHint", {
                       defaultValue:
-                        "开启后，这台机器的 Claude / Codex / Gemini / Grok 供应商会经反向隧道使用你本机正在运行的代理；需本机路由已开启",
+                        "开启后，对应应用的供应商会经 SSH 反向隧道使用你本机正在运行的代理；未运行时会自动启动本机代理",
                     })}
                   </p>
                 </div>
-                <Switch
-                  checked={form.routeThroughLocalProxy}
-                  onCheckedChange={(v) =>
-                    setForm({ ...form, routeThroughLocalProxy: v })
-                  }
-                />
+                <div className="grid grid-cols-2 gap-2">
+                  {(["claude", "codex", "gemini", "grokbuild"] as const).map(
+                    (app) => (
+                      <label
+                        key={app}
+                        className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 cursor-pointer"
+                      >
+                        <span className="text-xs capitalize">{app}</span>
+                        <Switch
+                          checked={Boolean(form.routeProxyApps?.[app])}
+                          onCheckedChange={(v) =>
+                            setForm({
+                              ...form,
+                              routeProxyApps: {
+                                ...form.routeProxyApps,
+                                [app]: v,
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ),
+                  )}
+                </div>
               </div>
             </div>
 

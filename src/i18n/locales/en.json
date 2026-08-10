@@ -344,8 +344,8 @@
       "proxy": {
         "title": "Local Routing",
         "description": "Control routing service toggle, view status and port info",
-        "enableFeature": "Show Routing Toggle on Main Page",
-        "enableFeatureDescription": "When enabled, the routing and failover toggles will appear at the top of the main page",
+        "enableFeature": "Show App Takeover Toggles on Main Page",
+        "enableFeatureDescription": "When enabled, per-app takeover toggles (route that app's requests through the local proxy) will appear at the top of the main page",
         "enableFailoverToggle": "Show Failover Toggle on Main Page",
         "enableFailoverToggleDescription": "When enabled, the failover toggle will appear independently at the top of the main page",
         "running": "Running",
@@ -2683,14 +2683,14 @@
     },
     "switchFailed": "Switch failed: {{error}}",
     "takeover": {
-      "hint": "Select apps to route — once enabled, requests from that app will go through local routing",
-      "enabled": "{{app}} routing enabled",
-      "disabled": "{{app}} routing disabled",
-      "failed": "Failed to toggle routing: {{detail}}",
+      "hint": "Affects local apps only. Select local apps to route; once enabled, requests from that app will go through local routing. Remote takeover is configured per-host in the target selector or host form.",
+      "enabled": "{{app}} takeover enabled",
+      "disabled": "{{app}} takeover disabled",
+      "failed": "Failed to toggle takeover: {{detail}}",
       "tooltip": {
-        "active": "{{appLabel}} is routing - {{address}}:{{port}}\nSwitch provider for hot switching",
-        "broken": "{{appLabel}} is routing, but routing service is not running",
-        "inactive": "Route {{appLabel}}'s requests through local routing"
+        "active": "{{appLabel}} taken over - {{address}}:{{port}}\nSwitch provider for hot switching",
+        "broken": "{{appLabel}} taken over, but proxy service is not running",
+        "inactive": "Take over {{appLabel}}'s requests through the local proxy"
       }
     },
     "failover": {
@@ -2782,7 +2782,7 @@
   },
   "proxyConfig": {
     "proxyEnabled": "Routing Master Switch",
-    "appTakeover": "Routing Enabled",
+    "appTakeover": "Local App Takeover Enabled",
     "perAppConfig": "Per-App Config",
     "circuitBreaker": "Circuit Breaker",
     "circuitBreakerSettings": "Circuit Breaker Settings",

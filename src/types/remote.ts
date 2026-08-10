@@ -11,6 +11,10 @@ export interface RemoteHost {
   authMethod: RemoteAuthMethod;
   savePassword: boolean;
   routeThroughLocalProxy: boolean;
+  /** per-app 远端接管开关（claude/codex/gemini/grokbuild）——宿主机目标 */
+  routeProxyApps: Record<string, boolean>;
+  /** per-container×app 远端接管开关：{"<容器名>":{"claude":true,...}}——容器目标各自独立 */
+  routeProxyContainerApps?: Record<string, Record<string, boolean>>;
   createdAt: number;
   updatedAt: number;
 }

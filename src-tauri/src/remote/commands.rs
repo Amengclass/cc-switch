@@ -12,6 +12,35 @@ use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, credentials, AuthMethod, RemoteHost};
 
+/// 取该主机「per-app 走本机路由」意图（宿主机目标）：
+/// - route_proxy_apps（JSON）有该 app → 用它的值；
+/// - 空但旧布尔 route_through_local_proxy=true（迁移前旧库兜底）→ 视为全开。
+fn host_route_proxy_for_app(host: &RemoteHost, app: &str) -> bool {
+    if let Some(&v) = host.route_proxy_apps.get(app) {
+        return v;
+    }
+    if host.route_proxy_apps.is_empty() && host.route_through_local_proxy {
+        // 旧库迁移兜底：迁移 SQL 会把 =1 的主机展开成全开，这里防御性兜底
+        return true;
+    }
+    false
+}
+
+/// 取某目标（宿主机 / 容器）「per-app 走本机路由」意图：
+/// - 容器目标：读 route_proxy_container_apps[container][app]（各自独立，缺省=关）；
+/// - 宿主机目标：走 host_route_proxy_for_app（host 级字段）。
+pub fn route_proxy_for_target(host: &RemoteHost, container: Option<&str>, app: &str) -> bool {
+    match container {
+        Some(c) => host
+            .route_proxy_container_apps
+            .get(c)
+            .and_then(|m| m.get(app))
+            .copied()
+            .unwrap_or(false),
+        None => host_route_proxy_for_app(host, app),
+    }
+}
+
 /// 计算实际生效的 route_proxy：
 /// - DB 意图（route_through_local_proxy）为 false → false；
 /// - 意图为 true 但本机路由未运行 → 降级为直连（避免把 base_url 写成
@@ -32,6 +61,17 @@ async fn effective_route_proxy(
         );
         false
     }
+}
+
+/// 本机代理实际监听端口（运行中取 ProxyStatus.port；未运行回退 15721）。
+/// 同时同步给连接层（反向隧道端口），保证隧道/base_url/DNAT 用同一端口。
+async fn current_proxy_port(proxy_service: &crate::services::proxy::ProxyService) -> u16 {
+    let port = match proxy_service.get_status().await {
+        Ok(s) if s.running && s.port != 0 => s.port,
+        _ => 15721,
+    };
+    connection::set_tunnel_port(port);
+    port
 }
 use crate::store::AppState;
 
@@ -272,6 +312,81 @@ pub async fn save_remote_host(
     Ok(host)
 }
 
+/// per-app 远端接管开关（对齐本机接管开关语义，按目标分流）：
+/// - 宿主机目标（container=None）：写 `route_proxy_apps[app]`；
+/// - 容器目标（container=Some）：写 `route_proxy_container_apps[container][app]`，各自独立；
+/// - 开：写 DB 并确保本机代理进程运行（自动拉起）；
+/// - 关：写 DB，若全无需要（本机接管 + 所有远端/容器路由全空）则自动停止本机代理进程；
+/// - live 改写（路由态/直连态）由前端在开关后调用 reapply 完成。
+#[tauri::command]
+pub async fn set_remote_route_proxy_app(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    enabled: bool,
+    container: Option<String>,
+) -> Result<RemoteHost, String> {
+    let mut host = load_host(&state, &host_id)?;
+    host.updated_at = chrono::Utc::now().timestamp_millis();
+    if let Some(c) = container.as_deref() {
+        let entry = host.route_proxy_container_apps.entry(c.to_string()).or_default();
+        entry.insert(app.clone(), enabled);
+    } else if enabled {
+        host.route_proxy_apps.insert(app.clone(), true);
+    } else {
+        host.route_proxy_apps.insert(app.clone(), false);
+    }
+    state
+        .db
+        .upsert_remote_host(&host)
+        .map_err(|e| e.to_string())?;
+
+    if enabled {
+        if !state.proxy_service.is_running().await {
+            log::info!("[remote] 开启 {app} 远端接管，自动启动本机代理进程");
+            state
+                .proxy_service
+                .start()
+                .await
+                .map_err(|e| format!("开启远端接管时启动本机代理失败: {e}"))?;
+        }
+    } else if !any_route_consumer(&state).await && state.proxy_service.is_running().await {
+        log::info!(
+            "[remote] 关闭 {app} 远端接管后无任何接管/路由需要，自动停止本机代理进程"
+        );
+        let _ = state.proxy_service.stop().await;
+    }
+
+    // 立即对账反向隧道（不重建连接）：开→补隧道，关→撤隧道，即时生效。
+    // 先同步隧道端口（与代理实际监听端口一致），再对账。
+    let _ = current_proxy_port(&state.proxy_service).await;
+    connection::sync_tunnel_now(&host).await;
+
+    Ok(host)
+}
+
+/// 是否有任何「需要本机代理进程」的使用者：
+/// 本机任一 app 接管 || 任一 host 任一 app 远端接管（含容器目标的 per-container 开关）。
+async fn any_route_consumer(state: &AppState) -> bool {
+    match state.db.is_live_takeover_active().await {
+        Ok(true) => return true,
+        Ok(false) => {}
+        Err(e) => log::warn!("[remote] 检查本机接管状态失败: {e}"),
+    }
+    match state.db.list_remote_hosts() {
+        Ok(hosts) => hosts.iter().any(|h| {
+            h.route_proxy_apps.values().any(|&v| v)
+                || h.route_proxy_container_apps
+                    .values()
+                    .any(|m| m.values().any(|&v| v))
+        }),
+        Err(e) => {
+            log::warn!("[remote] 检查远端路由意图失败: {e}");
+            false
+        }
+    }
+}
+
 /// 删除远程主机（同时清除系统钥匙串里的密码）。
 #[tauri::command]
 pub async fn delete_remote_host(
@@ -320,6 +435,8 @@ pub async fn test_remote_connection_info(
         auth_method: AuthMethod::Password,
         save_password: false,
         route_through_local_proxy: false,
+        route_proxy_apps: std::collections::HashMap::new(),
+        route_proxy_container_apps: std::collections::HashMap::new(),
         created_at: 0,
         updated_at: 0,
     };
@@ -685,6 +802,7 @@ pub async fn add_remote_provider(
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
+    let _ = current_proxy_port(&state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
@@ -748,7 +866,8 @@ pub async fn add_remote_provider(
             &host.name,
             &app,
             p,
-            effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
+            effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+            current_proxy_port(&state.proxy_service).await,
         )
         .await?;
         if !additive {
@@ -792,6 +911,7 @@ pub async fn update_remote_provider(
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
+    let _ = current_proxy_port(&state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
@@ -891,7 +1011,8 @@ pub async fn update_remote_provider(
             &host.name,
             &app,
             p,
-            effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
+            effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+            current_proxy_port(&state.proxy_service).await,
         )
         .await?;
         let _ = crate::remote::current::save_current_provider(&host_id, &app, &provider_id_after);
@@ -1020,6 +1141,7 @@ pub async fn switch_remote_provider(
 ) -> Result<EffectReport, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
+    let _ = current_proxy_port(&state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
 
@@ -1051,7 +1173,8 @@ pub async fn switch_remote_provider(
         &host.name,
         &app,
         &provider,
-        effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
+        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+        current_proxy_port(&state.proxy_service).await,
     )
     .await?;
 
@@ -1188,7 +1311,8 @@ pub async fn reapply_remote_provider(
         &host.name,
         &app,
         &provider,
-        effective_route_proxy(&state.proxy_service, host.route_through_local_proxy).await,
+        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+        current_proxy_port(&state.proxy_service).await,
     )
     .await?;
 
@@ -1252,6 +1376,7 @@ pub async fn get_remote_current_provider(
 ) -> Result<Option<String>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
+    let _ = current_proxy_port(&state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(

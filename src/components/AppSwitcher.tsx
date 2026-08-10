@@ -22,6 +22,8 @@ interface AppSwitcherProps {
   activeApp: AppId;
   onSwitch: (app: AppId) => void;
   visibleApps?: VisibleApps;
+  /** 额外隐藏的应用（如远端目标下隐藏 claude-desktop，远端无此应用） */
+  hideApps?: AppId[];
 }
 
 const ALL_APPS: AppId[] = [
@@ -98,6 +100,7 @@ export function AppSwitcher({
   activeApp,
   onSwitch,
   visibleApps,
+  hideApps,
 }: AppSwitcherProps) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -111,6 +114,7 @@ export function AppSwitcher({
 
   // Filter apps based on visibility settings (default all visible)
   const appsToShow = ALL_APPS.filter((app) => {
+    if (hideApps?.includes(app)) return false;
     if (!visibleApps) return true;
     return visibleApps[app];
   });

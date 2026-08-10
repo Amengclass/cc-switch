@@ -122,6 +122,25 @@ export async function reapplyRemoteProvider(
   });
 }
 
+/**
+ * per-app 远端接管开关（对齐本机接管开关语义）：
+ * 开启会自动确保本机代理进程运行；关闭时若全无需要则自动停进程。
+ * 返回更新后的 RemoteHost。
+ */
+export async function setRemoteRouteProxyApp(
+  hostId: string,
+  app: string,
+  enabled: boolean,
+  container?: string,
+): Promise<RemoteHost> {
+  return invoke<RemoteHost>("set_remote_route_proxy_app", {
+    hostId,
+    app,
+    enabled,
+    container: container ?? null,
+  });
+}
+
 /** 远程目标下测试 Provider 连通性（经 SSH 在远端 curl base_url，真实反映远端网络） */
 export async function testRemoteProviderConnection(
   hostId: string,
