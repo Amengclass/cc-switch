@@ -63,9 +63,13 @@ async fn effective_route_proxy(
     }
 }
 
-/// 本机代理实际监听端口（运行中取 ProxyStatus.port；未运行回退 15721）。
+/// 本机代理实际监听端口（运行中取 ProxyStatus.port；未运行读配置 listen_port，
+/// 配置为 0 则报错——与本机 build_proxy_urls 同源，不硬编码默认端口）。
 /// 同时同步给连接层（反向隧道端口），保证隧道/base_url/DNAT 用同一端口。
-async fn current_proxy_port(proxy_service: &crate::services::proxy::ProxyService) -> u16 {
+async fn current_proxy_port(
+    db: &crate::database::Database,
+    proxy_service: &crate::services::proxy::ProxyService,
+) -> Result<u16, String> {
     let port = match proxy_service.get_status().await {
         Ok(s) if s.running && s.port != 0 => {
             // 同步反向隧道回连地址：监听地址一改（如自定义局域网 IP），
@@ -73,10 +77,19 @@ async fn current_proxy_port(proxy_service: &crate::services::proxy::ProxyService
             connection::set_tunnel_host(&s.address);
             s.port
         }
-        _ => 15721,
+        _ => {
+            let config = db
+                .get_proxy_config()
+                .await
+                .map_err(|e| format!("获取代理配置失败: {e}"))?;
+            config.listen_port
+        }
     };
+    if port == 0 {
+        return Err("代理监听端口为 0，但代理服务器尚未运行，无法生成接管地址".to_string());
+    }
     connection::set_tunnel_port(port);
-    port
+    Ok(port)
 }
 use crate::store::AppState;
 
@@ -364,7 +377,7 @@ pub async fn set_remote_route_proxy_app(
 
     // 立即对账反向隧道（不重建连接）：开→补隧道，关→撤隧道，即时生效。
     // 先同步隧道端口（与代理实际监听端口一致），再对账。
-    let _ = current_proxy_port(&state.proxy_service).await;
+    let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     connection::sync_tunnel_now(&host).await;
 
     Ok(host)
@@ -816,7 +829,7 @@ pub async fn add_remote_provider(
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    let _ = current_proxy_port(&state.proxy_service).await;
+    let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
@@ -881,7 +894,7 @@ pub async fn add_remote_provider(
             &app,
             p,
             effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
-            current_proxy_port(&state.proxy_service).await,
+            current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
         )
         .await?;
         if !additive {
@@ -925,7 +938,7 @@ pub async fn update_remote_provider(
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    let _ = current_proxy_port(&state.proxy_service).await;
+    let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
@@ -1026,7 +1039,7 @@ pub async fn update_remote_provider(
             &app,
             p,
             effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
-            current_proxy_port(&state.proxy_service).await,
+            current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
         )
         .await?;
         let _ = crate::remote::current::save_current_provider(&host_id, &app, &provider_id_after);
@@ -1155,7 +1168,7 @@ pub async fn switch_remote_provider(
 ) -> Result<EffectReport, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    let _ = current_proxy_port(&state.proxy_service).await;
+    let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
 
@@ -1188,7 +1201,7 @@ pub async fn switch_remote_provider(
         &app,
         &provider,
         effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
-        current_proxy_port(&state.proxy_service).await,
+        current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
     )
     .await?;
 
@@ -1337,7 +1350,7 @@ pub async fn reapply_remote_provider(
         &app,
         &provider,
         effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
-        current_proxy_port(&state.proxy_service).await,
+        current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
     )
     .await?;
 
@@ -1439,7 +1452,7 @@ pub async fn get_remote_current_provider(
 ) -> Result<Option<String>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    let _ = current_proxy_port(&state.proxy_service).await;
+    let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
