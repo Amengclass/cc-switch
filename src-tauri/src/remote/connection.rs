@@ -57,6 +57,13 @@ fn tunnel_host() -> String {
     }
 }
 
+/// 远端 sshd 隧道监听地址（tcpip_forward 请求的地址）。
+/// 固定回环：最安全（仅宿主机本机 app 可连），且无需远端 sshd 开 GatewayPorts。
+/// 若未来要跨机访问（局域网其他机器走此隧道）：改这里 + 远端 sshd 配
+/// `GatewayPorts clientspecified`；注意与本机回连地址 `TUNNEL_HOST`
+/// （另一处 127.0.0.1，本机代理监听地址）语义不同，勿混淆。
+const REMOTE_TUNNEL_LISTEN_ADDR: &str = "127.0.0.1";
+
 /// 认证时接受任意主机密钥。
 /// TODO(M2):引入 known_hosts 校验,防止中间人攻击。
 #[derive(Clone, Debug)]
@@ -165,13 +172,14 @@ impl RemoteSession {
         match action {
             Action::None => {}
             Action::Forward => {
-                match self.channel.tcpip_forward("127.0.0.1", port as u32).await {
+                match self.channel.tcpip_forward(REMOTE_TUNNEL_LISTEN_ADDR, port as u32).await {
                     Ok(port) => {
                         if let Ok(mut g) = self.tunnel_active.lock() {
                             *g = true;
                         }
                         log::info!(
-                            "主机 {host_display} 已建立反向隧道：远端 127.0.0.1:{port} → 本机代理"
+                            "主机 {host_display} 已建立反向隧道：远端 {}:{port} → 本机代理",
+                            REMOTE_TUNNEL_LISTEN_ADDR
                         );
                     }
                     Err(e) => log::warn!(
@@ -181,7 +189,7 @@ impl RemoteSession {
             }
             Action::Cancel => match self
                 .channel
-                .cancel_tcpip_forward("127.0.0.1", port as u32)
+                .cancel_tcpip_forward(REMOTE_TUNNEL_LISTEN_ADDR, port as u32)
                 .await
             {
                 Ok(()) => {

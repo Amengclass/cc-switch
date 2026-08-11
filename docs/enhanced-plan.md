@@ -254,7 +254,7 @@
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |
 | 低 | `APP_INSTALL_CMDS` 包名校对 ⚠️ 2026-08-08 核实:grokbuild 前端 `@grok/grok-cli`(npm 404,应为 `@xai-official/grok`)、hermes 前端 `hermes-cli`(无关包,应为 PyPI `hermes-agent`)——均需改,后端 misc.rs 已用正确包名 |
-| 低 | 远端隧道监听地址可配置化(2026-08-11 记录):现 `tcpip_forward("127.0.0.1",port)` 常量,UI 不可控;若需跨机访问/容器简化,可加设置项(默认 127.0.0.1,选非回环需提示远端 sshd 开 GatewayPorts)——当前无实际需求,暂缓 |
+| 低 | 远端隧道监听地址可配置化(2026-08-11 记录):现 `tcpip_forward("127.0.0.1",port)` 已抽为常量 `REMOTE_TUNNEL_LISTEN_ADDR`(connection.rs,含"跨机需 GatewayPorts"注释)。**决策:当前无跨机需求,勿提前实现**——若未来要做,改常量 + 远端 sshd 配 GatewayPorts clientspecified;注意与本机回连 `TUNNEL_HOST` 语义不同 |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
 
 ### 📋 功能按钮远端适配核查(2026-08-08 记录)
