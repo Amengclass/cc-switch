@@ -175,6 +175,59 @@ html[data-window-active="false"] .status-heartbeat {
   transition-duration: 0s;
 }
 
+/* 路由服务（总开关）运行中：开关周围绿色走马灯边框，严格沿灰色圆角框轮廓流动
+   实现：::before 画一圈 conic 光斑，用 @property --angle 只旋转渐变角度
+   （不旋转元素本身——旋转方形元素会让四角偏离圆角轮廓），
+   mask 只保留边框环（content-box xor），环贴合元素边缘（inset: 0） */
+@property --route-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.route-service-live {
+  position: relative;
+}
+
+.route-service-live::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--route-border-angle),
+    transparent 0deg,
+    transparent 280deg,
+    #10b981 330deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: route-border-spin 2s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes route-border-spin {
+  to {
+    --route-border-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-service-live::before {
+    animation: none;
+    background: #10b981;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-heartbeat {
     opacity: 1;

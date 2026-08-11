@@ -345,10 +345,11 @@
         "title": "本地路由",
         "description": "控制路由服務開關、查看狀態與連接埠資訊",
         "enableFeature": "在主頁面顯示應用接管開關",
-        "enableFeatureDescription": "開啟後，主頁面頂部將顯示各應用的接管開關（讓該應用請求走本地代理）",
+        "enableFeatureDescription": "開啟後，主頁面頂部將顯示各應用的接管開關（讓該應用請求走本地路由）；開關帶流動邊框即表示路由總開關已開啟",
         "enableFailoverToggle": "在主頁面顯示故障轉移開關",
         "enableFailoverToggleDescription": "開啟後，主頁面頂部將獨立顯示故障轉移開關",
         "running": "執行中",
+        "marqueeHint": "主頁面頂部應用開關帶流動邊框時，表示本機代理服務（路由總開關）執行中",
         "stopped": "已停止"
       },
       "connectivityCheck": {

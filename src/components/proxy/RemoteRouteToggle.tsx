@@ -9,6 +9,8 @@ import {
 } from "@/lib/api/remote";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
+import { useProxyStatus } from "@/hooks/useProxyStatus";
+import { useProxyStatus } from "@/hooks/useProxyStatus";
 
 interface RemoteRouteToggleProps {
   /** 宿主机目标：传入该主机则显示「走本机路由」开关（读/写 routeThroughLocalProxy） */
@@ -43,6 +45,8 @@ export function RemoteRouteToggle({
 }: RemoteRouteToggleProps) {
   const { t } = useTranslation();
   const [saving, setSaving] = useState(false);
+  // 本机路由服务（总开关）运行状态：远端接管依赖它，走马灯边框以此为准
+  const { isRunning: proxyRunning } = useProxyStatus();
   // per-app 开关值（key = appForApi，即 claude/codex/gemini/grokbuild）
   // 容器目标读 routeProxyContainerApps[containerId][app]（各自独立）；
   // 宿主机目标读 routeProxyApps[app]。
@@ -126,11 +130,11 @@ export function RemoteRouteToggle({
           appLabel,
           defaultValue: `容器内 ${appLabel} 经「${host.name}」宿主机隧道走本机代理（本机代理未运行时自动启动）`,
         })
-      : t("remote.route.tooltip.active", {
+      : `${t("remote.route.tooltip.active", {
           name: host.name,
           appLabel,
           defaultValue: `「${host.name}」的 ${appLabel} 已启用远端接管，请求经本机代理转发`,
-        })
+        })}${proxyRunning ? `\n${t("settings.advanced.proxy.marqueeHint")}` : ""}`
     : container
       ? t("remote.route.tooltip.containerInactive", {
           name: host.name,
@@ -147,6 +151,7 @@ export function RemoteRouteToggle({
     <div
       className={cn(
         "flex items-center gap-1 px-1.5 h-8 rounded-lg bg-muted/50 transition-all",
+        proxyRunning && "route-service-live",
         className,
       )}
       title={tooltipText}

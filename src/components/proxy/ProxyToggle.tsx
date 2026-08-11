@@ -45,12 +45,12 @@ export function ProxyToggle({ className, activeApp }: ProxyToggleProps) {
 
   const tooltipText = takeoverEnabled
     ? isRunning
-      ? t("proxy.takeover.tooltip.active", {
+      ? `${t("proxy.takeover.tooltip.active", {
           appLabel,
           address: status?.address,
           port: status?.port,
           defaultValue: `${appLabel} 已接管 - ${status?.address}:${status?.port}\n切换该应用供应商为热切换`,
-        })
+        })}\n${t("settings.advanced.proxy.marqueeHint")}`
       : t("proxy.takeover.tooltip.broken", {
           appLabel,
           defaultValue: `${appLabel} 已接管，但代理服务未运行`,
@@ -64,6 +64,7 @@ export function ProxyToggle({ className, activeApp }: ProxyToggleProps) {
     <div
       className={cn(
         "flex items-center gap-1 px-1.5 h-8 rounded-lg bg-muted/50 transition-all",
+        isRunning && "route-service-live",
         className,
       )}
       title={tooltipText}

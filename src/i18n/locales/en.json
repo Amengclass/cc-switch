@@ -345,10 +345,11 @@
         "title": "Local Routing",
         "description": "Control routing service toggle, view status and port info",
         "enableFeature": "Show App Takeover Toggles on Main Page",
-        "enableFeatureDescription": "When enabled, per-app takeover toggles (route that app's requests through the local proxy) will appear at the top of the main page",
+        "enableFeatureDescription": "When enabled, per-app takeover toggles (send that app's requests through the local route) will appear at the top of the main page; a flowing border on a toggle means the routing master switch is on",
         "enableFailoverToggle": "Show Failover Toggle on Main Page",
         "enableFailoverToggleDescription": "When enabled, the failover toggle will appear independently at the top of the main page",
         "running": "Running",
+        "marqueeHint": "When the app switches at the top of the main page show a flowing border, it means the local proxy service (routing master switch) is running",
         "stopped": "Stopped"
       },
       "connectivityCheck": {
