@@ -67,7 +67,12 @@ async fn effective_route_proxy(
 /// 同时同步给连接层（反向隧道端口），保证隧道/base_url/DNAT 用同一端口。
 async fn current_proxy_port(proxy_service: &crate::services::proxy::ProxyService) -> u16 {
     let port = match proxy_service.get_status().await {
-        Ok(s) if s.running && s.port != 0 => s.port,
+        Ok(s) if s.running && s.port != 0 => {
+            // 同步反向隧道回连地址：监听地址一改（如自定义局域网 IP），
+            // 隧道回连仍对准本机代理实际监听处（0.0.0.0/:: 在 setter 内归一化）。
+            connection::set_tunnel_host(&s.address);
+            s.port
+        }
         _ => 15721,
     };
     connection::set_tunnel_port(port);

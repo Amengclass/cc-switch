@@ -379,7 +379,7 @@ async fn parse_remote_live_default<F: FileOps>(
 }
 
 /// 探测容器走本机路由所需的 base_url host：
-/// - host 网络 → `localhost`（容器共享宿主机回环，隧道直接可达）；
+/// - host 网络 → `127.0.0.1`（容器共享宿主机回环，隧道直接可达）；
 /// - bridge / 自定义网络 → 返回网关 IP（容器访问宿主机的地址），并自动下发
 ///   **per-container DNAT**（`-s <容器IP>` 限定源，只影响该容器）让容器经网关
 ///   打通隧道；
@@ -406,7 +406,7 @@ async fn detect_container_route_base(
         return Ok(None); // 容器不存在或 inspect 失败
     }
     if mode == "host" {
-        return Ok(Some(("localhost".to_string(), String::new())));
+        return Ok(Some(("127.0.0.1".to_string(), String::new())));
     }
     // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）
     let net = if mode == "bridge" { "bridge" } else { mode };
@@ -517,8 +517,8 @@ pub async fn apply_remote_provider_to_live(
     port: u16,
 ) -> Result<crate::remote::effect::EffectReport, String> {
     // 走本机路由的 base_url host 解析：
-    // - 宿主机目标：localhost（隧道监听在宿主机回环）；
-    // - 容器目标：探测网络模式——host → localhost（共享宿主机回环）；
+    // - 宿主机目标：127.0.0.1（隧道监听在宿主机回环）；
+    // - 容器目标：探测网络模式——host → 127.0.0.1（共享宿主机回环）；
     //   bridge/自定义 → 网关 IP（容器访问宿主机的地址）+ per-container DNAT
     //   打通 docker0 → 隧道；探测失败则降级直连（避免写出无效 base_url）。
     // 隧道检查：意图走路由但反向隧道未建成（远端禁了端口转发等）→ 降级直连，
@@ -559,7 +559,7 @@ pub async fn apply_remote_provider_to_live(
             }
         }
     } else {
-        Some("localhost".to_string())
+        Some("127.0.0.1".to_string())
     };
     let route_proxy = route_base.is_some();
     let report = match app {
@@ -575,7 +575,7 @@ pub async fn apply_remote_provider_to_live(
                 crate::services::provider::live::sanitize_claude_settings_for_live(&effective);
             if route_proxy {
                 // 走本机路由：远端 claude 的 live 与本机路由模式逐字节一致——
-                // base_url 指向远端隧道（宿主机=localhost；容器=网关 IP），
+                // base_url 指向远端隧道（宿主机=127.0.0.1；容器=网关 IP），
                 // token 用 PROXY_MANAGED 占位（本机代理转发时注入真实密钥）。
                 let obj = sanitized
                     .as_object_mut()
@@ -607,7 +607,7 @@ pub async fn apply_remote_provider_to_live(
         }
         "codex" => {
             let settings = if route_proxy {
-                // 走本机路由：base_url 指向远端隧道（宿主机=localhost；容器=网关 IP），
+                // 走本机路由：base_url 指向远端隧道（宿主机=127.0.0.1；容器=网关 IP），
                 // 复用本机同一变换 apply_codex_official_proxy_route，保持与本机一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
@@ -638,7 +638,7 @@ pub async fn apply_remote_provider_to_live(
         "grokbuild" => {
             let settings = if route_proxy {
                 // 走本机路由：直接复用本机代理接管的同一变换
-                // （base_url 指向远端隧道：宿主机=localhost；容器=网关 IP +
+                // （base_url 指向远端隧道：宿主机=127.0.0.1；容器=网关 IP +
                 // api_key 占位 + api_backend=responses），与本机产物逐字段一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {

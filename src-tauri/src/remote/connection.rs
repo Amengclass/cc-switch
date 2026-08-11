@@ -27,6 +27,36 @@ fn tunnel_port() -> u16 {
     TUNNEL_PORT.load(Ordering::Relaxed)
 }
 
+/// 反向隧道回连本机时用的地址：默认 127.0.0.1，随本机代理实际监听地址动态同步
+/// （`commands.rs` 经 `set_tunnel_host` 更新）。归一化：0.0.0.0 → 127.0.0.1，
+/// :: → ::1（客户端无法用通配地址连接，与 `build_proxy_urls` 同一套规则）。
+/// 用 `Option` 避免 static 初始化里的非常量调用（`to_string` 不允许）。
+static TUNNEL_HOST: Mutex<Option<String>> = Mutex::new(None);
+
+/// 更新反向隧道回连地址（与 ProxyStatus.address 对齐）。幂等，可在任意时刻调用。
+/// 0.0.0.0 / :: 是「监听所有网卡」的通配地址，回连时归一化为对应回环地址。
+pub fn set_tunnel_host(address: &str) {
+    if address.is_empty() {
+        return;
+    }
+    let normalized = match address {
+        "0.0.0.0" => "127.0.0.1".to_string(),
+        "::" => "::1".to_string(),
+        other => other.to_string(),
+    };
+    match TUNNEL_HOST.lock() {
+        Ok(mut g) => *g = Some(normalized),
+        Err(p) => *p.into_inner() = Some(normalized),
+    }
+}
+
+fn tunnel_host() -> String {
+    match TUNNEL_HOST.lock() {
+        Ok(g) => g.clone().unwrap_or_else(|| "127.0.0.1".to_string()),
+        Err(p) => p.into_inner().clone().unwrap_or_else(|| "127.0.0.1".to_string()),
+    }
+}
+
 /// 认证时接受任意主机密钥。
 /// TODO(M2):引入 known_hosts 校验,防止中间人攻击。
 #[derive(Clone, Debug)]
@@ -45,19 +75,22 @@ impl client::Handler for RemoteHandler {
     /// 反向隧道：远端连上本机声明的 127.0.0.1:端口（即远端 localhost:15721）时，
     /// 把该 SSH 通道桥接到本机对应端口（cc-switch 本地代理）。
     /// 仅当本机对该连接发起过 tcpip_forward 时才会触发，不会干扰其他功能。
+    /// 回连目标用 `tunnel_host():tunnel_port()`（本机代理实际监听处），而非远端传来的
+    /// `connected_address`——否则本机代理监听地址一改（如自定义局域网 IP），
+    /// 远端传来的仍是 127.0.0.1，隧道桥接就会失败。
     #[allow(clippy::too_many_arguments)]
     async fn server_channel_open_forwarded_tcpip(
         &mut self,
         channel: Channel<Msg>,
-        connected_address: &str,
-        connected_port: u32,
+        _connected_address: &str,
+        _connected_port: u32,
         _originator_address: &str,
         _originator_port: u32,
         reply: ChannelOpenHandle,
         _session: &mut client::Session,
     ) -> Result<(), Self::Error> {
         reply.accept().await;
-        let target = format!("{connected_address}:{connected_port}");
+        let target = format!("{}:{}", tunnel_host(), tunnel_port());
         tokio::spawn(async move {
             let upstream = match tokio::net::TcpStream::connect(&target).await {
                 Ok(s) => s,
