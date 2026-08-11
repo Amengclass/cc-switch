@@ -242,6 +242,7 @@
 | **全 app 远程切换(08-07)** | gemini(.env+settings.json 读-改-写)/grokbuild(TOML)/opencode(additive upsert)/openclaw(JSON5)/hermes(YAML) 五个分支,全部复用本机纯变换产出一致;connection 加 read_remote_text(exec cat,容器兼容) |
 | 功能按钮远端适配(08-07) | 卡片测试按钮经 SSH 在远端 curl base_url(复用 resolve_base_url);删除 remove 清远端 live(additive 3 app)/delete 只删 DB+清远端记录(对齐本机) |
 | 远端路由/接管(08-11) | 反向隧道按意图对账(不重建连接)+ 端口动态化;per-container DNAT(按容器 IP);容器×app 独立接管开关(`route_proxy_container_apps`);隧道失败降级直连 + warnings 提示 + 开关回退(reapply/switch 双路径);远端隐藏 claude-desktop;宿主机仅需 22 端口 |
+| 隧道回连地址动态化(08-11) | `TUNNEL_HOST` 全局同步本机代理监听地址(0.0.0.0→127.0.0.1、::→::1);`server_channel_open_forwarded_tcpip` 回连改 `tunnel_host():tunnel_port()`——本机监听地址改任意 IP 远端仍可用 |
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
 
 ### ⏳ 远程·待完成(优先级从高到低)
@@ -253,6 +254,7 @@
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |
 | 低 | `APP_INSTALL_CMDS` 包名校对 ⚠️ 2026-08-08 核实:grokbuild 前端 `@grok/grok-cli`(npm 404,应为 `@xai-official/grok`)、hermes 前端 `hermes-cli`(无关包,应为 PyPI `hermes-agent`)——均需改,后端 misc.rs 已用正确包名 |
+| 低 | 远端隧道监听地址可配置化(2026-08-11 记录):现 `tcpip_forward("127.0.0.1",port)` 常量,UI 不可控;若需跨机访问/容器简化,可加设置项(默认 127.0.0.1,选非回环需提示远端 sshd 开 GatewayPorts)——当前无实际需求,暂缓 |
 | 既有 | 广播模式、密钥认证、`~/.ssh/config` 兼容、远端发现/恢复 Skills 等(见下方「待完成」) |
 
 ### 📋 功能按钮远端适配核查(2026-08-08 记录)
