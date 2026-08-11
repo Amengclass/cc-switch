@@ -501,14 +501,16 @@ async fn pooled_connect(
 }
 
 /// 该宿主是否「需要反向隧道」：任一 app 开了远端接管（宿主机目标），或任一容器
-/// 任一 app 开了接管（容器目标经隧道走 DNAT），或旧布尔兼容字段为 true。
+/// 任一 app 开了接管（容器目标经隧道走 DNAT）。
+/// 注意：不再读旧布尔 `route_through_local_proxy`——它是迁移前兼容字段，
+/// per-app 字段（route_proxy_apps / route_proxy_container_apps）已完全覆盖语义；
+/// 若保留会误判（旧库升级后布尔残留 1 而 per-app 全关，也会去建隧道）。
 fn host_wants_tunnel(host: &RemoteHost) -> bool {
     host.route_proxy_apps.values().any(|&v| v)
         || host
             .route_proxy_container_apps
             .values()
             .any(|m| m.values().any(|&v| v))
-        || host.route_through_local_proxy
 }
 
 /// 放回池（顺带惰性清理：过期 / 超量）。

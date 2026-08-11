@@ -692,6 +692,9 @@ pub struct RemoteProvidersView {
     pub current_provider_id: Option<String>,
     /// additive：远端 live 中的供应商 ID 集合（isInConfig 按钮态）；其他 app 为空
     pub live_ids: Vec<String>,
+    /// 该目标（宿主机/容器）per-app 接管开关是否开启（对齐本机 isProxyTakeover 语义，
+    /// 供前端供应商卡片绿色高亮）
+    pub route_proxy_enabled: bool,
 }
 
 /// 远端供应商面板数据源（per-target 独立）。
@@ -766,10 +769,16 @@ async fn build_remote_providers_view(
         &ssot,
     )
     .await?;
+    let route_proxy_enabled = route_proxy_for_target(
+        &load_host(state, host_id)?,
+        container,
+        app,
+    );
     Ok(RemoteProvidersView {
         providers: ssot.providers,
         current_provider_id,
         live_ids,
+        route_proxy_enabled,
     })
 }
 

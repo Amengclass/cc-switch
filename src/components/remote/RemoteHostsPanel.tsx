@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   Server,
@@ -6,50 +13,49 @@ import {
   Pencil,
   Trash2,
   PlugZap,
-  FileText,
   Loader2,
-  ExternalLink,
   ShieldAlert,
   Eye,
   EyeOff,
   Tag,
   Globe,
+  Search,
   User,
   Key,
   Info,
-  X,
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetFooter,
-} from "@/components/ui/sheet";
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { ManagementListSearch } from "@/components/common/ManagementListSearch";
 import {
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
   listRemoteHosts,
-  readRemoteSettings,
   saveRemoteHost,
   scanRemoteEnvConflicts,
   testRemoteConnection,
@@ -100,26 +106,18 @@ function formToDraft(f: HostFormState) {
   };
 }
 
-/** toast 多行信息分点显示（①②③…）：测试连接结果等多项说明用，与全局多条提示风格一致 */
-function bulletPoints(items: string[]) {
-  return (
-    <div className="space-y-0.5 text-left">
-      {items.map((item, i) => (
-        <div key={i} className="flex items-start gap-1.5">
-          <span className="shrink-0 text-muted-foreground">
-            {i < 10 ? "①②③④⑤⑥⑦⑧⑨⑩"[i] : `${i + 1}.`}
-          </span>
-          <span>{item}</span>
-        </div>
-      ))}
-    </div>
-  );
+export interface RemoteHostsPanelHandle {
+  openAdd: () => void;
 }
 
-export function RemoteHostsPanel({ app }: { app: string }) {
+export const RemoteHostsPanel = React.forwardRef<
+  RemoteHostsPanelHandle,
+  { app: string }
+>(function RemoteHostsPanel({ app }, ref) {
   const { t } = useTranslation();
 
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RemoteHost | null>(null);
@@ -130,11 +128,6 @@ export function RemoteHostsPanel({ app }: { app: string }) {
   const [testFormLoading, setTestFormLoading] = useState(false);
   // 抽屉打开时初始焦点指向「名称」输入框（而非右上角 X）
   const nameInputRef = useRef<HTMLInputElement>(null);
-  const [readingId, setReadingId] = useState<string | null>(null);
-  const [viewSettings, setViewSettings] = useState<{
-    host: RemoteHost;
-    content: string;
-  } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{
     open: boolean;
     host: RemoteHost | null;
@@ -172,6 +165,8 @@ export function RemoteHostsPanel({ app }: { app: string }) {
     setForm(EMPTY_FORM);
     setFormOpen(true);
   };
+
+  useImperativeHandle(ref, () => ({ openAdd }), [openAdd]);
 
   const openEdit = (host: RemoteHost) => {
     setEditing(host);
@@ -219,7 +214,9 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       username: draft.username,
       authMethod: draft.authMethod,
       savePassword: draft.savePassword,
-      routeThroughLocalProxy: draft.routeThroughLocalProxy,
+      // 旧布尔 routeThroughLocalProxy 已废弃（per-app 字段全覆盖）：保存固定 false，
+      // 顺带清除旧库升级时的残留 1（否则 host_wants_tunnel 曾误判建隧道）。
+      routeThroughLocalProxy: false,
       routeProxyApps: draft.routeProxyApps,
       // 表单不编辑容器开关：编辑主机时保留已有容器开关，避免误清空
       routeProxyContainerApps: editing?.routeProxyContainerApps,
@@ -249,42 +246,12 @@ export function RemoteHostsPanel({ app }: { app: string }) {
   const handleTest = async (host: RemoteHost) => {
     setTestingId(host.id);
     try {
-      const info = await testRemoteConnection(host.id, app);
-      const appLabel = t(`apps.${app}`);
-      const cliStatusText = info.cliInstalled
-        ? t("remote.cliInstalled", {
-            defaultValue: "已检测到 {{app}}",
-            app: appLabel,
-          })
-        : info.cliInstalled === false
-          ? t("remote.cliNotInstalled", {
-              defaultValue: "未检测到 {{app}}（配置会预置，安装后生效）",
-              app: appLabel,
-            })
-          : t("remote.cliDetectFailed", {
-              defaultValue: "{{app}} 安装状态检测失败",
-              app: appLabel,
-            });
+      await testRemoteConnection(host.id, app);
       toast.success(
-        t("remote.connected", {
-          defaultValue: `连接成功 ${host.name}（远端目录 ${info.home}）`,
+        t("remote.reachable", {
+          defaultValue: `连通正常 ${host.name}`,
           name: host.name,
-          home: info.home,
         }),
-        {
-          description: bulletPoints([
-            info.settingsExists
-              ? t("remote.settingsExists", {
-                  defaultValue: "检测到远端 {{app}} 配置",
-                  app: appLabel,
-                })
-              : t("remote.settingsMissing", {
-                  defaultValue: "远端尚未创建 {{app}} 配置",
-                  app: appLabel,
-                }),
-            cliStatusText,
-          ]),
-        },
       );
     } catch (error) {
       console.error("Failed to test connection:", error);
@@ -308,47 +275,17 @@ export function RemoteHostsPanel({ app }: { app: string }) {
     }
     setTestFormLoading(true);
     try {
-      const info = await testRemoteConnectionInfo(
+      await testRemoteConnectionInfo(
         form.host.trim(),
         Math.max(1, Number(form.port) || 22),
         form.username.trim(),
         form.password,
         app,
       );
-      const appLabel = t(`apps.${app}`);
-      const cliStatusText = info.cliInstalled
-        ? t("remote.cliInstalled", {
-            defaultValue: "已检测到 {{app}}",
-            app: appLabel,
-          })
-        : info.cliInstalled === false
-          ? t("remote.cliNotInstalled", {
-              defaultValue: "未检测到 {{app}}（配置会预置，安装后生效）",
-              app: appLabel,
-            })
-          : t("remote.cliDetectFailed", {
-              defaultValue: "{{app}} 安装状态检测失败",
-              app: appLabel,
-            });
       toast.success(
-        t("remote.connected", {
-          defaultValue: `连接成功（远端目录 ${info.home}）`,
-          home: info.home,
+        t("remote.reachable", {
+          defaultValue: "连通正常",
         }),
-        {
-          description: bulletPoints([
-            info.settingsExists
-              ? t("remote.settingsExists", {
-                  defaultValue: "检测到远端 {{app}} 配置",
-                  app: appLabel,
-                })
-              : t("remote.settingsMissing", {
-                  defaultValue: "远端尚未创建 {{app}} 配置",
-                  app: appLabel,
-                }),
-            cliStatusText,
-          ]),
-        },
       );
     } catch (error) {
       console.error("Failed to test new connection:", error);
@@ -357,24 +294,6 @@ export function RemoteHostsPanel({ app }: { app: string }) {
       });
     } finally {
       setTestFormLoading(false);
-    }
-  };
-
-  const handleReadSettings = async (host: RemoteHost) => {
-    setReadingId(host.id);
-    try {
-      const settings = await readRemoteSettings(host.id);
-      setViewSettings({ host, content: JSON.stringify(settings, null, 2) });
-    } catch (error) {
-      console.error("Failed to read remote settings:", error);
-      toast.error(
-        t("remote.readSettingsError", {
-          defaultValue: "读取远端配置失败",
-        }),
-        { description: String(error) },
-      );
-    } finally {
-      setReadingId(null);
     }
   };
 
@@ -443,15 +362,41 @@ export function RemoteHostsPanel({ app }: { app: string }) {
     () =>
       t("remote.description", {
         defaultValue:
-          "通过 SSH 直连 Linux 服务器，直接读写远端 ~/.claude/settings.json，实现「一处配置、多机生效」。",
+          "通过 SSH 直连 Linux 服务器，统一管理远端各应用（Claude Code / Codex / Gemini / Grok Build / OpenCode 等）的配置与供应商切换，实现「一处配置、多机生效」。",
       }),
     [t],
   );
 
+  // 搜索过滤：按名称 / 地址 / 用户名匹配
+  const filteredHosts = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return hosts;
+    return hosts.filter(
+      (h) =>
+        h.name.toLowerCase().includes(q) ||
+        h.host.toLowerCase().includes(q) ||
+        h.username.toLowerCase().includes(q),
+    );
+  }, [hosts, searchQuery]);
+
   return (
-    <div className="space-y-4 px-6 pt-4">
-      {/* 顶部导航已含标题「远程主机」，此处仅保留有信息量的描述 */}
+    <TooltipProvider>
+      <div className="space-y-4 px-6 pt-4">
+      {/* 添加按钮在顶部导航右侧（remote.add），此处仅保留页面描述 */}
       <p className="text-sm text-muted-foreground">{description}</p>
+
+      {/* 搜索 + 计数（对齐 MCP 管理面板） */}
+      <ManagementListSearch
+        value={searchQuery}
+        onValueChange={setSearchQuery}
+        placeholder={t("remote.searchPlaceholder", {
+          defaultValue: "搜索主机名称 / 地址 / 用户名…",
+        })}
+        ariaLabel={t("remote.searchAriaLabel", {
+          defaultValue: "搜索远程主机",
+        })}
+        clearLabel={t("common.clear", { defaultValue: "清除" })}
+      />
 
       {/* 主机列表 */}
       {loading ? (
@@ -472,12 +417,23 @@ export function RemoteHostsPanel({ app }: { app: string }) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {hosts.map((host) => (
+        <div>
+          {filteredHosts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-12 text-center">
+              <Search className="mb-3 h-8 w-8 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">
+                {t("remote.searchEmpty", {
+                  defaultValue: "没有匹配的主机",
+                })}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {filteredHosts.map((host) => (
             <div
               key={host.id}
               className={cn(
-                "rounded-xl border bg-card p-4 shadow-sm transition-shadow",
+                "group rounded-xl border bg-card p-4 shadow-sm transition-all duration-300 hover:border-border-active hover:shadow-sm",
                 editing?.id === host.id &&
                   "ring-2 ring-primary/60 border-primary/40",
               )}
@@ -485,12 +441,42 @@ export function RemoteHostsPanel({ app }: { app: string }) {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{host.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {host.username}@{host.host}:{host.port}
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    <span className="text-foreground/70">{host.username}</span>
+                    <span className="text-muted-foreground/60">@</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void copyText(host.host).then(() =>
+                              toast.success(
+                                t("remote.copied", {
+                                  defaultValue: "主机地址已复制",
+                                }),
+                              ),
+                            );
+                          }}
+                          className="inline-block font-mono text-blue-500 transition-colors hover:underline dark:text-blue-400 cursor-pointer"
+                        >
+                          {host.host}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t("remote.copyHost", {
+                          defaultValue: "点击复制主机地址",
+                        })}
+                      </TooltipContent>
+                    </Tooltip>
+                    <span className="text-muted-foreground/60">
+                      :{host.port}
+                    </span>
                   </p>
                 </div>
-                <Server className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+                <Server className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-primary" />
               </div>
+
+              {/* 测试结果通过 toast 提示，卡片不常驻状态行（仅按钮文案反映已测过） */}
 
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <Button
@@ -504,20 +490,9 @@ export function RemoteHostsPanel({ app }: { app: string }) {
                   ) : (
                     <PlugZap className="mr-1 h-3.5 w-3.5" />
                   )}
-                  {t("remote.test", { defaultValue: "测试连接" })}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleReadSettings(host)}
-                  disabled={readingId === host.id}
-                >
-                  {readingId === host.id ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <FileText className="mr-1 h-3.5 w-3.5" />
-                  )}
-                  {t("remote.readSettings", { defaultValue: "读取配置" })}
+                  {testingId === host.id
+                    ? t("remote.testingShort", { defaultValue: "测试中…" })
+                    : t("remote.test", { defaultValue: "测试连接" })}
                 </Button>
                 <Button
                   variant="outline"
@@ -548,48 +523,64 @@ export function RemoteHostsPanel({ app }: { app: string }) {
               </div>
             </div>
           ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* 添加按钮 */}
-      <Button onClick={openAdd} className="gap-1.5">
-        <Plus className="h-4 w-4" />
-        {t("remote.add", { defaultValue: "添加远程主机" })}
-      </Button>
+      {/* 添加按钮已移至顶部工具栏（不随列表漂移） */}
 
-      {/* 添加/编辑表单 - 右侧抽屉 */}
-      <Sheet open={formOpen} onOpenChange={setFormOpen}>
-        <SheetContent
-          className="top-16 h-[calc(100dvh-64px)] max-h-[calc(100dvh-64px)]"
-          onOpenAutoFocus={(e) => {
-            // 初始焦点指向「名称」输入框，避免聚焦到右上角 X
-            e.preventDefault();
-            nameInputRef.current?.focus();
-          }}
-        >
-          <SheetHeader>
-            <div className="flex items-start justify-between gap-2">
-              <div className="space-y-1">
-                <SheetTitle className="flex items-center gap-2">
-                  <Server className="h-4 w-4 text-primary" />
-                  {editing
-                    ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
-                    : t("remote.addTitle", { defaultValue: "添加远程主机" })}
-                </SheetTitle>
-                <p className="text-xs text-muted-foreground">
-                  {t("remote.formSubtitle", {
-                    defaultValue: "填写 SSH 连接信息，保存后可快速连接与管理",
-                  })}
-                </p>
-              </div>
-              <SheetClose className="shrink-0 rounded-full p-1.5 hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2">
-                <X className="size-4 text-muted-foreground" />
-              </SheetClose>
-            </div>
-          </SheetHeader>
-
-          {/* 可滚动表单区域 - 与 header/footer 对齐 px-6 */}
-          <div className="flex-1 overflow-y-auto px-6 py-5 space-y-0">
+      {/* 添加/编辑表单 - 全屏面板（对齐 MCP 的 FullScreenPanel 形态） */}
+      <FullScreenPanel
+        isOpen={formOpen}
+        title={
+          editing
+            ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
+            : t("remote.addTitle", { defaultValue: "添加远程主机" })
+        }
+        onClose={() => setFormOpen(false)}
+        footer={
+          <>
+            <Button
+              variant="outline"
+              onClick={() => setFormOpen(false)}
+              disabled={saving || testFormLoading}
+            >
+              {t("common.cancel", { defaultValue: "取消" })}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (editing) {
+                  void handleTest(editing);
+                } else {
+                  void handleTestForm();
+                }
+              }}
+              disabled={saving || testFormLoading}
+            >
+              {testFormLoading || (editing && testingId === editing.id) ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <PlugZap className="mr-1 h-4 w-4" />
+              )}
+              {testFormLoading || (editing && testingId === editing.id)
+                ? t("remote.testing", { defaultValue: "测试中…" })
+                : t("remote.test", { defaultValue: "测试连接" })}
+            </Button>
+            <Button
+              onClick={() => void handleSave()}
+              disabled={saving || testFormLoading}
+            >
+              {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+              {t("common.save", { defaultValue: "保存" })}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-6">
+          {/* 基础信息 + 连接信息 + 接管开关 + 提示：整体卡片（对齐 MCP 表单的 glass 卡片样式） */}
+          <div className="glass rounded-xl p-6 border border-white/10 space-y-0">
             {/* 基础信息 */}
             <div className="space-y-3 pb-4">
               <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
@@ -837,13 +828,13 @@ export function RemoteHostsPanel({ app }: { app: string }) {
                 <div className="space-y-0.5">
                   <Label className="text-sm font-normal text-foreground/80">
                     {t("remote.routeThroughLocalProxy", {
-                      defaultValue: "远端接管",
+                      defaultValue: "远端接管（宿主机）",
                     })}
                   </Label>
                   <p className="text-xs text-muted-foreground/70">
                     {t("remote.routeThroughLocalProxyHint", {
                       defaultValue:
-                        "开启后，对应应用的供应商会经 SSH 反向隧道使用你本机正在运行的代理；未运行时会自动启动本机代理",
+                        "作用于该宿主机：开启后，对应应用的供应商会经 SSH 反向隧道使用你本机正在运行的代理；未运行时会自动启动本机代理。容器目标请到容器下单独配置",
                     })}
                   </p>
                 </div>
@@ -884,72 +875,8 @@ export function RemoteHostsPanel({ app }: { app: string }) {
               </AlertDescription>
             </Alert>
           </div>
-
-          <SheetFooter>
-            <Button
-              variant="outline"
-              onClick={() => setFormOpen(false)}
-              disabled={saving || testFormLoading}
-            >
-              {t("common.cancel", { defaultValue: "取消" })}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                if (editing) {
-                  void handleTest(editing);
-                } else {
-                  void handleTestForm();
-                }
-              }}
-              disabled={saving || testFormLoading}
-            >
-              {testFormLoading || (editing && testingId === editing.id) ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <PlugZap className="mr-1 h-4 w-4" />
-              )}
-              {testFormLoading || (editing && testingId === editing.id)
-                ? t("remote.testing", { defaultValue: "测试中…" })
-                : t("remote.test", { defaultValue: "测试连接" })}
-            </Button>
-            <Button
-              onClick={() => void handleSave()}
-              disabled={saving || testFormLoading}
-            >
-              {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-              {t("common.save", { defaultValue: "保存" })}
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
-
-      {/* 远端配置查看 */}
-      <Dialog
-        open={Boolean(viewSettings)}
-        onOpenChange={(open) => !open && setViewSettings(null)}
-      >
-        <DialogContent className="max-h-[85vh] overflow-y-auto max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ExternalLink className="h-4 w-4" />
-              {viewSettings
-                ? `${viewSettings.host.name} · ~/.claude/settings.json`
-                : ""}
-            </DialogTitle>
-          </DialogHeader>
-          <ScrollArea className="h-[55vh] rounded-lg border bg-muted/40 p-3">
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed">
-              {viewSettings?.content}
-            </pre>
-          </ScrollArea>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setViewSettings(null)}>
-              {t("common.close", { defaultValue: "关闭" })}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </div>
+      </FullScreenPanel>
 
       {/* 环境变量清理 */}
       <Dialog
@@ -958,53 +885,68 @@ export function RemoteHostsPanel({ app }: { app: string }) {
           !open && setEnvDialog({ open: false, host: null })
         }
       >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
+        <DialogContent className="max-w-md" zIndex="alert">
+          <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
+            <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
+              <ShieldAlert className="h-5 w-5 text-amber-500" />
               {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
             </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground">
+              {envDialog.host
+                ? t("remote.envSubtitle", {
+                    defaultValue: "{{host}} · 清理后远端切换才生效",
+                    host: envDialog.host.name,
+                  })
+                : ""}
+            </DialogDescription>
           </DialogHeader>
-          {envLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-            </div>
-          ) : envConflicts.length === 0 ? (
-            <Alert>
-              <AlertDescription>
-                {t("remote.envClean", {
-                  defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
-                })}
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                {t("remote.envConflictCount", {
-                  defaultValue: "发现 {{count}} 处冲突",
-                  count: envConflicts.length,
-                })}
-              </p>
-              <ScrollArea className="max-h-[45vh] rounded-lg border p-2">
-                <div className="space-y-1">
-                  {envConflicts.map((c, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-2 rounded-md bg-muted/40 px-2 py-1.5 text-xs"
-                    >
-                      <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-                      <div className="min-w-0">
-                        <p className="font-mono font-medium">{c.varName}</p>
-                        <p className="truncate text-muted-foreground">
+
+          <div className="space-y-3 px-6">
+            {envLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+              </div>
+            ) : envConflicts.length === 0 ? (
+              <Alert>
+                <AlertDescription>
+                  {t("remote.envClean", {
+                    defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
+                  })}
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <>
+                <ScrollArea className="max-h-[45vh]">
+                  <div className="space-y-2">
+                    {envConflicts.map((c, i) => (
+                      <div
+                        key={i}
+                        className="rounded-lg border border-border bg-muted/30 px-3 py-2.5"
+                      >
+                        <p className="font-mono text-sm font-medium">
+                          {c.varName}
+                        </p>
+                        <p
+                          className="mt-0.5 break-all font-mono text-xs text-muted-foreground"
+                          title={c.sourcePath}
+                        >
                           {c.sourcePath}
                         </p>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </div>
-          )}
-          <DialogFooter>
+                    ))}
+                  </div>
+                </ScrollArea>
+                <p className="text-xs text-muted-foreground">
+                  {t("remote.envCleanWarning", {
+                    defaultValue:
+                      "清理会移除这些变量（含系统级 .env 中的定义）",
+                  })}
+                </p>
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
             <Button
               variant="outline"
               onClick={() => setEnvDialog({ open: false, host: null })}
@@ -1012,6 +954,7 @@ export function RemoteHostsPanel({ app }: { app: string }) {
               {t("common.cancel", { defaultValue: "取消" })}
             </Button>
             <Button
+              variant="destructive"
               disabled={envLoading || envConflicts.length === 0 || envCleaning}
               onClick={() => void handleCleanEnv()}
             >
@@ -1036,6 +979,7 @@ export function RemoteHostsPanel({ app }: { app: string }) {
         onConfirm={handleDelete}
         onCancel={() => setDeleteConfirm({ open: false, host: null })}
       />
-    </div>
+      </div>
+    </TooltipProvider>
   );
-}
+});

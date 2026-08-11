@@ -170,6 +170,8 @@ export interface RemoteProvidersView {
   currentProviderId: string | null;
   /** additive：远端 live 中的供应商 ID 集合（isInConfig 按钮态） */
   liveIds: string[];
+  /** 该目标（宿主机/容器）per-app 接管开关是否开启（对齐本机 isProxyTakeover） */
+  routeProxyEnabled: boolean;
 }
 
 /** 后端原始视图（snake_case）→ 前端 camelCase 视图 */
@@ -177,6 +179,7 @@ function toRemoteProvidersView(view: {
   providers: Provider[];
   current_provider_id: string | null;
   live_ids: string[];
+  route_proxy_enabled: boolean;
 }): RemoteProvidersView {
   const providers: Record<string, Provider> = {};
   for (const p of view.providers) {
@@ -186,6 +189,7 @@ function toRemoteProvidersView(view: {
     providers,
     currentProviderId: view.current_provider_id,
     liveIds: view.live_ids,
+    routeProxyEnabled: view.route_proxy_enabled,
   };
 }
 

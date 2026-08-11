@@ -431,6 +431,12 @@ impl Database {
             "UPDATE remote_hosts SET route_proxy_apps = '{\"claude\":true,\"codex\":true,\"gemini\":true,\"grokbuild\":true}' WHERE route_through_local_proxy = 1 AND route_proxy_apps = '{}'",
             [],
         );
+        // 展开后清零旧布尔：route_through_local_proxy 已废弃（per-app 全覆盖），
+        // 不清会残留 1，导致 host_wants_tunnel 误判「需要隧道」（旧库升级场景）。
+        let _ = conn.execute(
+            "UPDATE remote_hosts SET route_through_local_proxy = 0 WHERE route_through_local_proxy = 1",
+            [],
+        );
 
         // 尝试添加 per-container×app 接管列 route_proxy_container_apps
         // （JSON：{"<容器名>":{"claude":true,...}}）。旧库升级后容器侧默认空 = 不接管。

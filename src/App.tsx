@@ -325,8 +325,9 @@ function App() {
 
   // 选中服务器时：读取远端当前生效的供应商（按 base_url 匹配本地供应商）
   // 并检测远端 Claude Code 安装状态（用于主面板横幅徽标）。
+  // remote 视图（远程主机管理面板）不针对当前目标，跳过探测。
   useEffect(() => {
-    if (!remoteTargetId) {
+    if (currentView === "remote" || !remoteTargetId) {
       setRemoteCurrentProviderId(null);
       setRemoteInstalled(null);
       setContainers([]);
@@ -508,6 +509,7 @@ function App() {
 
   const promptPanelRef = useRef<any>(null);
   const mcpPanelRef = useRef<any>(null);
+  const remoteHostsPanelRef = useRef<any>(null);
   const skillsPageRef = useRef<any>(null);
   const unifiedSkillsPanelRef = useRef<any>(null);
   // 订阅未管理 Skill 的共享缓存（实际扫描由 UnifiedSkillsPanel 进入页面时触发）。
@@ -1496,7 +1498,12 @@ function App() {
             </div>
           );
         case "remote":
-          return <RemoteHostsPanel app={sharedFeatureApp} />;
+          return (
+            <RemoteHostsPanel
+              ref={remoteHostsPanelRef}
+              app={sharedFeatureApp}
+            />
+          );
 
         case "sessions":
           return (
@@ -1535,10 +1542,9 @@ function App() {
                       isLoading={isLoading}
                       isProxyRunning={isProxyRunning}
                       isProxyTakeover={
-                        !remoteTargetId &&
-                        !remoteContainerId &&
-                        isProxyRunning &&
-                        isCurrentAppTakeoverActive
+                        remoteTargetId || remoteContainerId
+                          ? Boolean(remoteProvidersQuery.data?.routeProxyEnabled)
+                          : isProxyRunning && isCurrentAppTakeoverActive
                       }
                       isSwitching={
                         remoteTargetId
@@ -1879,22 +1885,38 @@ function App() {
                       activeApp={activeApp}
                       appForApi={sharedFeatureApp}
                       containerId={remoteContainerId}
-                      onUpdated={(h) =>
+                      onUpdated={(h) => {
                         setServers((prev) =>
                           prev.map((s) => (s.id === h.id ? h : s)),
-                        )
-                      }
+                        );
+                        void queryClient.invalidateQueries({
+                          queryKey: [
+                            "remoteProviders",
+                            h.id,
+                            remoteContainerId || "__host__",
+                            activeApp,
+                          ],
+                        });
+                      }}
                     />
                   ) : remoteTargetId ? (
                     <RemoteRouteToggle
                       host={servers.find((s) => s.id === remoteTargetId)}
                       activeApp={activeApp}
                       appForApi={sharedFeatureApp}
-                      onUpdated={(h) =>
+                      onUpdated={(h) => {
                         setServers((prev) =>
                           prev.map((s) => (s.id === h.id ? h : s)),
-                        )
-                      }
+                        );
+                        void queryClient.invalidateQueries({
+                          queryKey: [
+                            "remoteProviders",
+                            h.id,
+                            "__host__",
+                            activeApp,
+                          ],
+                        });
+                      }}
                     />
                   ) : activeApp === "claude-desktop" ? (
                     <ClaudeDesktopRouteToggle />
@@ -1971,6 +1993,17 @@ function App() {
                       {t("mcp.addMcp")}
                     </Button>
                   </>
+                )}
+                {currentView === "remote" && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => remoteHostsPanelRef.current?.openAdd()}
+                    className="hover:bg-black/5 dark:hover:bg-white/5"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    {t("remote.add", { defaultValue: "添加远程主机" })}
+                  </Button>
                 )}
                 {currentView === "skills" && (
                   <>
@@ -2312,8 +2345,9 @@ function App() {
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
-        {/* 设置页不需要目标选择器/远端状态栏（设置里无切换场景） */}
-        {currentView !== "settings" && (
+        {/* 设置页/远程主机管理页不需要目标选择器/远端状态栏：设置里无切换场景，
+            远程主机面板管理的是全部主机（不针对当前目标），显示了反而误导 */}
+        {currentView !== "settings" && currentView !== "remote" && (
           <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
             <TargetBreadcrumb
               remoteTargetId={remoteTargetId}
