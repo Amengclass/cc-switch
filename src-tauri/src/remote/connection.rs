@@ -1,4 +1,13 @@
 //! SSH 连接与认证(russh 0.62,纯 Rust,无 C 工具链依赖)。
+//!
+//! 反向隧道机制（远端 app 走本机代理）：
+//! 远端 app → `REMOTE_TUNNEL_LISTEN_ADDR:port`（远端 sshd 隧道入口）
+//!   → SSH 隧道 → 本机 `server_channel_open_forwarded_tcpip`
+//!   → 回连本机代理实际监听处（`TUNNEL_HOST` 同步 listen_address）
+//!   → 本机代理转发到真实 API。
+//! 注意两个地址默认都是 127.0.0.1 但语义不同：REMOTE 是「远端 sshd 监听」
+//! （写死回环，无需 GatewayPorts）；TUNNEL_HOST 是「本机代理监听」
+//! （随 listen_address 动态同步，用户可改）。
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -31,6 +40,7 @@ fn tunnel_port() -> u16 {
 /// （`commands.rs` 经 `set_tunnel_host` 更新）。归一化：0.0.0.0 → 127.0.0.1，
 /// :: → ::1（客户端无法用通配地址连接，与 `build_proxy_urls` 同一套规则）。
 /// 用 `Option` 避免 static 初始化里的非常量调用（`to_string` 不允许）。
+/// 与远端侧 `REMOTE_TUNNEL_LISTEN_ADDR`（sshd 隧道监听，写死）配套，见模块顶部机制说明。
 static TUNNEL_HOST: Mutex<Option<String>> = Mutex::new(None);
 
 /// 更新反向隧道回连地址（与 ProxyStatus.address 对齐）。幂等，可在任意时刻调用。
