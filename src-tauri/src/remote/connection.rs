@@ -62,7 +62,9 @@ fn tunnel_host() -> String {
 /// 若未来要跨机访问（局域网其他机器走此隧道）：改这里 + 远端 sshd 配
 /// `GatewayPorts clientspecified`；注意与本机回连地址 `TUNNEL_HOST`
 /// （另一处 127.0.0.1，本机代理监听地址）语义不同，勿混淆。
-const REMOTE_TUNNEL_LISTEN_ADDR: &str = "127.0.0.1";
+/// `pub`：providers.rs 写入远端 base_url 与 DNAT 目标也引用此常量，
+/// 保证「sshd 隧道监听地址」与「远端 app 连的地址」永远配套一致（单点修改）。
+pub const REMOTE_TUNNEL_LISTEN_ADDR: &str = "127.0.0.1";
 
 /// 认证时接受任意主机密钥。
 /// TODO(M2):引入 known_hosts 校验,防止中间人攻击。

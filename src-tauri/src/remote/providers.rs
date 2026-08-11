@@ -406,7 +406,7 @@ async fn detect_container_route_base(
         return Ok(None); // 容器不存在或 inspect 失败
     }
     if mode == "host" {
-        return Ok(Some(("127.0.0.1".to_string(), String::new())));
+        return Ok(Some((crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR.to_string(), String::new())));
     }
     // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）
     let net = if mode == "bridge" { "bridge" } else { mode };
@@ -478,7 +478,9 @@ async fn ensure_container_dnat(
     )
     .await?;
     let rule = format!(
-        "iptables -t nat -C PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} >/dev/null 2>&1 || true",
+        "iptables -t nat -C PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} >/dev/null 2>&1 || true",
+        crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
+        crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
         ip = container_ip,
         port = port
     );
@@ -494,7 +496,8 @@ pub async fn remove_container_dnat(
     port: u16,
 ) -> Result<(), String> {
     let rule = format!(
-        "iptables -t nat -D PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination 127.0.0.1:{port} 2>/dev/null || true",
+        "iptables -t nat -D PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || true",
+        crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
         ip = container_ip,
         port = port
     );
@@ -559,7 +562,7 @@ pub async fn apply_remote_provider_to_live(
             }
         }
     } else {
-        Some("127.0.0.1".to_string())
+        Some(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR.to_string())
     };
     let route_proxy = route_base.is_some();
     let report = match app {
@@ -584,7 +587,7 @@ pub async fn apply_remote_provider_to_live(
                     .entry("env")
                     .or_insert_with(|| serde_json::json!({}));
                 if let Some(e) = env.as_object_mut() {
-                    let base = route_base.as_deref().unwrap_or("localhost");
+                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     e.insert(
                         "ANTHROPIC_BASE_URL".to_string(),
                         serde_json::json!(format!("http://{base}:{port}")),
@@ -611,7 +614,7 @@ pub async fn apply_remote_provider_to_live(
                 // 复用本机同一变换 apply_codex_official_proxy_route，保持与本机一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base.as_deref().unwrap_or("localhost");
+                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::codex_config::apply_codex_official_proxy_route(
                         config,
                         &format!("http://{base}:{port}/v1"),
@@ -642,7 +645,7 @@ pub async fn apply_remote_provider_to_live(
                 // api_key 占位 + api_backend=responses），与本机产物逐字段一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base.as_deref().unwrap_or("localhost");
+                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::grok_config::apply_proxy_takeover(
                         config,
                         &format!("http://{base}:{port}/grokbuild/v1"),
