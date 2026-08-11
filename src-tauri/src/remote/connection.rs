@@ -58,12 +58,9 @@ fn tunnel_host() -> String {
 }
 
 /// 远端 sshd 隧道监听地址（tcpip_forward 请求的地址）。
-/// 固定回环：最安全（仅宿主机本机 app 可连），且无需远端 sshd 开 GatewayPorts。
-/// 若未来要跨机访问（局域网其他机器走此隧道）：改这里 + 远端 sshd 配
-/// `GatewayPorts clientspecified`；注意与本机回连地址 `TUNNEL_HOST`
-/// （另一处 127.0.0.1，本机代理监听地址）语义不同，勿混淆。
-/// `pub`：providers.rs 写入远端 base_url 与 DNAT 目标也引用此常量，
-/// 保证「sshd 隧道监听地址」与「远端 app 连的地址」永远配套一致（单点修改）。
+/// 唯一真源：connection.rs 隧道请求、providers.rs 的 base_url/DNAT 均引用此常量，
+/// 保证「sshd 监听地址」与「远端 app 连的地址」配套一致（跨机方案见 enhanced-plan.md）。
+/// 与 TUNNEL_HOST（本机代理监听地址，回连用）语义不同，勿混淆。
 pub const REMOTE_TUNNEL_LISTEN_ADDR: &str = "127.0.0.1";
 
 /// 认证时接受任意主机密钥。
