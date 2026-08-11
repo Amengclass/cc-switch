@@ -98,6 +98,24 @@
 - **进程生命周期**:任一 app 远端接管(含容器)开启 → 自动拉起本机代理;全关 → 自动停止(any_route_consumer
   含容器判断,stop_with_restore 连容器字段一起清空并异步重写远端直连)
 - **宿主机仅需开放 22 端口**:隧道复用 SSH 连接,15721 由 sshd 监听在回环,无需额外开放端口
+- **端口来源同源化(2026-08-11)**:`current_proxy_port` 未运行不再硬编码 15721,改读配置 `listen_port`;
+  配置为 0 时明确报错(与本机 `build_proxy_urls` 同款),隧道/base_url/DNAT 端口来源单点化,改端口不再分叉
+- **启动按远端接管意图自动拉起代理(2026-08-11)**:重启后若 DB 仍有远端接管意图(宿主机/容器任一 app),
+  `restore_proxy_state_on_startup` 自动 `start()` 拉起本机代理(隧道由下次取连接对账自动建立),
+  与本机接管启动恢复对齐——开关显示开、流心即亮,不再需要手动抖一下
+- **隧道回连地址动态化(2026-08-11)**:`server_channel_open_forwarded_tcpip` 回连目标从"远端传来的
+  connected_address"改为 `tunnel_host():tunnel_port()`(本机代理实际监听处,0.0.0.0/:: 归一化),
+  监听地址一改(如自定义局域网 IP)隧道桥接不再失效
+- **隧道地址单点化**:`REMOTE_TUNNEL_LISTEN_ADDR` 常量(connection.rs),8 处引用统一指向;
+  与本机回连 `TUNNEL_HOST`(127.0.0.1 默认)语义区分,连接层模块注释完整记录两地址机制
+- **前端状态刷新对齐本机(2026-08-11)**:远端接管开关操作后 invalidate `proxyKeys.status` +
+  `takeoverStatus`(开/关都刷——`running=false` 时不轮询,开接管必须主动刷流心才及时出现);
+  关闭时 removeQueries(`providerHealth`/`circuitBreakerStats`)对齐 stopWithRestore 清缓存
+- **走马灯(流心)CSS 修复**:`route-service-live` 改用 `@property` 只旋转 conic 渐变角度,
+  不再 rotate 整个方形元素——流动边框严格沿灰色圆角框轮廓,四角不再偏离
+- **停代理全局判断双向对称**:本机 `set_takeover_for_app(false)`(proxy.rs:906-937)与远端
+  `any_route_consumer`(commands.rs:375-393)都检查「本机接管 + 所有远端宿主机 + 所有容器」——
+  容器全关但宿主机/本机仍用代理则不停;唯一停代理条件 = 全局所有 app 都不使用
 
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
