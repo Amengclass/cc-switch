@@ -2016,7 +2016,18 @@ async fn restore_proxy_state_on_startup(state: &store::AppState) {
     let apps_to_restore = enabled_proxy_apps_on_startup(&state.db).await;
 
     if apps_to_restore.is_empty() {
-        log::debug!("启动时无需恢复代理状态");
+        // 本机无接管要恢复；但远端可能有「远端接管」意图（route_proxy_apps /
+        // route_proxy_container_apps 非空）——重启后开关显示开、代理却没跑，
+        // 流心不亮且远端连不上。此处按意图拉起代理进程（隧道由下次取连接时
+        // sync_route_tunnel 对账自动建立，无需在此主动建）。
+        if crate::remote::commands::any_route_consumer(state).await {
+            log::info!("检测到远端接管意图，启动代理服务");
+            if let Err(e) = state.proxy_service.start().await {
+                log::error!("按远端接管意图启动代理服务失败: {e}");
+            }
+        } else {
+            log::debug!("启动时无需恢复代理状态");
+        }
         return;
     }
 

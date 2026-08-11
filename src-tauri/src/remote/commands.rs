@@ -385,7 +385,8 @@ pub async fn set_remote_route_proxy_app(
 
 /// 是否有任何「需要本机代理进程」的使用者：
 /// 本机任一 app 接管 || 任一 host 任一 app 远端接管（含容器目标的 per-container 开关）。
-async fn any_route_consumer(state: &AppState) -> bool {
+/// pub(crate)：供 lib.rs 启动恢复时判断「远端是否有接管意图」复用。
+pub(crate) async fn any_route_consumer(state: &AppState) -> bool {
     match state.db.is_live_takeover_active().await {
         Ok(true) => return true,
         Ok(false) => {}
