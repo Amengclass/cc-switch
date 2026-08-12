@@ -1355,6 +1355,19 @@ pub async fn reapply_remote_provider(
     )
     .await?;
 
+    // 重新应用后同步持久化该远端当前供应商（含完整 provider_config）——
+    // 老迁移行（仅 provider_id、无配置）或通用配置变更后，重开接管 / 重新应用即补齐，
+    // 本机代理按远端路由时才能取到 base_url 与密钥。
+    if let Err(e) = crate::remote::current::save_current_provider(
+        state.db.as_ref(),
+        &host_id,
+        &app,
+        &provider_id,
+        Some(&provider),
+    ) {
+        log::warn!("[remote] 重新应用后持久化当前供应商失败 host_id={host_id}: {e}");
+    }
+
     // MCP 投影（与 switch 一致，避免整文件覆盖后 MCP 失效），失败降级为警告
     let reproject = match container.as_deref() {
         Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {

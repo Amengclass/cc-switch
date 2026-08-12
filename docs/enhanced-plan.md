@@ -155,11 +155,12 @@
     路由,并把 `current_provider_id` 对齐到它——forwarder 据此**不会误触发本机故障转移切换**(否则会改写
     本机配置)。claude 路由时补 `build_effective_settings_with_common_config` 生效配置(官方供应商原始
     配置缺 base_url/密钥)
-  - **回退**:远端无已存配置/解析失败(如升级前切换的旧行 provider_config 为 NULL)→ 回退本机路由(旧行为,
-    优雅降级);重切一次该远端即补齐 provider_config。裸 `PROXY_MANAGED`(本机接管占位,无冒号)不会被误判为远端
+  - **回退**:远端无已存配置/解析失败(如升级前迁移的旧行 provider_config 为 NULL)→ 回退本机路由(旧行为,
+    优雅降级)。**重开接管 / 重新应用即补齐**(reapply 也写 provider_config,老行自愈)。
+    裸 `PROXY_MANAGED`(本机接管占位,无冒号)不会被误判为远端
   - **已知边界**:codex 远端接管固定走官方路由(不写 bearer token,走原生登录),token 标记对它不适用,维持
     旧行为;codex `/v1/models` 模型目录探测仍返回本机 catalog(远端目录在远端机上,不在本机代理范围);
-    远端请求的 usage/健康记录写入本机库(provider_id 为 UUID,隔离,不污染本机同名 provider);
+    远端请求不写本机 provider_health(不在本机 providers 表的 provider 静默跳过,无 FK 噪音);
     `current_providers`(active_targets)会显示最后实际使用该 app 的供应商
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端

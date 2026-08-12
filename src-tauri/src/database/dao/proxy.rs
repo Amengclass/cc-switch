@@ -602,6 +602,20 @@ impl Database {
     ) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
 
+        // 远端接管路由的 provider 属于远端 SSOT，不在本机 providers 表；
+        // 静默跳过健康记录（避免 provider_health 的 FK 约束噪音，也符合
+        // 「远端健康不写本机库」语义——本机同名 provider 不受影响）。
+        let provider_exists: bool = conn
+            .query_row(
+                "SELECT 1 FROM providers WHERE id = ?1 AND app_type = ?2 LIMIT 1",
+                rusqlite::params![provider_id, app_type],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        if !provider_exists {
+            return Ok(());
+        }
+
         let now = chrono::Utc::now().to_rfc3339();
 
         // 先查询当前状态
