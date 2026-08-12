@@ -58,6 +58,14 @@ pub fn detect_host_id_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+/// 判断某 provider 的 `settings_config` 是否为远端接管/路由写的**占位配置**
+/// （token 含 `PROXY_MANAGED` 占位符，base_url 指向隧道）。这类配置不是真实
+/// 供应商配置，不应导入 SSOT / 展示为「当前机器配置」。
+/// 真实供应商的 token 不会出现该占位串，子串匹配对 claude/codex/gemini/grok 均有效。
+pub fn is_route_placeholder_settings(settings: &serde_json::Value) -> bool {
+    settings.to_string().contains("PROXY_MANAGED")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +114,30 @@ mod tests {
     #[test]
     fn token_format() {
         assert_eq!(remote_token_for("h1"), "PROXY_MANAGED:h1");
+    }
+
+    #[test]
+    fn detects_route_placeholder_settings() {
+        // 路由/接管写的占位配置（隧道 base_url + PROXY_MANAGED token）→ true
+        let routing = serde_json::json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "http://127.0.0.1:15721",
+                "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED:9b2a0411-abc",
+            }
+        });
+        assert!(is_route_placeholder_settings(&routing));
+
+        // 本地接管占位（裸 PROXY_MANAGED）同样识别
+        let local = serde_json::json!({ "env": { "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED" } });
+        assert!(is_route_placeholder_settings(&local));
+
+        // 真实供应商配置 → false
+        let real = serde_json::json!({
+            "env": {
+                "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic",
+                "ANTHROPIC_AUTH_TOKEN": "sk-abc123",
+            }
+        });
+        assert!(!is_route_placeholder_settings(&real));
     }
 }

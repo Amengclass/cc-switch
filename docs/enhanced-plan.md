@@ -162,6 +162,11 @@
     旧行为;codex `/v1/models` 模型目录探测仍返回本机 catalog(远端目录在远端机上,不在本机代理范围);
     远端请求不写本机 provider_health(不在本机 providers 表的 provider 静默跳过,无 FK 噪音);
     `current_providers`(active_targets)会显示最后实际使用该 app 的供应商
+- **路由残留不导入供应商面板(2026-08-13)**:`get_remote_providers` 的 `sync_remote_live_into_ssot`
+  (auto_import_default)会把 live 当前配置导入成 SSOT default——开启路由时 live 是隧道占位配置
+  (`http://127.0.0.1:15721` + `PROXY_MANAGED` token),会被当真实配置导入,关路由后仍残留展示。
+  修复:settings 含 `PROXY_MANAGED` 占位即视为路由残留——**跳过导入** + **清理 SSOT 已有占位 provider**
+  (面板不再显示隧道 URL)
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
 - 编辑当前供应商保存后原子写回远端

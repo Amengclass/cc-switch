@@ -135,7 +135,24 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         let Some(default) = parse_remote_live_default(fs, root, app).await? else {
             return Ok((0, Vec::new())); // live 无内容 → 不导入
         };
+        // live 是远端接管/路由写的占位配置（token 含 PROXY_MANAGED），不是真实
+        // 供应商配置——不导入 SSOT，避免把 `http://127.0.0.1:15721` 之类路由残留
+        // 当成「当前机器实际在用什么配置」展示在供应商面板。
+        if crate::proxy::remote_route::is_route_placeholder_settings(&default.settings_config) {
+            return Ok((0, Vec::new()));
+        }
         let mut ssot = read_remote_providers_ssot(fs, root, app).await?;
+        // 清理历史导入的占位 provider（路由残留，非真实供应商）——防止关路由后
+        // 面板仍显示隧道 URL。
+        let had_placeholder = ssot.providers.iter().any(|p| {
+            crate::proxy::remote_route::is_route_placeholder_settings(&p.settings_config)
+        });
+        if had_placeholder {
+            ssot.providers.retain(|p| {
+                !crate::proxy::remote_route::is_route_placeholder_settings(&p.settings_config)
+            });
+            write_remote_providers_ssot(fs, root, app, &ssot).await?;
+        }
         if !auto_import_default && !ssot.providers.is_empty() {
             return Ok((0, Vec::new()));
         }
