@@ -67,6 +67,35 @@ fn tunnel_host() -> String {
     }
 }
 
+/// 主机级反向隧道状态：host_id → 是否有任一存活连接持有隧道。
+///
+/// 隧道是「主机」级资源——任何一条连接把远端 15721 绑定成功，整台主机的
+/// 远端接管即走隧道。多条并发连接只有第一条能绑定，其余 tcpip_forward 会被
+/// EADDRINUSE 拒绝（"rejected by the other party"），这**不代表隧道不存在**。
+/// 所以把真实状态提到主机级共享：`tunnel_is_active()` 查这里，避免 reapply 恰好
+/// 落在非持连接上时误判「隧道未建立」而降级直连、回退开关。
+static HOST_TUNNEL_STATE: Mutex<Option<HashMap<String, bool>>> = Mutex::new(None);
+
+/// 记录/清除某主机的隧道状态（true = 有任一连接持有；false = 无）。
+fn set_host_tunnel(host_id: &str, active: bool) {
+    let mut g = HOST_TUNNEL_STATE.lock().unwrap();
+    let map = g.get_or_insert_with(HashMap::new);
+    if active {
+        map.insert(host_id.to_string(), true);
+    } else {
+        map.remove(host_id);
+    }
+}
+
+/// 某主机当前是否已有可用反向隧道（任一连接持有）。
+fn host_tunnel_is_active(host_id: &str) -> bool {
+    let g = HOST_TUNNEL_STATE.lock().unwrap();
+    g.as_ref()
+        .and_then(|m| m.get(host_id))
+        .copied()
+        .unwrap_or(false)
+}
+
 /// 远端 sshd 隧道监听地址（tcpip_forward 请求的地址）。
 /// 唯一真源：connection.rs 隧道请求、providers.rs 的 base_url/DNAT 均引用此常量，
 /// 保证「sshd 监听地址」与「远端 app 连的地址」配套一致（跨机方案见 enhanced-plan.md）。
@@ -128,9 +157,24 @@ impl client::Handler for RemoteHandler {
 pub struct RemoteSession {
     pub channel: Handle<RemoteHandler>,
     pub sftp: SftpSession,
-    /// 反向隧道是否已建立（远端 15721 → 本机代理）。
+    /// 本连接所属 host_id：隧道状态按主机共享，查询主机级状态需要它。
+    host_id: String,
+    /// 反向隧道是否由【本连接】建立（远端 15721 → 本机代理）。
     /// 用互斥锁保护：取连接时按宿主当前意图对账（补建/取消），不重建连接。
+    /// 注意这只是「本连接是否持有」；整机是否可用看主机级 HOST_TUNNEL_STATE。
     tunnel_active: Mutex<bool>,
+}
+
+impl Drop for RemoteSession {
+    fn drop(&mut self) {
+        // 本连接是隧道持有者且被丢弃（池淘汰/验活失败/操作结束）→ 主机级
+        // 隧道状态应随之清除：远端 sshd 会在连接关闭时释放 15721 转发，
+        // 若不清理，主机级状态会残留 true，误以为隧道仍可用。
+        let held = self.tunnel_active.lock().map(|g| *g).unwrap_or(false);
+        if held {
+            set_host_tunnel(&self.host_id, false);
+        }
+    }
 }
 
 /// 把参数安全地包进单引号（shell 转义）：单引号内一切字面化，无需担心特殊字符。
@@ -145,9 +189,24 @@ pub fn shell_quote(s: &str) -> String {
 }
 
 impl RemoteSession {
-    /// 反向隧道是否已成功建立（远端 127.0.0.1:port → 本机代理）。
+    /// 反向隧道是否已建立（远端 127.0.0.1:port → 本机代理）。
     /// 供切换判定用：意图走路由但隧道未建时，应降级直连并提示用户。
+    ///
+    /// 以**主机级**状态为准：任一存活连接持有隧道即视为本主机可用
+    /// （并发多连接只有第一条能绑定远端端口，其余被拒属正常，不代表没隧道）。
     pub fn tunnel_is_active(&self) -> bool {
+        if host_tunnel_is_active(&self.host_id) {
+            return true;
+        }
+        match self.tunnel_active.lock() {
+            Ok(g) => *g,
+            Err(p) => *p.into_inner(),
+        }
+    }
+
+    /// 本连接是否「自己」持有反向隧道（不含主机级共享状态）。
+    /// 用于连接池换入换出时判断「不要挤掉持隧道的连接」。
+    fn session_holds_tunnel(&self) -> bool {
         match self.tunnel_active.lock() {
             Ok(g) => *g,
             Err(p) => *p.into_inner(),
@@ -158,8 +217,9 @@ impl RemoteSession {
     /// - 意图要隧道且未建 → 补发 tcpip_forward；
     /// - 意图不要隧道且已建 → 撤销 cancel_tcpip_forward；
     /// - 其余情况（已一致）不动。
-    /// 全程复用现有连接，不重建。失败仅记日志（远端可能禁用了端口转发），不致命。
-    pub async fn sync_route_tunnel(&self, host_display: &str, wants_tunnel: bool) {
+    /// 全程复用现有连接，不重建。成功/撤销会同步**主机级**隧道状态
+    /// （HOST_TUNNEL_STATE）：绑定成功即整机可用，不依赖本连接是唯一持有者。
+    pub async fn sync_route_tunnel(&self, host_id: &str, host_display: &str, wants_tunnel: bool) {
         // 锁内只做状态判定（不跨 await）：决定动作后立即释放锁。
         enum Action {
             None,
@@ -182,18 +242,30 @@ impl RemoteSession {
             Action::None => {}
             Action::Forward => {
                 match self.channel.tcpip_forward(REMOTE_TUNNEL_LISTEN_ADDR, port as u32).await {
-                    Ok(port) => {
+                    Ok(_) => {
                         if let Ok(mut g) = self.tunnel_active.lock() {
                             *g = true;
                         }
+                        set_host_tunnel(host_id, true);
                         log::info!(
                             "主机 {host_display} 已建立反向隧道：远端 {}:{port} → 本机代理",
                             REMOTE_TUNNEL_LISTEN_ADDR
                         );
                     }
-                    Err(e) => log::warn!(
-                        "主机 {host_display} 反向隧道建立失败（本机路由不可用）: {e}"
-                    ),
+                    Err(e) => {
+                        // 端口可能已被本机另一条连接持有（并发多连接只有第一条能
+                        // 绑定，其余 EADDRINUSE 被拒）→ 主机隧道其实存在，仅 debug；
+                        // 真失败（远端禁了端口转发）时主机级状态为 false，才告警。
+                        if host_tunnel_is_active(host_id) {
+                            log::debug!(
+                                "主机 {host_display} 本连接未抢到隧道（其他连接已持有），共享主机隧道: {e}"
+                            );
+                        } else {
+                            log::warn!(
+                                "主机 {host_display} 反向隧道建立失败（本机路由不可用）: {e}"
+                            );
+                        }
+                    }
                 }
             }
             Action::Cancel => match self
@@ -205,6 +277,7 @@ impl RemoteSession {
                     if let Ok(mut g) = self.tunnel_active.lock() {
                         *g = false;
                     }
+                    set_host_tunnel(host_id, false);
                     log::info!("主机 {host_display} 已撤销反向隧道");
                 }
                 Err(e) => log::warn!("主机 {host_display} 反向隧道撤销失败: {e}"),
@@ -398,6 +471,7 @@ async fn connect_fresh(host: &RemoteHost, password: Option<&str>) -> Result<Arc<
         Ok(Arc::new(RemoteSession {
             channel,
             sftp,
+            host_id: host.id.clone(),
             tunnel_active: Mutex::new(false),
         }))
     };
@@ -474,7 +548,7 @@ async fn pooled_connect(
         if alive {
             // 复用连接前按宿主当前意图对账隧道（开关变更后自动补建/撤销，不重建）
             session
-                .sync_route_tunnel(&host_display, host_wants_tunnel(host))
+                .sync_route_tunnel(&host.id, &host_display, host_wants_tunnel(host))
                 .await;
             clear_connect_fail(&key);
             put_back(&key, session.clone());
@@ -487,7 +561,7 @@ async fn pooled_connect(
     match connect_fresh(host, password).await {
         Ok(session) => {
             session
-                .sync_route_tunnel(&host_display, host_wants_tunnel(host))
+                .sync_route_tunnel(&host.id, &host_display, host_wants_tunnel(host))
                 .await;
             clear_connect_fail(&key);
             put_back(&key, session.clone());
@@ -526,6 +600,15 @@ fn put_back(key: &str, session: Arc<RemoteSession>) {
         entries.truncate(POOL_MAX_SIZE - 1);
         map.extend(entries);
     }
+    // 并发抖动保护：若池里已有一条**持有反向隧道**的连接，不替换它——
+    // 并发操作会创建冗余连接，若把持隧道者挤出池，其连接被关、隧道丢失，
+    // 后续 reapply 就误判「隧道未建立」而降级直连。
+    // 冗余连接（未持隧道）由调用方持有，操作结束后自然释放，不影响池。
+    if let Some(existing) = map.get(key) {
+        if existing.session.session_holds_tunnel() && !session.session_holds_tunnel() {
+            return;
+        }
+    }
     map.insert(
         key.to_string(),
         PooledSession {
@@ -563,7 +646,7 @@ pub async fn sync_tunnel_now(host: &RemoteHost) {
     .map(|r| r.is_ok())
     .unwrap_or(false);
     if alive {
-        session.sync_route_tunnel(&host_display, wants).await;
+        session.sync_route_tunnel(&host.id, &host_display, wants).await;
         put_back(&key, session);
     }
     // 不存活则丢弃（下次连接会重建并对账）
