@@ -185,6 +185,37 @@ impl ProxyServer {
                                     // Insert our own header case map alongside hyper's internal one
                                     parts.extensions.insert(cases);
 
+                                    // 剥掉远端接管路由标记（/ccr-<host_id>）：远端 app 经反向隧道
+                                    // 发来的请求带此前缀，用它识别来源主机，交给 handler 按该远端
+                                    // 自己的当前供应商路由（解耦，不依赖本机当前供应商）。
+                                    if let Some((host_id, tail)) =
+                                        super::remote_route::strip_marker_from_path(parts.uri.path())
+                                    {
+                                        let mut uri_parts = parts.uri.clone().into_parts();
+                                        let new_path = match parts.uri.query() {
+                                            Some(q) => format!("{tail}?{q}"),
+                                            None => tail,
+                                        };
+                                        match new_path.parse::<http::uri::PathAndQuery>() {
+                                            Ok(pq) => {
+                                                uri_parts.path_and_query = Some(pq);
+                                                if let Ok(new_uri) = http::Uri::from_parts(uri_parts)
+                                                {
+                                                    parts.uri = new_uri;
+                                                    parts.extensions
+                                                        .insert(super::remote_route::RemoteRoute {
+                                                            host_id,
+                                                        });
+                                                }
+                                            }
+                                            Err(_) => {
+                                                log::debug!(
+                                                    "[ProxyServer] 远端路由标记剥除后 path 非法: {new_path}"
+                                                );
+                                            }
+                                        }
+                                    }
+
                                     let body = axum::body::Body::new(body);
                                     let axum_req = http::Request::from_parts(parts, body);
                                     <Router as tower::Service<http::Request<axum::body::Body>>>::call(&mut router, axum_req).await

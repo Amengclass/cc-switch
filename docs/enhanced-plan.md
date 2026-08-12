@@ -139,7 +139,24 @@
 - **remote_current_providers 迁入 SQLite(2026-08-13)**:`~/.cc-switch/remote_current_providers.json` 迁入
   `remote_current_providers` 表(host_id, app, provider_id, provider_config, updated_at;主键 host_id+app);
   旧 json 首次调用自动迁移(改名 `.bak` 兜底);`save_current_provider` 扩展存完整 Provider 配置
-  (`provider_config`)——「本机代理按远端路由」解耦方案的数据基座,下一步接令牌标记来源 + per-远端路由
+  (`provider_config`)——「本机代理按远端路由」解耦方案的数据基座,供下方解耦路由实现消费
+- **解耦路由实现:本机代理按「远端各自」的当前供应商路由(2026-08-13)**:远端接管经隧道发到本机代理的
+  请求,不再依赖本机当前供应商,而是按来源远端自己存的 provider_config 路由:
+  - **写入端**(`remote/providers.rs` 各 app 分支 + `remote/gemini.rs`):走路由时 base_url 拼上
+    `/ccr-<host_id>` 路径段(如 `http://127.0.0.1:15721/ccr-<id>/v1/messages`),token 仍 `PROXY_MANAGED`
+    占位(本机代理注入真实密钥)。**用路径标记而非 token 标记**:codex 官方接管不写 bearer token(走原生
+    ChatGPT 登录),token 标记对它失效;路径标记对所有走 HTTP 代理的 app 统一有效。gemini 顺带修了
+    base_url 端口写死 15721 的问题(改随 `port` 参数)
+  - **代理端**:新模块 `proxy/remote_route.rs`(标记常量/`RemoteRoute` extension/解析纯函数 + 单测);
+    `server.rs` 入口 `service_fn` 剥掉 `/ccr-<host_id>` 前缀、重建 URI、host_id 注入 extension;
+    `RequestContext::new` 收 host_id 后从 `remote_current_providers.provider_config` 反序列化该 host
+    的完整 Provider 作为唯一 provider 路由,并把 `current_provider_id` 对齐到它——forwarder 据此
+    **不会误触发本机故障转移切换**(否则会改写本机配置)
+  - **回退**:远端无已存配置/解析失败(如升级前切换的旧行 provider_config 为 NULL)→ 回退本机路由(旧行为,
+    优雅降级);重切一次该远端即补齐 provider_config
+  - **已知边界**:codex `/v1/models` 模型目录探测仍返回本机 catalog(远端目录在远端机上,不在本机代理
+    范围,不影响请求路由);远端请求的 usage/健康记录写入本机库(provider_id 为 UUID,隔离,不污染本机
+    同名 provider);`current_providers`(active_targets)会显示最后实际使用该 app 的供应商
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
 - 编辑当前供应商保存后原子写回远端

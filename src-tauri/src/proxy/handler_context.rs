@@ -82,6 +82,7 @@ impl RequestContext {
     /// * `app_type` - 应用类型
     /// * `tag` - 日志标签
     /// * `app_type_str` - 应用类型字符串
+    /// * `remote_host_id` - 远端来源主机 id（远端接管路由标记；无则 None，走本机路由）
     ///
     /// # Errors
     /// 返回 `ProxyError` 如果 Provider 选择失败
@@ -92,6 +93,7 @@ impl RequestContext {
         app_type: AppType,
         tag: &'static str,
         app_type_str: &'static str,
+        remote_host_id: Option<&str>,
     ) -> Result<Self, ProxyError> {
         let start_time = Instant::now();
 
@@ -107,8 +109,7 @@ impl RequestContext {
         let optimizer_config = state.db.get_optimizer_config().unwrap_or_default();
         let copilot_optimizer_config = state.db.get_copilot_optimizer_config().unwrap_or_default();
 
-        let current_provider_id =
-            crate::settings::get_current_provider(&app_type).unwrap_or_default();
+        // 供应商选择在下方统一处理（远端接管路由 / 本机路由）。
 
         // 从请求体提取模型名称
         let request_model = body
@@ -129,19 +130,91 @@ impl RequestContext {
             session_result.client_provided
         );
 
-        // 使用共享的 ProviderRouter 选择 Provider（熔断器状态跨请求保持）
-        // 注意：只在这里调用一次，结果传递给 forwarder，避免重复消耗 HalfOpen 名额
-        let providers = state
-            .provider_router
-            .select_providers(app_type_str)
-            .await
-            .map_err(|e| match e {
-                crate::error::AppError::AllProvidersCircuitOpen => {
-                    ProxyError::AllProvidersCircuitOpen
+        // 供应商选择：远端接管请求（带 ccr-<host_id> 标记）按**该远端自己**的当前供应商
+        // 路由（解耦，不依赖本机当前供应商）；其余走本机 ProviderRouter。
+        // 远端路由只取单家（该 host 已存的完整 provider 配置），并把 current_provider_id
+        // 对齐到该 provider id——forwarder 据此不会误触发本机故障转移切换。
+        // 远端配置缺失/解析失败回退本机路由（升级前旧行为，优雅降级）。
+        let select_local = || async {
+            state
+                .provider_router
+                .select_providers(app_type_str)
+                .await
+                .map_err(|e| match e {
+                    crate::error::AppError::AllProvidersCircuitOpen => {
+                        ProxyError::AllProvidersCircuitOpen
+                    }
+                    crate::error::AppError::NoProvidersConfigured => {
+                        ProxyError::NoProvidersConfigured
+                    }
+                    _ => ProxyError::DatabaseError(e.to_string()),
+                })
+        };
+        let local_current = |app_type: &AppType| {
+            crate::settings::get_current_provider(app_type).unwrap_or_default()
+        };
+
+        let (providers, current_provider_id) = match remote_host_id {
+            Some(host_id) => {
+                match crate::remote::current::get_current_provider_config(
+                    &state.db,
+                    host_id,
+                    app_type_str,
+                ) {
+                    Ok(Some(config_json)) => {
+                        match serde_json::from_str::<Provider>(&config_json) {
+                            Ok(mut p) => {
+                                // claude 的生效 base_url/密钥来自通用配置合并，已存 provider_config
+                                // 可能是原始配置（缺 ANTHROPIC_BASE_URL/AUTH_TOKEN）。路由时按与写入
+                                // 远端 live 相同的 `build_effective_settings_with_common_config` 补一份
+                                // 生效配置，代理才能取到真实上游地址与密钥（对既有/新存数据都生效）。
+                                if app_type_str == "claude" {
+                                    if let Ok(effective) = crate::services::provider::live::build_effective_settings_with_common_config(
+                                        &state.db, &app_type, &p,
+                                    ) {
+                                        p.settings_config = effective;
+                                    }
+                                }
+                                log::debug!(
+                                    "[{tag}] 远端接管路由: host_id={host_id} provider={} (app={app_type_str})",
+                                    p.name
+                                );
+                                (vec![p.clone()], p.id.clone())
+                            }
+                            Err(e) => {
+                                log::warn!(
+                                    "[{tag}] 解析远端 host_id={host_id} app={app_type_str} 的供应商配置失败，回退本机路由: {e}"
+                                );
+                                let providers = select_local().await?;
+                                let current = local_current(&app_type);
+                                (providers, current)
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        log::warn!(
+                            "[{tag}] 远端 host_id={host_id} app={app_type_str} 无已存供应商配置（升级前切换？），回退本机路由"
+                        );
+                        let providers = select_local().await?;
+                        let current = local_current(&app_type);
+                        (providers, current)
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[{tag}] 读取远端 host_id={host_id} app={app_type_str} 供应商配置失败，回退本机路由: {e}"
+                        );
+                        let providers = select_local().await?;
+                        let current = local_current(&app_type);
+                        (providers, current)
+                    }
                 }
-                crate::error::AppError::NoProvidersConfigured => ProxyError::NoProvidersConfigured,
-                _ => ProxyError::DatabaseError(e.to_string()),
-            })?;
+            }
+            None => {
+                let providers = select_local().await?;
+                let current = local_current(&app_type);
+                (providers, current)
+            }
+        };
 
         let provider = providers
             .first()

@@ -30,6 +30,8 @@ pub async fn apply_gemini_provider_settings(
     provider: &Provider,
     route_proxy: bool,
     route_base: Option<&str>,
+    port: u16,
+    host_id: &str,
 ) -> Result<EffectReport, String> {
     let env_path = format!("{root}/.gemini/.env");
     let settings_path = format!("{root}/.gemini/settings.json");
@@ -42,12 +44,12 @@ pub async fn apply_gemini_provider_settings(
     if route_proxy {
         // 走本机路由：与本机 gemini 接管逐字段一致（services::proxy 的
         // takeover_live_config_strict gemini 分支）——base_url 指向远端隧道
-        // （宿主机=localhost；容器=网关 IP），token 用 PROXY_MANAGED 占位
-        // （本机代理转发时注入真实密钥）。
+        // （宿主机=localhost；容器=网关 IP）并带 ccr-<host_id> 路由标记，
+        // token 用 PROXY_MANAGED 占位（本机代理转发时注入真实密钥）。
         let base = route_base.unwrap_or("localhost");
         env_map.insert(
             "GOOGLE_GEMINI_BASE_URL".to_string(),
-            format!("http://{base}:15721"),
+            crate::proxy::remote_route::tunnel_base_url(base, port, host_id, ""),
         );
         env_map.insert("GEMINI_API_KEY".to_string(), "PROXY_MANAGED".to_string());
     }

@@ -590,7 +590,12 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     e.insert(
                         "ANTHROPIC_BASE_URL".to_string(),
-                        serde_json::json!(format!("http://{base}:{port}")),
+                        serde_json::json!(crate::proxy::remote_route::tunnel_base_url(
+                            base,
+                            port,
+                            session.host_id(),
+                            ""
+                        )),
                     );
                     e.insert(
                         "ANTHROPIC_AUTH_TOKEN".to_string(),
@@ -617,7 +622,12 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::codex_config::apply_codex_official_proxy_route(
                         config,
-                        &format!("http://{base}:{port}/v1"),
+                        &crate::proxy::remote_route::tunnel_base_url(
+                            base,
+                            port,
+                            session.host_id(),
+                            "/v1",
+                        ),
                     )
                     .map_err(|e| e.to_string())?;
                     s["config"] = serde_json::json!(routed);
@@ -648,7 +658,12 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::grok_config::apply_proxy_takeover(
                         config,
-                        &format!("http://{base}:{port}/grokbuild/v1"),
+                        &crate::proxy::remote_route::tunnel_base_url(
+                            base,
+                            port,
+                            session.host_id(),
+                            "/grokbuild/v1",
+                        ),
                         "PROXY_MANAGED",
                     )
                     .map_err(|e| e.to_string())?;
@@ -680,6 +695,8 @@ pub async fn apply_remote_provider_to_live(
                 provider,
                 route_proxy,
                 route_base.as_deref(),
+                port,
+                session.host_id(),
             )
             .await
         }

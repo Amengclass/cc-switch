@@ -189,6 +189,11 @@ pub fn shell_quote(s: &str) -> String {
 }
 
 impl RemoteSession {
+    /// 本连接所属的 host_id（远端接管路由标记写入 live 时需要）。
+    pub fn host_id(&self) -> &str {
+        &self.host_id
+    }
+
     /// 反向隧道是否已建立（远端 127.0.0.1:port → 本机代理）。
     /// 供切换判定用：意图走路由但隧道未建时，应降级直连并提示用户。
     ///
