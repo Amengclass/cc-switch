@@ -906,6 +906,10 @@
   "appSwitcher": {
     "more": "更多應用程式"
   },
+  "remote": {
+    "readingConfigPrefix": "正在讀取 ",
+    "readingConfigSuffix": " 設定…"
+  },
   "grokBuild": {
     "apiBackend": "API Backend",
     "contextWindow": "上下文視窗",

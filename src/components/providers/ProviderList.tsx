@@ -484,14 +484,10 @@ export function ProviderList({
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
-          {remoteRefreshing && (
+          {remoteRefreshing && remoteLoadingLabel && (
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-              <span>
-                {t("remote.refreshing", {
-                  defaultValue: "正在刷新远端配置…",
-                })}
-              </span>
+              <span>{remoteLoadingLabel}</span>
             </div>
           )}
           {filteredProviders.map((provider) => {

@@ -905,6 +905,10 @@
   "appSwitcher": {
     "more": "More apps"
   },
+  "remote": {
+    "readingConfigPrefix": "Reading ",
+    "readingConfigSuffix": " config…"
+  },
   "grokBuild": {
     "apiBackend": "API backend",
     "contextWindow": "Context window",

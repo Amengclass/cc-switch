@@ -1898,6 +1898,11 @@ function App() {
                           ],
                         });
                       }}
+                      onHostRefreshed={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
+                      }}
                     />
                   ) : remoteTargetId ? (
                     <RemoteRouteToggle
@@ -1916,6 +1921,11 @@ function App() {
                             activeApp,
                           ],
                         });
+                      }}
+                      onHostRefreshed={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
                       }}
                     />
                   ) : activeApp === "claude-desktop" ? (

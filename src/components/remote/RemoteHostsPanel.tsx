@@ -9,7 +9,6 @@ import React, {
 import { useTranslation } from "react-i18next";
 import {
   Server,
-  Plus,
   Pencil,
   Trash2,
   PlugZap,

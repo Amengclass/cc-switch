@@ -2,15 +2,17 @@ import { Loader2, Radio } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@/components/ui/switch";
 import {
+  listRemoteHosts,
   reapplyRemoteProvider,
   setRemoteRouteProxyApp,
 } from "@/lib/api/remote";
 import { cn } from "@/lib/utils";
-import type { RemoteHost } from "@/types/remote";
+import type { EffectReport, RemoteHost } from "@/types/remote";
 import { useProxyStatus } from "@/hooks/useProxyStatus";
-import { useProxyStatus } from "@/hooks/useProxyStatus";
+import { proxyKeys } from "@/lib/query/proxy";
 
 interface RemoteRouteToggleProps {
   /** 宿主机目标：传入该主机则显示「走本机路由」开关（读/写 routeThroughLocalProxy） */
@@ -25,6 +27,8 @@ interface RemoteRouteToggleProps {
   containerId?: string;
   /** 保存成功后的回调（用于更新上层 hosts 列表状态） */
   onUpdated?: (host: RemoteHost) => void;
+  /** 仅刷新开关状态（不 invalidate 远端供应商，避免二次刷新抖两次） */
+  onHostRefreshed?: (host: RemoteHost) => void;
   className?: string;
 }
 
@@ -41,9 +45,11 @@ export function RemoteRouteToggle({
   appForApi,
   containerId,
   onUpdated,
+  onHostRefreshed,
   className,
 }: RemoteRouteToggleProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   // 本机路由服务（总开关）运行状态：远端接管依赖它，走马灯边框以此为准
   const { isRunning: proxyRunning } = useProxyStatus();
@@ -86,10 +92,23 @@ export function RemoteRouteToggle({
         containerId,
       );
       onUpdated?.(updated);
+      // 对齐本机 useProxyStatus.setTakeoverForApp 的 onSuccess：开/关都刷新
+      // 代理状态与接管状态。注意 running=false 时 useProxyStatusQuery 不轮询，
+      // 打开接管后必须主动刷新流心（走马灯）才会及时出现；关闭时后端可能
+      // 停止代理服务，主动刷新也能立即反映。
+      queryClient.invalidateQueries({ queryKey: proxyKeys.status });
+      queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
+      // 对齐本机 stopWithRestore：关闭接管且后端据此停止代理服务时，
+      // 健康/熔断统计已失效，清除缓存避免 UI 显示过期数据。
+      if (!checked) {
+        queryClient.removeQueries({ queryKey: ["providerHealth"] });
+        queryClient.removeQueries({ queryKey: ["circuitBreakerStats"] });
+      }
       // 对齐本机「开关即生效」：立即把当前供应商按新意图重写 live，
       // 无需用户再手动切一次供应商（含容器网络探测/DNAT 下发）。
+      let report: EffectReport | null = null;
       try {
-        await reapplyRemoteProvider(host.id, appKey, containerId);
+        report = await reapplyRemoteProvider(host.id, appKey, containerId);
       } catch (error) {
         console.error("[RemoteRouteToggle] reapply failed:", error);
         toast.error(
@@ -98,19 +117,35 @@ export function RemoteRouteToggle({
           }),
         );
       }
-      toast.success(
-        checked
-          ? t("remote.route.enabled", {
-              name: host.name,
-              appLabel,
-              defaultValue: `已开启「${host.name}」的 ${appLabel} 远端接管`,
-            })
-          : t("remote.route.disabled", {
-              name: host.name,
-              appLabel,
-              defaultValue: `已关闭「${host.name}」的 ${appLabel} 远端接管`,
-            }),
-      );
+      // 重新拉取主机列表，让开关跟随后端真实状态：隧道建立失败时后端会回退
+      // DB 开关（revert_route_switch_on_tunnel_failure），必须刷新 UI 归位，
+      // 否则开关会一直显示「开」而实际已回退（servers 状态只在切视图时刷新）。
+      try {
+        const hosts = await listRemoteHosts();
+        const fresh = hosts.find((h) => h.id === host.id);
+        if (fresh) onHostRefreshed?.(fresh);
+      } catch {
+        // 刷新失败不阻塞；下次切视图会自动对齐
+      }
+      if (report?.warnings?.length) {
+        // 隧道未建立、按直连写入等：明确告知用户接管未真正生效，
+        // 不再弹「已开启」成功提示以免误导。
+        report.warnings.forEach((w) => toast.warning(w));
+      } else {
+        toast.success(
+          checked
+            ? t("remote.route.enabled", {
+                name: host.name,
+                appLabel,
+                defaultValue: `已开启「${host.name}」的 ${appLabel} 远端接管`,
+              })
+            : t("remote.route.disabled", {
+                name: host.name,
+                appLabel,
+                defaultValue: `已关闭「${host.name}」的 ${appLabel} 远端接管`,
+              }),
+        );
+      }
     } catch (error) {
       console.error("[RemoteRouteToggle] toggle failed:", error);
       toast.error(

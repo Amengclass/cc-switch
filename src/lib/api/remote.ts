@@ -205,6 +205,7 @@ export async function getRemoteProviders(
     providers: Provider[];
     current_provider_id: string | null;
     live_ids: string[];
+    route_proxy_enabled: boolean;
   }>("get_remote_providers", {
     hostId,
     app,
@@ -227,6 +228,7 @@ export async function addRemoteProvider(
     providers: Provider[];
     current_provider_id: string | null;
     live_ids: string[];
+    route_proxy_enabled: boolean;
   }>("add_remote_provider", {
     hostId,
     app,
@@ -250,6 +252,7 @@ export async function updateRemoteProvider(
     providers: Provider[];
     current_provider_id: string | null;
     live_ids: string[];
+    route_proxy_enabled: boolean;
   }>("update_remote_provider", {
     hostId,
     app,
@@ -272,6 +275,7 @@ export async function deleteRemoteProvider(
     providers: Provider[];
     current_provider_id: string | null;
     live_ids: string[];
+    route_proxy_enabled: boolean;
   }>("delete_remote_provider", {
     hostId,
     app,
@@ -293,6 +297,7 @@ export async function removeRemoteProviderFromLive(
     providers: Provider[];
     current_provider_id: string | null;
     live_ids: string[];
+    route_proxy_enabled: boolean;
   }>("remove_remote_provider_from_live", {
     hostId,
     app,
