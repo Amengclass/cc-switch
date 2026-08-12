@@ -1,4 +1,4 @@
-﻿# CC Switch 增强版 — 远程主机统一控制面
+# CC Switch 增强版 — 远程主机统一控制面
 
 > **定位**:在 farion1231/cc-switch 基础上 **Fork**,保持上游完整(不裁剪),新增 **SSH 远程主机管理**。
 > **目标**:「**一处配置、多机生效**」的统一控制平面(定义 Provider 于一处,应用到本机 + 任意远程主机),**不是**单纯的文件同步工具。
@@ -116,6 +116,25 @@
 - **停代理全局判断双向对称**:本机 `set_takeover_for_app(false)`(proxy.rs:906-937)与远端
   `any_route_consumer`(commands.rs:375-393)都检查「本机接管 + 所有远端宿主机 + 所有容器」——
   容器全关但宿主机/本机仍用代理则不停;唯一停代理条件 = 全局所有 app 都不使用
+- **隧道状态主机级共享(2026-08-12 修复)**:隧道是「主机」级资源——任一连接绑定远端端口即整机可用,
+  并发多连接只有第一条能绑定,其余 tcpip_forward 被 EADDRINUSE 拒(日志"The request was rejected by the
+  other party")不代表没隧道。新增 `HOST_TUNNEL_STATE`(host_id→bool),`tunnel_is_active()` 改查主机级;
+  `RemoteSession` 加 host_id + Drop 清状态(连接关闭即释放远端端口)。修复"开接管后 reapply 恰好用
+  非持连接 → 误判隧道未建 → 降级直连 + 回退 DB 开关"的间歇性 bug
+- **连接池持隧道者不被替换(2026-08-12 修复)**:`put_back` 时池里已有一条持有隧道的连接则不替换——
+  并发操作(开关命令 + reapply + onUpdated 触发的远端面板刷新)会创建冗余连接,若把持隧道者挤出池,
+  其连接被关、隧道丢失,reapply 又误判降级。配合主机级状态,reapply 无论拿到哪条连接都能识别隧道可用
+- **前端开关状态跟随后端真实回退 + 暴露隧道警告(2026-08-12)**:reapply 后重拉主机列表
+  (`onHostRefreshed` 只更新 servers 不 invalidate 远端供应商,避免二次刷新抖两次),隧道失败回退 DB 时
+  开关 UI 立即归位;reapply 返回的 `report.warnings` 弹 toast 明确提示(不再吞掉误报成功)
+- **流心即时刷新恢复(2026-08-12)**:上游 clone 丢失了"开关后 invalidate `proxyKeys.status`/`takeoverStatus`"
+  的增强(`running=false` 时 useProxyStatusQuery 不轮询,开接管后不主动刷则流心不亮)——已补回,
+  与文档上文"前端状态刷新对齐本机"一致
+- **供应商页加载文案统一(2026-08-12)**:首载("正在读取 {App} 配置…")与后台刷新("正在刷新远端配置…")
+  两套措辞统一为前者(带 app 名,首载/刷新共用 `remoteLoadingLabel`);补 `remote.readingConfigPrefix/Suffix`
+  到 zh/zh-TW/en/ja 四语(此前 `remote.*` 全无 locale key,全硬编码中文)
+- **类型清理(2026-08-12)**:remote.ts 5 处 invoke 返回值类型补 `route_proxy_enabled`(后端 RemoteProvidersView
+  已有该字段,前端声明漏了,tsc 报错);RemoteHostsPanel 删未用 Plus import。`pnpm typecheck` 恢复全绿
 
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
@@ -218,7 +237,9 @@
 
 ### UI 修复与打磨
 - **Sonner toast 修复**:portaling 到 document.body + `pointerEvents:auto`,解决模态抽屉打开时 toast X 点不了的问题(根因:Radix 模态 Dialog 设置 `body { pointer-events: none }`)
-- **Sonner 关闭按钮位置**:修正到右上角(覆盖 sonner 默认左上角定位)
+- **Sonner 关闭按钮位置(2026-08-12 改回默认)**:最初修正到右上角(覆盖 sonner 默认左上角定位),
+  后发现本机/远端 toast 的 X 位置表现不一致,已移除 index.css 覆盖、**保持 sonner 默认(左上角)**——
+  所有 toast 统一默认定位,不再因覆盖选择性生效而漂移
 - **目标选择器可滚动**:主机/容器下拉框 `max-h-[50vh]` + 可见细滚动条
 - **目标选择器聚焦样式**:与全局 `*:focus-visible` 保持一致,不下拉特殊处理
 
@@ -562,6 +583,28 @@ cc-switch/                     # fork 自 farion1231/cc-switch
 
 > **必须用 `C:\build\build-exe.ps1`,不要直接 `cargo build --release`。**
 > 踩坑实录:`cargo build --release`(未设 `/DEBUG:NONE`)全量编译,多次撞火绒 `sysdiag` 文件锁(LNK1105 / 错误码 1224),重试 5 次仍失败;改用脚本第 1 次即成功。
+
+**两种运行方式(务必分清):**
+
+### 开发模式:`pnpm tauri dev`(前端 + 后端同时跑)
+
+> 这是 Tauri 的标准开发模式,会同时启动**两个进程**:
+
+| 进程 | 角色 | 说明 |
+|---|---|---|
+| `node.exe`(Vite 开发服务器,端口 3000) | 前端 | 改 `src/` 代码即时热更新(HMR),无需重编译 |
+| `cc-switch.exe`(`src-tauri\target\debug\`) | 后端 Rust 应用(Tauri 壳) | 从 `http://localhost:3000` 加载前端页面,处理 IPC / 系统能力 |
+
+- 改 `src/` 前端代码 → vite 热更新,浏览器/窗口立即生效;
+- 改 `src-tauri/src/` Rust 代码 → cargo 增量编译后自动重启应用;
+- 关掉应用窗口即整体退出(vite 随之结束)。
+- 适合:边改边看、日常开发。首次全量编译约 13 分钟(738 crates),之后增量很快。
+- ⚠️ dev 实例同样受 `tauri-plugin-single-instance` 约束:已安装版 `D:\software\cc switch\cc-switch.exe` 若在运行,dev 实例启动即自动退出(单实例锁被占),需先 `Stop-Process -Name cc-switch -Force`。
+
+### 生产构建(独立 exe,单进程,默认)
+
+> 前端先打包,再编译 Rust 并嵌入前端 → 产物自带前端,**不需要** vite 服务器,单进程独立运行。
+> 代价:每次改前端都要重新打包,无热重载。
 
 **流程**
 1. 前端有改动 → 先 `pnpm build:renderer`(dist 由 `--features tauri/custom-protocol` 嵌入 exe)
