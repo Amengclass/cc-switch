@@ -579,7 +579,8 @@ pub async fn apply_remote_provider_to_live(
             if route_proxy {
                 // 走本机路由：远端 claude 的 live 与本机路由模式逐字节一致——
                 // base_url 指向远端隧道（宿主机=127.0.0.1；容器=网关 IP），
-                // token 用 PROXY_MANAGED 占位（本机代理转发时注入真实密钥）。
+                // token 用 PROXY_MANAGED:<host_id> 占位（本机代理识别 host_id 按该远端
+                // 自己的当前供应商路由，并注入真实密钥）。
                 let obj = sanitized
                     .as_object_mut()
                     .ok_or_else(|| "sanitized settings 不是对象".to_string())?;
@@ -590,16 +591,13 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     e.insert(
                         "ANTHROPIC_BASE_URL".to_string(),
-                        serde_json::json!(crate::proxy::remote_route::tunnel_base_url(
-                            base,
-                            port,
-                            session.host_id(),
-                            ""
-                        )),
+                        serde_json::json!(format!("http://{base}:{port}")),
                     );
                     e.insert(
                         "ANTHROPIC_AUTH_TOKEN".to_string(),
-                        serde_json::json!("PROXY_MANAGED"),
+                        serde_json::json!(crate::proxy::remote_route::remote_token_for(
+                            session.host_id()
+                        )),
                     );
                 }
             }
@@ -622,12 +620,7 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::codex_config::apply_codex_official_proxy_route(
                         config,
-                        &crate::proxy::remote_route::tunnel_base_url(
-                            base,
-                            port,
-                            session.host_id(),
-                            "/v1",
-                        ),
+                        &format!("http://{base}:{port}/v1"),
                     )
                     .map_err(|e| e.to_string())?;
                     s["config"] = serde_json::json!(routed);
@@ -658,13 +651,8 @@ pub async fn apply_remote_provider_to_live(
                     let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::grok_config::apply_proxy_takeover(
                         config,
-                        &crate::proxy::remote_route::tunnel_base_url(
-                            base,
-                            port,
-                            session.host_id(),
-                            "/grokbuild/v1",
-                        ),
-                        "PROXY_MANAGED",
+                        &format!("http://{base}:{port}/grokbuild/v1"),
+                        &crate::proxy::remote_route::remote_token_for(session.host_id()),
                     )
                     .map_err(|e| e.to_string())?;
                     s["config"] = serde_json::json!(routed);

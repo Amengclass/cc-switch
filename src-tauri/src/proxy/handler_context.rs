@@ -82,7 +82,6 @@ impl RequestContext {
     /// * `app_type` - 应用类型
     /// * `tag` - 日志标签
     /// * `app_type_str` - 应用类型字符串
-    /// * `remote_host_id` - 远端来源主机 id（远端接管路由标记；无则 None，走本机路由）
     ///
     /// # Errors
     /// 返回 `ProxyError` 如果 Provider 选择失败
@@ -93,7 +92,6 @@ impl RequestContext {
         app_type: AppType,
         tag: &'static str,
         app_type_str: &'static str,
-        remote_host_id: Option<&str>,
     ) -> Result<Self, ProxyError> {
         let start_time = Instant::now();
 
@@ -130,11 +128,12 @@ impl RequestContext {
             session_result.client_provided
         );
 
-        // 供应商选择：远端接管请求（带 ccr-<host_id> 标记）按**该远端自己**的当前供应商
-        // 路由（解耦，不依赖本机当前供应商）；其余走本机 ProviderRouter。
+        // 供应商选择：远端接管请求（auth 头带 PROXY_MANAGED:<host_id> 标记）按**该远端自己**
+        // 的当前供应商路由（解耦，不依赖本机当前供应商）；其余走本机 ProviderRouter。
         // 远端路由只取单家（该 host 已存的完整 provider 配置），并把 current_provider_id
         // 对齐到该 provider id——forwarder 据此不会误触发本机故障转移切换。
         // 远端配置缺失/解析失败回退本机路由（升级前旧行为，优雅降级）。
+        let remote_host_id = crate::proxy::remote_route::detect_host_id_from_headers(headers);
         let select_local = || async {
             state
                 .provider_router
@@ -158,7 +157,7 @@ impl RequestContext {
             Some(host_id) => {
                 match crate::remote::current::get_current_provider_config(
                     &state.db,
-                    host_id,
+                    &host_id,
                     app_type_str,
                 ) {
                     Ok(Some(config_json)) => {
