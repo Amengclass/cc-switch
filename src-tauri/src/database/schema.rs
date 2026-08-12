@@ -363,6 +363,20 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 远程主机「当前生效供应商」记录（per-app），含完整 provider 配置 JSON
+        // （解耦路由基座）。原 ~/.cc-switch/remote_current_providers.json 已迁入此表。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_current_providers (
+                host_id TEXT NOT NULL,
+                app TEXT NOT NULL,
+                provider_id TEXT NOT NULL,
+                provider_config TEXT,
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (host_id, app)
+            )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
         // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
         // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
         if conn

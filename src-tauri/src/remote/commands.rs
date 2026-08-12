@@ -418,7 +418,7 @@ pub async fn delete_remote_host(
         .map_err(|e| e.to_string())?;
     if deleted {
         let _ = credentials::delete_password(&host_id);
-        let _ = crate::remote::current::delete_current_provider(&host_id);
+        let _ = crate::remote::current::delete_current_provider(state.db.as_ref(), &host_id);
     }
     Ok(deleted)
 }
@@ -900,7 +900,7 @@ pub async fn add_remote_provider(
         .await?;
         if !additive {
             let _ =
-                crate::remote::current::save_current_provider(&host_id, &app, &provider_id);
+                crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id, Some(p));
         }
     }
 
@@ -1043,7 +1043,7 @@ pub async fn update_remote_provider(
             current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
         )
         .await?;
-        let _ = crate::remote::current::save_current_provider(&host_id, &app, &provider_id_after);
+        let _ = crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id_after, Some(p));
     }
 
     // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
@@ -1118,7 +1118,7 @@ pub async fn delete_remote_provider(
     crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot).await?;
 
     // 清理该远端「当前供应商」持久化记录（对齐本机 delete 后前端清 current）
-    let _ = crate::remote::current::delete_current_provider_for_app(&host_id, &app);
+    let _ = crate::remote::current::delete_current_provider_for_app(state.db.as_ref(), &host_id, &app);
 
     // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
     // 按钮态需要最新集合）
@@ -1150,7 +1150,7 @@ pub async fn clear_remote_provider_record(
     app: String,
 ) -> Result<(), String> {
     let _ = state;
-    crate::remote::current::delete_current_provider_for_app(&host_id, &app)
+    crate::remote::current::delete_current_provider_for_app(state.db.as_ref(), &host_id, &app)
 }
 
 /// 对远程主机执行供应商切换：将该远端目标（宿主机/容器）SSOT 中保存的供应商定义
@@ -1240,7 +1240,7 @@ pub async fn switch_remote_provider(
             log::warn!("[remote] 切换后同步 SSOT 标记失败 host_id={host_id}: {e}");
         }
     }
-    if let Err(e) = crate::remote::current::save_current_provider(&host_id, &app, &provider_id) {
+    if let Err(e) = crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id, Some(&provider)) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
@@ -1320,7 +1320,7 @@ pub async fn reapply_remote_provider(
         .current_provider_id
         .clone()
         .or_else(|| {
-            crate::remote::current::get_current_provider(&host_id, &app)
+            crate::remote::current::get_current_provider(state.db.as_ref(), &host_id, &app)
                 .ok()
                 .flatten()
         })
@@ -1489,7 +1489,7 @@ async fn resolve_remote_current_provider_id(
     // 1) 持久化记录优先：本应用上次「切换」写入的真实当前供应商，不受用户后续
     //    编辑 base_url / 通用配置片段影响（那正是匹配法失效的场景）。校验其仍
     //    存在于该远端 SSOT（per-target 独立：本机 DB 里有没有不再相关）。
-    if let Some(persisted) = crate::remote::current::get_current_provider(host_id, app)? {
+    if let Some(persisted) = crate::remote::current::get_current_provider(state.db.as_ref(), host_id, app)? {
         if ssot.providers.iter().any(|p| p.id == persisted) {
             return Ok(Some(persisted));
         }

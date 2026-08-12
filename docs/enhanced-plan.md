@@ -136,6 +136,10 @@
 - **类型清理(2026-08-12)**:remote.ts 5 处 invoke 返回值类型补 `route_proxy_enabled`(后端 RemoteProvidersView
   已有该字段,前端声明漏了,tsc 报错);RemoteHostsPanel 删未用 Plus import。`pnpm typecheck` 恢复全绿
 
+- **remote_current_providers 迁入 SQLite(2026-08-13)**:`~/.cc-switch/remote_current_providers.json` 迁入
+  `remote_current_providers` 表(host_id, app, provider_id, provider_config, updated_at;主键 host_id+app);
+  旧 json 首次调用自动迁移(改名 `.bak` 兜底);`save_current_provider` 扩展存完整 Provider 配置
+  (`provider_config`)——「本机代理按远端路由」解耦方案的数据基座,下一步接令牌标记来源 + per-远端路由
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
 - 编辑当前供应商保存后原子写回远端
