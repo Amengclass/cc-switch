@@ -122,10 +122,11 @@ body {
   align-self: center;
   transition: background 0.3s ease;
 }
-/* 左半区：固定宽，不收缩（右半区无法挤压它） */
+/* 左半区：固定宽，不收缩（右半区无法挤压它）。
+   加宽到 126px 给供应商球标更多空间（配合 Rust BALL_WIDTH 180→208）。 */
 .ball-left {
-  flex: 0 0 98px;
-  width: 98px;
+  flex: 0 0 126px;
+  width: 126px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -148,10 +149,10 @@ body {
   height: 100%;
   display: block;
 }
-/* 置顶锁图标：继承前景色，覆盖上面 svg 100% 的通用规则保持小尺寸 */
+/* 置顶图钉：灰小图钉表示「该 app 被固定显示」，不与供应商蓝底抢视觉 */
 .ball-pin {
   flex-shrink: 0;
-  opacity: 0.75;
+  color: var(--fb-muted);
   margin-left: 1px;
 }
 .ball-app .ball-pin {

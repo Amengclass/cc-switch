@@ -21,7 +21,7 @@ pub const PANEL_LABEL: &str = "floating-panel";
 pub const MENU_LABEL: &str = "floating-menu";
 /// 悬浮球窗口内容尺寸（方案C：横向胶囊条 180×40）。
 /// 窗口实际尺寸 = 内容 + 四周 FLOATING_MARGIN 留白（见 ball_window_size）。
-const BALL_WIDTH: f64 = 180.0;
+const BALL_WIDTH: f64 = 208.0;
 const BALL_HEIGHT: f64 = 40.0;
 const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;

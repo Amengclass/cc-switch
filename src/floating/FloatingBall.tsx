@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Lock } from "lucide-react";
+import { Pin } from "lucide-react";
 import { getIcon } from "@/icons/extracted";
 import { type FloatingEntry, type FloatingUsageData } from "./types";
 
@@ -244,7 +244,7 @@ export function FloatingBall() {
           <span className="ball-app-text">{summary.app}</span>
           {summary.isPinned && (
             <span className="ball-pin" title="已置顶此 app" aria-label="已置顶">
-              <Lock size={9} />
+              <Pin size={9} />
             </span>
           )}
         </span>
