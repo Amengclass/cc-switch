@@ -97,14 +97,14 @@ export interface FloatingBallTarget {
 }
 
 /** 读取悬浮球目标 app 的供应商 / 模型 / 余量。
- *  目标由后端决定（置顶优先，否则跟随最近活跃 app）；后端无目标时退化为「CC」。 */
+ *  只用两个轻量命令（get_floating_ball_detail 只查目标一个 app、get_floating_ball_target
+ *  只回 app/isPinned），避免面板全量扫描拖慢球的响应。 */
 async function loadSummary(): Promise<Summary> {
-  const [entries, target] = (await Promise.all([
-    invoke("get_floating_window_data") as Promise<FloatingEntry[]>,
+  const [entry, target] = (await Promise.all([
+    invoke("get_floating_ball_detail") as Promise<FloatingEntry | null>,
     invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>,
-  ])) as [FloatingEntry[], FloatingBallTarget | null];
+  ])) as [FloatingEntry | null, FloatingBallTarget | null];
 
-  const entry = target ? entries.find((e) => e.appType === target.appType) : undefined;
   const isPinned = !!target?.isPinned;
 
   if (!entry)
@@ -193,6 +193,10 @@ export function FloatingBall() {
       }
       refresh();
     }).then((u) => unlisteners.push(u));
+    // 置顶/跟随目标变化：用轻量命令立刻刷新球，不等全量 data-refresh
+    void listen("floating-pin-changed", refresh).then((u) =>
+      unlisteners.push(u),
+    );
     void listen("floating-data-refresh", refresh).then((u) =>
       unlisteners.push(u),
     );

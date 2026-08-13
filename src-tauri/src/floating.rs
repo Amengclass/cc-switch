@@ -818,6 +818,62 @@ fn floating_queried_at(
     None
 }
 
+/// 构建单个 app 的悬浮窗行条目（当前供应商 / 模型 / 用量）。
+/// 面板（`get_floating_window_data` 遍历所有可见 app）与悬浮球
+/// （`get_floating_ball_detail` 只取目标 app）共用，保证两者数据一致。
+fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingEntry {
+    let app_type_str = app_type.as_str();
+
+    let current_id =
+        crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None);
+
+    let (provider_name, model, usage_summary, worst_pct, usage, queried_at, has_provider) =
+        match current_id {
+            Some(provider_id) => {
+                let provider = state
+                    .db
+                    .get_provider_by_id(&provider_id, app_type_str)
+                    .ok()
+                    .flatten();
+                match provider {
+                    Some(provider) => {
+                        let model = resolve_model(app_type, &provider);
+                        let usage_summary =
+                            crate::tray::format_usage_suffix(state, app_type, &provider, &provider_id);
+                        let worst_pct =
+                            worst_utilization_pct(state, app_type, &provider, &provider_id);
+                        let usage = floating_usage_data(state, app_type, &provider, &provider_id);
+                        let queried_at =
+                            floating_queried_at(state, app_type, &provider, &provider_id);
+                        (
+                            provider.name.clone(),
+                            model,
+                            usage_summary,
+                            worst_pct,
+                            usage,
+                            queried_at,
+                            true,
+                        )
+                    }
+                    None => (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false),
+                }
+            }
+            None => (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false),
+        };
+
+    FloatingEntry {
+        app_type: app_type_str.to_string(),
+        app_label: app_label(app_type),
+        provider_name,
+        has_provider,
+        model,
+        usage_summary,
+        worst_pct,
+        usage,
+        queried_at,
+    }
+}
+
 /// 拉取悬浮窗面板数据：每个可见 app 一行（当前供应商 / 模型 / 用量）
 #[tauri::command]
 pub async fn get_floating_window_data(
@@ -832,63 +888,7 @@ pub async fn get_floating_window_data(
         if !visible_apps.is_visible(&app_type) {
             continue;
         }
-        let app_type_str = app_type.as_str();
-
-        let current_id =
-            crate::settings::get_effective_current_provider(&state.db, &app_type).unwrap_or(None);
-
-        let (provider_name, model, usage_summary, worst_pct, usage, queried_at, has_provider) =
-            match current_id {
-                Some(provider_id) => {
-                    let provider = state
-                        .db
-                        .get_provider_by_id(&provider_id, app_type_str)
-                        .ok()
-                        .flatten();
-                    match provider {
-                        Some(provider) => {
-                            let model = resolve_model(&app_type, &provider);
-                            let usage_summary = crate::tray::format_usage_suffix(
-                                &state,
-                                &app_type,
-                                &provider,
-                                &provider_id,
-                            );
-                            let worst_pct =
-                                worst_utilization_pct(&state, &app_type, &provider, &provider_id);
-                            let usage =
-                                floating_usage_data(&state, &app_type, &provider, &provider_id);
-                            let queried_at =
-                                floating_queried_at(&state, &app_type, &provider, &provider_id);
-                            (
-                                provider.name.clone(),
-                                model,
-                                usage_summary,
-                                worst_pct,
-                                usage,
-                                queried_at,
-                                true,
-                            )
-                        }
-                        None => {
-                            (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false)
-                        }
-                    }
-                }
-                None => (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false),
-            };
-
-        entries.push(FloatingEntry {
-            app_type: app_type_str.to_string(),
-            app_label: app_label(&app_type),
-            provider_name,
-            has_provider,
-            model,
-            usage_summary,
-            worst_pct,
-            usage,
-            queried_at,
-        });
+        entries.push(build_floating_entry(&state, &app_type));
     }
 
     log::info!(
@@ -900,6 +900,29 @@ pub async fn get_floating_window_data(
             .join(", ")
     );
     Ok(entries)
+}
+
+/// 悬浮球详情：只构建当前目标 app（置顶优先，否则最近活跃）的一行数据。
+/// 相比 `get_floating_window_data`（遍历全部 app），只查一个 app，球据此立即刷新，
+/// 避免面板全量扫描拖慢球的响应。
+#[tauri::command]
+pub async fn get_floating_ball_detail(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<FloatingEntry>, String> {
+    let Some(target) = resolve_ball_target() else {
+        return Ok(None);
+    };
+    let Some(app_type) = parse_app_type(&target.app_type) else {
+        return Ok(None);
+    };
+    let entry = build_floating_entry(&state, &app_type);
+    log::info!(
+        "[Floating] 悬浮球详情: {}={} pinned={}",
+        entry.app_label,
+        entry.provider_name,
+        target.is_pinned
+    );
+    Ok(Some(entry))
 }
 
 /// 悬浮球当前应显示的 app 目标
@@ -964,6 +987,9 @@ pub async fn floating_set_pin_app(
     }
     crate::settings::set_floating_pin_app(app_type).map_err(|e| e.to_string())?;
     log::info!("[Floating] 设置悬浮球置顶 app: {:?}", resolve_ball_target().map(|t| t.app_type));
+    // 球对置顶变化要即时响应：单独发 target 事件（轻量，只带 app/isPinned），
+    // 球据此立刻刷新详情，不再依赖全量 data-refresh 的慢路径。
+    let _ = app.emit("floating-pin-changed", resolve_ball_target());
     let _ = app.emit("floating-data-refresh", ());
     Ok(())
 }
@@ -971,13 +997,18 @@ pub async fn floating_set_pin_app(
 /// 记录最近一次活跃的 app（球未置顶时跟随它）。由悬浮球前端在收到
 /// provider-switched 事件时调用；主窗口切 app 即可实时影响球。
 #[tauri::command]
-pub async fn floating_record_active_app(app_type: String) -> Result<(), String> {
+pub async fn floating_record_active_app(
+    app: tauri::AppHandle,
+    app_type: String,
+) -> Result<(), String> {
     let Some(parsed) = parse_app_type(&app_type) else {
         log::debug!("[Floating] 忽略未知活跃 app: {app_type}");
         return Ok(());
     };
     crate::settings::set_floating_last_app(parsed.as_str().to_string()).map_err(|e| e.to_string())?;
     log::info!("[Floating] 记录最近活跃 app: {}", parsed.as_str());
+    // 未置顶时球跟随最近活跃：发 target 事件让球即时更新
+    let _ = app.emit("floating-pin-changed", resolve_ball_target());
     Ok(())
 }
 

@@ -1704,6 +1704,7 @@ pub fn run() {
             commands::set_window_theme,
             // Floating window (加速球)
             floating::get_floating_window_data,
+            floating::get_floating_ball_detail,
             floating::get_floating_ball_target,
             floating::floating_set_pin_app,
             floating::floating_record_active_app,
