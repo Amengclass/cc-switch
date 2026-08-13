@@ -167,12 +167,25 @@
   (`http://127.0.0.1:15721` + `PROXY_MANAGED` token),会被当真实配置导入,关路由后仍残留展示。
   修复:settings 含 `PROXY_MANAGED` 占位即视为路由残留——**跳过导入** + **清理 SSOT 已有占位 provider**
   (面板不再显示隧道 URL)
+- **容器路由稳健性(2026-08-13)**:修复三类「硬编码 Docker 假设」导致容器接管静默降级直连——
+  - **NetworkMode=default 识别**:Docker 对未显式指定网络的容器返回 `default`(默认 bridge 网络),
+    原代码只认 host/bridge,把 default 当网络名 `docker network inspect default` 查空 → 误判探测失败
+    降级直连(容器接管不生效、配置保持原始)。`resolve_container_network` 把 default 映射为 bridge
+  - **DNAT 去掉写死 `-i docker0`**:自定义 bridge 网络容器流量从 `br-<hash>` 进(非 docker0),
+    `-i docker0` 规则匹配不到 → 容器连网关 15721 被拒 → 路由静默失败。改为 `-s <容器IP>` 限定
+    (源 IP 唯一标识该容器,与入口接口无关)
+  - **容器 IP 多网络取首个**:`{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}` 多网络时会把
+    多个 IP 无分隔串成一串(如 `172.17.0.8fd00::1`),`.contains('.') 误通过。IP 后加空格分隔取首个
+  - **探测加 debug 日志**:detect_container_route_base 打出 mode/gw/ip + 各失败点,下次日志直接可见卡点
 ### 目标选择器(本机 / 服务器 / 容器)
 - 头部连体胶囊式选择器,选服务器后供应商当前高亮 + 切换走远端
 - 编辑当前供应商保存后原子写回远端
 - 容器目标支持(Docker exec,方案 B):`docker ps` 列表 + 容器下拉
 - 下拉可滚动(`max-h-[50vh]` + 细滚动条)
 - 聚焦样式与全局 `*:focus-visible` 蓝框一致
+- **切主机同步清空容器列表(2026-08-13)**:TargetBreadcrumb 切主机时只清 remoteContainerId 不清
+  containers 列表,容器 effect 渲染后才跑且正常路径开头未清空 → 拉取完成前(SSH 往返 1~3 秒甚至超时)
+  容器下拉显示上一台主机的容器。修复:切主机同步 setContainers([]) + 容器 effect 拉取前先清空
 
 ### 远程功能面板
 - **远程会话**:浏览/查看消息/删除远端 `~/.claude/projects/*.jsonl`(复用本机解析,FileOps)
