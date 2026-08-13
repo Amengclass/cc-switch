@@ -435,6 +435,9 @@ pub struct AppSettings {
     /// 最近一次活跃的 app（provider-switched 事件写入，供球跟随）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_last_app: Option<String>,
+    /// 球当前显示的 app 是否处「远端接管」（主窗口计算后写入；球据此显示流动边框）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_remote_takeover: Option<bool>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -561,6 +564,7 @@ impl Default for AppSettings {
             floating_locked: None,
             floating_pin_app: None,
             floating_last_app: None,
+            floating_remote_takeover: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,
@@ -1081,6 +1085,13 @@ pub fn set_floating_pin_app(app_type: Option<String>) -> Result<(), AppError> {
 pub fn set_floating_last_app(app_type: String) -> Result<(), AppError> {
     mutate_settings(|settings| {
         settings.floating_last_app = Some(app_type);
+    })
+}
+
+/// 设置球当前 app 是否处「远端接管」（主窗口计算后写入，球据此显示流动边框）
+pub fn set_floating_remote_takeover(active: Option<bool>) -> Result<(), AppError> {
+    mutate_settings(|settings| {
+        settings.floating_remote_takeover = active;
     })
 }
 

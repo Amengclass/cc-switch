@@ -528,6 +528,24 @@ function App() {
     status: proxyStatus,
   } = useProxyStatus();
   const isCurrentAppTakeoverActive = takeoverStatus?.[activeApp] || false;
+  // 悬浮球「远端接管」状态同步：主窗口当前目标(主机/容器)+ 当前 app 的远端接管
+  // 是否开启，算好后写入后端设置，球靠 1s 轮询读它显示流动边框。
+  // （activeRemoteHost 已在上方 line 401 定义）
+  const isRemoteTakeoverActive = !!(
+    remoteTargetId &&
+    activeRemoteHost &&
+    (remoteContainerId
+      ? activeRemoteHost.routeProxyContainerApps?.[remoteContainerId]?.[
+          sharedFeatureApp
+        ]
+      : activeRemoteHost.routeProxyApps?.[sharedFeatureApp])
+  );
+  useEffect(() => {
+    void invoke("floating_set_remote_takeover", {
+      active: isRemoteTakeoverActive,
+    }).catch((e) => console.error("[Floating] 同步远端接管状态失败", e));
+  }, [isRemoteTakeoverActive]);
+
   const activeProviderId = useMemo(() => {
     const target = proxyStatus?.active_targets?.find(
       (t) => t.app_type === activeApp,

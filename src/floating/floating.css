@@ -114,12 +114,14 @@ body {
 .ball:active {
   transform: scale(0.97);
 }
-.ball-status {
+/* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中） */
+.ball-status-col {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
   align-self: center;
+  margin-right: 4px;
   transition: background 0.3s ease;
 }
 /* 左半区：固定宽，不收缩（右半区无法挤压它） */
@@ -512,6 +514,58 @@ body {
 .menu-icon {
   color: var(--fb-muted);
   flex-shrink: 0;
+}
+
+/* ===== 悬浮球「远端接管」流动边框（与主界面 RemoteRouteToggle 的走马灯一致）=====
+   当前 app 开启远端接管时，.ball 加 route-service-live，
+   ::before 画一圈 conic 光斑沿圆角轮廓流动（@property 只旋角度，不旋元素）。 */
+@property --route-border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+.ball.route-service-live {
+  position: relative;
+}
+
+.ball.route-service-live::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from var(--route-border-angle),
+    transparent 0deg,
+    transparent 280deg,
+    #10b981 330deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: route-border-spin 2s linear infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+
+@keyframes route-border-spin {
+  to {
+    --route-border-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ball.route-service-live::before {
+    animation: none;
+    background: #10b981;
+  }
 }
 .menu-item:hover .menu-icon {
   color: var(--fb-fg);

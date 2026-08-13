@@ -1708,6 +1708,7 @@ pub fn run() {
             floating::get_floating_ball_target,
             floating::floating_set_pin_app,
             floating::floating_record_active_app,
+            floating::floating_set_remote_takeover,
             floating::show_floating_panel,
             floating::hide_floating_panel,
             floating::floating_set_hover,

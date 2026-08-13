@@ -21,7 +21,7 @@ pub const PANEL_LABEL: &str = "floating-panel";
 pub const MENU_LABEL: &str = "floating-menu";
 /// 悬浮球窗口内容尺寸（方案C：横向胶囊条 180×40）。
 /// 窗口实际尺寸 = 内容 + 四周 FLOATING_MARGIN 留白（见 ball_window_size）。
-const BALL_WIDTH: f64 = 180.0;
+const BALL_WIDTH: f64 = 192.0;
 const BALL_HEIGHT: f64 = 40.0;
 const PANEL_WIDTH: f64 = 300.0;
 const PANEL_HEIGHT: f64 = 320.0;
@@ -937,6 +937,8 @@ pub struct FloatingBallTarget {
     pub is_pinned: bool,
     /// 目标 app 的显示名
     pub app_label: &'static str,
+    /// 该 app 是否处「远端接管」（主窗口算好写入设置，球据此显示流动边框）
+    pub takeover_active: bool,
 }
 
 /// 解析 app 类型字符串（非法/未识别返回 None）
@@ -948,12 +950,14 @@ fn parse_app_type(s: &str) -> Option<AppType> {
 /// 两者都无时返回 None（球端退化为通用「CC」）。
 fn resolve_ball_target() -> Option<FloatingBallTarget> {
     let settings = crate::settings::get_settings();
+    let takeover_active = settings.floating_remote_takeover.unwrap_or(false);
     if let Some(pin) = settings.floating_pin_app.as_deref() {
         if let Some(app_type) = parse_app_type(pin) {
             return Some(FloatingBallTarget {
                 app_type: app_type.as_str().to_string(),
                 is_pinned: true,
                 app_label: app_label(&app_type),
+                takeover_active,
             });
         }
     }
@@ -963,10 +967,23 @@ fn resolve_ball_target() -> Option<FloatingBallTarget> {
                 app_type: app_type.as_str().to_string(),
                 is_pinned: false,
                 app_label: app_label(&app_type),
+                takeover_active,
             });
         }
     }
     None
+}
+
+/// 主窗口计算「球当前目标 app 是否处远端接管」后写入设置（球 1s 轮询读它显示流动边框）。
+#[tauri::command]
+pub async fn floating_set_remote_takeover(
+    app: tauri::AppHandle,
+    active: bool,
+) -> Result<(), String> {
+    crate::settings::set_floating_remote_takeover(Some(active)).map_err(|e| e.to_string())?;
+    let _ = app.emit("floating-pin-changed", resolve_ball_target());
+    let _ = app.emit("floating-data-refresh", ());
+    Ok(())
 }
 
 /// 悬浮球拉取「显示哪个 app」：置顶优先，否则最近活跃 app。

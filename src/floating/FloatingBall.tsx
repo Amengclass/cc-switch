@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { PointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Pin } from "lucide-react";
-import { getIcon } from "@/icons/extracted";
+import { APP_ICON_MAP } from "@/config/appConfig";
 import { type FloatingEntry, type FloatingUsageData } from "./types";
 
-/** app 小图标：取主应用品牌内联 SVG，内联样式渲染（悬浮窗不加载 tailwind） */
-function AppIcon({ size }: { size: number }) {
-  const svg = useMemo(() => getIcon("claude"), []);
-  if (!svg) return null;
+/** app 小图标：按当前 appType 取主应用对应品牌图标（与主窗口 APP_ICON_MAP 一致）。 */
+function AppIcon({ size, appType }: { size: number; appType: string }) {
+  const cfg = APP_ICON_MAP[appType as keyof typeof APP_ICON_MAP];
+  if (!cfg?.icon) return null;
   return (
     <span
       style={{
@@ -21,17 +21,22 @@ function AppIcon({ size }: { size: number }) {
         flexShrink: 0,
         color: "currentColor",
       }}
-      dangerouslySetInnerHTML={{ __html: svg }}
-    />
+    >
+      {cfg.icon}
+    </span>
   );
 }
 
 interface Summary {
   level: UsageLevel;
   color: string;
+  /** app 类型 key（claude/codex/gemini/...），用于取对应品牌图标 */
+  appType: string;
   app: string;
-  /** 是否手动置顶（面板/设置页图钉圈定）；置顶时球显示锁图标 */
+  /** 是否手动置顶（面板/设置页图钉圈定）；置顶时球显示小图钉 */
   isPinned: boolean;
+  /** 当前 app 是否处「远端接管」；是则球显示流动边框 */
+  takeoverActive: boolean;
   provider: string;
   model: string;
   /** 余量数值（状态色；单套餐用） */
@@ -94,6 +99,7 @@ export interface FloatingBallTarget {
   appType: string;
   isPinned: boolean;
   appLabel: string;
+  takeoverActive: boolean;
 }
 
 /** 读取悬浮球目标 app 的供应商 / 模型 / 余量。
@@ -106,13 +112,16 @@ async function loadSummary(): Promise<Summary> {
   ])) as [FloatingEntry | null, FloatingBallTarget | null];
 
   const isPinned = !!target?.isPinned;
+  const takeoverActive = !!target?.takeoverActive;
 
   if (!entry)
     return {
       level: "none",
       color: "#94a3b8",
+      appType: target?.appType ?? "claude",
       app: target?.appLabel ?? "CC",
       isPinned,
+      takeoverActive,
       provider: "—",
       model: "—",
       usageValue: "—",
@@ -144,8 +153,10 @@ async function loadSummary(): Promise<Summary> {
   return {
     level,
     color: ballStatusColor(level),
+    appType: entry.appType,
     app: entry.appLabel,
     isPinned,
+    takeoverActive,
     provider: entry.providerName ?? "",
     model: entry.model ?? "",
     usageValue,
@@ -164,8 +175,10 @@ export function FloatingBall() {
   const [summary, setSummary] = useState<Summary>({
     level: "none",
     color: "#94a3b8",
+    appType: "claude",
     app: "CC",
     isPinned: false,
+    takeoverActive: false,
     provider: "—",
     model: "—",
     usageValue: "—",
@@ -222,7 +235,8 @@ export function FloatingBall() {
 
   return (
     <div
-      className="ball"
+      className={`ball${summary.takeoverActive ? " route-service-live" : ""}`}
+      title={summary.takeoverActive ? "此 app 正处远端接管，请求经本机代理/远端隧道转发" : undefined}
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
       onPointerCancel={() => void invoke("floating_drag_end")}
@@ -233,14 +247,16 @@ export function FloatingBall() {
         );
       }}
     >
+      {/* 左区：状态圆点（绿/橙/红）单独一列 */}
+      <span
+        className="ball-status-col"
+        style={{ background: summary.color }}
+        title={`${summary.usageValue}${summary.usageUnit ? ` ${summary.usageUnit}` : ""}`}
+      />
+      {/* 中区：app 图标 + 名 + 图钉 + 供应商蓝底球标（原左区内容） */}
       <div className="ball-left">
         <span className="ball-app">
-          <span
-            className="ball-status"
-            style={{ background: summary.color }}
-            title={`${summary.usageValue}${summary.usageUnit ? ` ${summary.usageUnit}` : ""}`}
-          />
-          <AppIcon size={10} />
+          <AppIcon size={10} appType={summary.appType} />
           <span className="ball-app-text">{summary.app}</span>
           {summary.isPinned && (
             <span className="ball-pin" title="已置顶此 app" aria-label="已置顶">
