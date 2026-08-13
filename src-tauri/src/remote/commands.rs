@@ -1167,7 +1167,27 @@ pub async fn switch_remote_provider(
     app: String,
     container: Option<String>,
 ) -> Result<EffectReport, String> {
-    let host = load_host(&state, &host_id)?;
+    switch_remote_provider_target(
+        &state,
+        &host_id,
+        &provider_id,
+        &app,
+        container.as_deref(),
+    )
+    .await
+}
+
+/// 单个落点（宿主机 或 宿主机下的容器）的一次远程切换。被单机命令
+/// `switch_remote_provider` 与批量命令 `broadcast_switch_provider` 共用，
+/// 保证「单机切换」与「广播切换」产出逐字节一致。
+async fn switch_remote_provider_target(
+    state: &AppState,
+    host_id: &str,
+    provider_id: &str,
+    app: &str,
+    container: Option<&str>,
+) -> Result<EffectReport, String> {
+    let host = load_host(state, host_id)?;
     let password = resolve_password(&host)?;
     let _ = current_proxy_port(state.db.as_ref(), &state.proxy_service).await;
     let session = connection::connect(&host, Some(&password)).await?;
@@ -1176,11 +1196,11 @@ pub async fn switch_remote_provider(
     let target = crate::remote::docker::RemoteTarget::new(
         &session.sftp,
         &session.channel,
-        container.as_deref(),
+        container,
     )?;
 
     // 首次访问（SSOT 空）时从远端 live 导入（对齐本机启动导入语义）
-    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
     let provider = ssot
         .providers
         .iter()
@@ -1196,12 +1216,12 @@ pub async fn switch_remote_provider(
     let report = crate::remote::providers::apply_remote_provider_to_live(
         state.db.as_ref(),
         &session,
-        container.as_deref(),
+        container,
         &home,
         &host.name,
-        &app,
+        app,
         &provider,
-        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container, app)).await,
         current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
     )
     .await?;
@@ -1209,11 +1229,11 @@ pub async fn switch_remote_provider(
     // 切换成功即持久化「该远端当前生效供应商」：SSOT current（非 additive）+
     // 本地记录（remote_current_providers.json）。与原生 cc switch 的「当前供应商」
     // 语义一致（判断当前不靠 base_url 匹配）。
-    if !crate::remote::providers::is_additive_app(&app) {
+    if !crate::remote::providers::is_additive_app(app) {
         let mut ssot = ssot;
-        ssot.current_provider_id = Some(provider_id.clone());
+        ssot.current_provider_id = Some(provider_id.to_string());
         if let Err(e) =
-            crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot)
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot)
                 .await
         {
             log::warn!("[remote] 写回远端 SSOT current 失败 host_id={host_id}: {e}");
@@ -1234,13 +1254,13 @@ pub async fn switch_remote_provider(
             }
         }
         if let Err(e) =
-            crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot)
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot)
                 .await
         {
             log::warn!("[remote] 切换后同步 SSOT 标记失败 host_id={host_id}: {e}");
         }
     }
-    if let Err(e) = crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id, Some(&provider)) {
+    if let Err(e) = crate::remote::current::save_current_provider(state.db.as_ref(), host_id, app, provider_id, Some(&provider)) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
@@ -1248,10 +1268,10 @@ pub async fn switch_remote_provider(
     // 对齐本机 McpService::sync_enabled_for_app：把远端 SSOT 中已启用的 MCP
     // 重新投影回 live，避免切换后 MCP 失效。失败降级为警告（投影自愈：
     // 下次切换 / 任一 MCP 启停都会重新投影），不阻断已成功的切换。
-    let reproject = match container.as_deref() {
+    let reproject = match container {
         Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
             Ok(ops) => {
-                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
+                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await
             }
             Err(e) => Err(e),
         },
@@ -1259,7 +1279,7 @@ pub async fn switch_remote_provider(
             let ops = crate::fsops::RemoteSftpFileOps {
                 sftp: &session.sftp,
             };
-            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
+            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await
         }
     };
     if let Err(e) = reproject {
@@ -1268,19 +1288,87 @@ pub async fn switch_remote_provider(
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
     revert_route_switch_on_tunnel_failure(
-        &state,
+        state,
         &report,
-        &host_id,
-        container.as_deref(),
-        &app,
+        host_id,
+        container,
+        app,
     )
     .await;
 
     // 直接带上前端需要的当前供应商 id，避免前端再调一次 get_remote_current_provider
     let mut report = report;
-    report.current_provider_id = Some(provider_id.clone());
+    report.current_provider_id = Some(provider_id.to_string());
 
     Ok(report)
+}
+
+/// 一个广播落点：宿主机 或 宿主机下的某个容器
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSwitchTarget {
+    pub host_id: String,
+    /// None = 宿主机账号本体；Some(c) = 该宿主机下的容器
+    pub container: Option<String>,
+}
+
+/// 批量切换：把同一个 Provider 应用到多个落点（宿主机/容器）。
+/// 与单机切换语义完全一致，只是循环多落点并聚合每个落点的成功/失败。
+/// 失败不阻断其它落点（某台连不上/切失败，其余照常）。
+#[tauri::command]
+pub async fn broadcast_switch_provider(
+    state: State<'_, AppState>,
+    targets: Vec<RemoteSwitchTarget>,
+    provider_id: String,
+    app: String,
+) -> Result<Vec<RemoteSwitchResult>, String> {
+    let mut out = Vec::with_capacity(targets.len());
+    for t in &targets {
+        let label = match t.container.as_deref() {
+            Some(c) => format!("{} / {}", t.host_id, c),
+            None => t.host_id.clone(),
+        };
+        let result = switch_remote_provider_target(
+            &state,
+            &t.host_id,
+            &provider_id,
+            &app,
+            t.container.as_deref(),
+        )
+        .await;
+        out.push(match result {
+            Ok(report) => RemoteSwitchResult {
+                host_id: t.host_id.clone(),
+                container: t.container.clone(),
+                label,
+                ok: true,
+                provider_name: report.provider_name,
+                error: None,
+            },
+            Err(e) => RemoteSwitchResult {
+                host_id: t.host_id.clone(),
+                container: t.container.clone(),
+                label,
+                ok: false,
+                provider_name: String::new(),
+                error: Some(e),
+            },
+        });
+    }
+    Ok(out)
+}
+
+/// 批量切换单个落点的结果
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSwitchResult {
+    pub host_id: String,
+    pub container: Option<String>,
+    /// 展示名（宿主机 或 宿主机/容器）
+    pub label: String,
+    pub ok: bool,
+    pub provider_name: String,
+    pub error: Option<String>,
 }
 
 /// 重新应用该远端目标「当前生效供应商」到 live（对齐本机「开关即生效」语义）。

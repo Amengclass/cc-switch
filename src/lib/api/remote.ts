@@ -106,6 +106,36 @@ export async function switchRemoteProvider(
   });
 }
 
+/** 批量切换的单个落点（宿主机 或 宿主机下的容器） */
+export interface BroadcastSwitchTarget {
+  hostId: string;
+  container?: string | null;
+}
+
+/** 批量切换单个落点的结果 */
+export interface BroadcastSwitchResult {
+  hostId: string;
+  container?: string | null;
+  /** 展示名（宿主机 或 宿主机/容器） */
+  label: string;
+  ok: boolean;
+  providerName: string;
+  error?: string | null;
+}
+
+/** 把同一个 Provider 批量应用到多个落点（宿主机/容器），返回逐落点结果 */
+export async function broadcastSwitchProvider(
+  targets: BroadcastSwitchTarget[],
+  providerId: string,
+  app: string,
+): Promise<BroadcastSwitchResult[]> {
+  return invoke<BroadcastSwitchResult[]>("broadcast_switch_provider", {
+    targets,
+    providerId,
+    app,
+  });
+}
+
 /**
  * 重新应用远端目标「当前生效供应商」到 live（对齐本机「开关即生效」语义）。
  * 「走本机路由」开关开启/关闭时调用，立即按新意图重写 live，无需再手动切一次。

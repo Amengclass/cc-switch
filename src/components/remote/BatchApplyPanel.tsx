@@ -16,7 +16,10 @@ import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
 import type { Provider } from "@/types";
-import { listDockerContainers, switchRemoteProvider } from "@/lib/api/remote";
+import {
+  broadcastSwitchProvider,
+  listDockerContainers,
+} from "@/lib/api/remote";
 
 interface Target {
   hostId: string;
@@ -192,26 +195,29 @@ export function BatchApplyPanel({
     }));
     setResults(rows);
 
-    for (let i = 0; i < selectedTargets.length; i++) {
-      const t = selectedTargets[i];
-      const key = t.container ? `${t.hostId}::${t.container}` : t.hostId;
-      setResults((prev) =>
-        prev.map((r) => (r.key === key ? { ...r, status: "running" } : r)),
+    // 一次调用后端广播命令，逐落点聚合结果（后端逐落点建连切换，失败不阻断其它）
+    try {
+      const results = await broadcastSwitchProvider(
+        selectedTargets.map((t) => ({
+          hostId: t.hostId,
+          container: t.container ?? null,
+        })),
+        providerId,
+        app,
       );
-      try {
-        const report = await switchRemoteProvider(t.hostId, providerId, app, t.container);
-        setResults((prev) =>
-          prev.map((r) =>
-            r.key === key ? { ...r, status: "ok", message: report.providerName } : r,
-          ),
-        );
-      } catch (e) {
-        setResults((prev) =>
-          prev.map((r) =>
-            r.key === key ? { ...r, status: "fail", message: String(e) } : r,
-          ),
-        );
-      }
+      setResults(
+        results.map((res) => ({
+          key: res.container ? `${res.hostId}::${res.container}` : res.hostId,
+          label: res.label,
+          status: res.ok ? "ok" : "fail",
+          message: res.ok ? res.providerName : (res.error ?? "切换失败"),
+        })),
+      );
+    } catch (e) {
+      // 整个广播调用崩了（如参数错误）：全标失败
+      setResults(
+        rows.map((r) => ({ ...r, status: "fail", message: String(e) })),
+      );
     }
     setRunning(false);
   };
