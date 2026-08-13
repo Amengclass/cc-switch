@@ -203,7 +203,10 @@ export function FloatingBall() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
-    const timer = setInterval(refresh, 5_000);
+    // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮球 webview 不可靠，球常只按
+    // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
+    // 保证置顶/跟随任何变化 ≤1s 生效。
+    const timer = setInterval(refresh, 1_000);
     return () => {
       clearInterval(timer);
       unlisteners.forEach((u) => u());
