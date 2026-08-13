@@ -124,18 +124,19 @@ body {
   margin-right: 4px;
   transition: background 0.3s ease;
 }
-/* 左半区：固定宽，不收缩（右半区无法挤压它） */
+/* 中区（原左半区）：占满剩余宽度且可收缩，避免固定 98px 时 app 名长短不一
+   造成留白或图钉被挤出。名称过长省略号截断，置顶图钉固定在右端点。 */
 .ball-left {
-  flex: 0 0 98px;
-  width: 98px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 1px;
 }
-/* 左半区第一行：app 主标题（图标 + app 名，深色） */
+/* 中区第一行：app 主标题（图标 + app 名 + 置顶图钉，深色） */
 .ball-app {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   color: var(--fb-fg);
@@ -150,11 +151,18 @@ body {
   height: 100%;
   display: block;
 }
-/* 置顶图钉：灰小图钉表示「该 app 被固定显示」，不与供应商蓝底抢视觉 */
+/* app 名：占满可用宽度，过长省略号截断（给右端图钉让位） */
+.ball-app-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 置顶图钉：右端固定(margin-left:auto)，不占名宽、永不被裁切 */
 .ball-pin {
   flex-shrink: 0;
   color: var(--fb-muted);
-  margin-left: 1px;
+  margin-left: 6px;
 }
 .ball-app .ball-pin {
   width: 9px;
