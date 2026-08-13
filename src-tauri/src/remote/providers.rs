@@ -402,6 +402,18 @@ async fn parse_remote_live_default<F: FileOps>(
 ///   打通隧道；
 /// - 探测失败 / 容器不存在 → `Ok(None)`（上层降级为直连）。
 ///
+/// 容器网络模式 → `docker network inspect` 用的网络名。
+/// `default` 是 Docker 对「默认 bridge 网络」的 NetworkMode 表示（容器未显式指定
+/// 网络时返回 default），与 `bridge` 语义相同；其余模式（自定义网络名 / none /
+/// container:<id>）原样返回，交由上层探测。
+fn resolve_container_network(mode: &str) -> &str {
+    if mode == "bridge" || mode == "default" {
+        "bridge"
+    } else {
+        mode
+    }
+}
+
 /// 返回 `(base_host, 容器IP)`；容器 IP 供后续按容器精确删除 DNAT。
 async fn detect_container_route_base(
     session: &crate::remote::connection::RemoteSession,
@@ -419,14 +431,20 @@ async fn detect_container_route_base(
     )
     .await?;
     let mode = mode.trim();
+    log::debug!("[remote] 容器 {container} 网络模式: {mode:?}");
     if mode.is_empty() {
+        log::warn!(
+            "[remote] 容器 {container} 网络模式探测为空（容器不存在或 docker inspect 失败），按直连写入"
+        );
         return Ok(None); // 容器不存在或 inspect 失败
     }
     if mode == "host" {
         return Ok(Some((crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR.to_string(), String::new())));
     }
-    // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）
-    let net = if mode == "bridge" { "bridge" } else { mode };
+    // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）。
+    //    `default` 与 `bridge` 同义（见 resolve_container_network），否则会被当成
+    //    网络名去 `docker network inspect default` 而查空 → 误判探测失败。
+    let net = resolve_container_network(mode);
     let gw = crate::remote::connection::exec_command(
         &session.channel,
         &format!(
@@ -436,7 +454,11 @@ async fn detect_container_route_base(
     )
     .await?;
     let gw = gw.trim();
+    log::debug!("[remote] 容器 {container} 网络 {net} 网关: {gw:?}");
     if gw.is_empty() || !gw.contains('.') {
+        log::warn!(
+            "[remote] 容器 {container} 网络 {net} 网关探测为空/非法（{gw:?}），按直连写入"
+        );
         return Ok(None);
     }
     // 3. 拿容器自身 IP（per-container DNAT 的源限定）
@@ -449,11 +471,18 @@ async fn detect_container_route_base(
     )
     .await?;
     let ip = ip.trim();
+    log::debug!("[remote] 容器 {container} IP: {ip:?}");
     if ip.is_empty() || !ip.contains('.') {
+        log::warn!(
+            "[remote] 容器 {container} IP 探测为空/非法（{ip:?}），按直连写入"
+        );
         return Ok(None);
     }
     // 4. 下发 per-container DNAT（幂等），让该容器经网关访问隧道
     ensure_container_dnat(session, ip, port).await?;
+    log::debug!(
+        "[remote] 容器 {container} 走本机路由就绪：网关 {gw} 容器IP {ip}（DNAT 已下发）"
+    );
     Ok(Some((gw.to_string(), ip.to_string())))
 }
 
@@ -811,6 +840,17 @@ pub async fn read_remote_live_provider_ids<F: FileOps>(
 mod tests {
     use super::*;
     use crate::fsops::LocalFileOps;
+
+    #[test]
+    fn resolve_network_maps_default_to_bridge() {
+        // 回归点：Docker 对未显式指定网络的容器返回 NetworkMode=default，
+        // 必须映射到 bridge 网络去查网关，否则误判探测失败而降级直连。
+        assert_eq!(resolve_container_network("default"), "bridge");
+        assert_eq!(resolve_container_network("bridge"), "bridge");
+        assert_eq!(resolve_container_network("host"), "host");
+        assert_eq!(resolve_container_network("my_custom_net"), "my_custom_net");
+        assert_eq!(resolve_container_network("none"), "none");
+    }
 
     fn temp_root(tag: &str) -> String {
         let dir = std::env::temp_dir().join(format!(
