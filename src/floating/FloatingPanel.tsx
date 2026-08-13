@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Clock, Pin } from "lucide-react";
 import {
   statusColor,
@@ -93,12 +92,8 @@ export function FloatingPanel() {
       .catch((e) => console.error("[Floating] 读取置顶 app 失败", e));
   }, []);
 
-  // 面板窗口是否可见：不可见时跳过数据轮询（面板 3s 的 get_floating_window_data
-  // 会遍历全部 app，隐藏时纯浪费 CPU/IO/日志）。
   const refresh = useCallback(async () => {
     try {
-      const visible = await getCurrentWindow().isVisible();
-      if (!visible) return;
       const data = (await invoke(
         "get_floating_window_data",
       )) as FloatingEntry[];
