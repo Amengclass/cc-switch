@@ -465,12 +465,14 @@ async fn detect_container_route_base(
     let ip = crate::remote::connection::exec_command(
         &session.channel,
         &format!(
-            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' 2>/dev/null || true",
+            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}} {{{{end}}}}' 2>/dev/null || true",
             q(container)
         ),
     )
     .await?;
-    let ip = ip.trim();
+    // 取第一个 IP（多网络时 range 输出多个 IP，空格分隔后取首个；无分隔会把多个
+    // IP 串成一串，`.contains('.')` 误通过、DNAT 源 IP 变乱值）
+    let ip = ip.split_whitespace().next().unwrap_or("").to_string();
     log::debug!("[remote] 容器 {container} IP: {ip:?}");
     if ip.is_empty() || !ip.contains('.') {
         log::warn!(
@@ -479,7 +481,7 @@ async fn detect_container_route_base(
         return Ok(None);
     }
     // 4. 下发 per-container DNAT（幂等），让该容器经网关访问隧道
-    ensure_container_dnat(session, ip, port).await?;
+    ensure_container_dnat(session, &ip, port).await?;
     log::debug!(
         "[remote] 容器 {container} 走本机路由就绪：网关 {gw} 容器IP {ip}（DNAT 已下发）"
     );
@@ -495,24 +497,30 @@ async fn container_ip(
     let out = crate::remote::connection::exec_command(
         &session.channel,
         &format!(
-            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}}{{{{end}}}}' 2>/dev/null || true",
+            // IP 后跟空格分隔：容器可能挂在多个网络上，无分隔会把多个 IP 串成一串
+            // （如 172.17.0.8fd00::1），`.contains('.')` 检查会误通过，DNAT 源 IP 变乱值。
+            "docker inspect {} --format '{{{{range .NetworkSettings.Networks}}}}{{{{.IPAddress}}}} {{{{end}}}}' 2>/dev/null || true",
             q(container)
         ),
     )
     .await
     .ok()?;
-    let ip = out.trim();
+    // 取第一个 IP（单网络即唯一 IP；多网络取首个，best-effort）
+    let ip = out.split_whitespace().next().unwrap_or("").to_string();
     if ip.is_empty() || !ip.contains('.') {
         None
     } else {
-        Some(ip.to_string())
+        Some(ip)
     }
 }
 
 /// 在宿主机下发 **per-container** DNAT：仅把该容器（源 IP 限定）发往
 /// 网关端口的流量转到本机路由隧道（127.0.0.1:{port}）。
 /// - `sysctl route_localnet=1`：允许 DNAT 到回环地址；
-/// - iptables PREROUTING（`-i docker0 -s <ip>` 入口 {port} → 127.0.0.1:{port}），`-C` 检查幂等。
+/// - iptables PREROUTING（`-s <ip>` 入口 {port} → 127.0.0.1:{port}），`-C` 检查幂等。
+///   **不限定 `-i docker0`**：默认 bridge 的容器经 docker0 进入，自定义 bridge 网络
+///   的容器经 `br-<hash>` 进入；`-s <容器IP>` 已唯一限定该容器，按入口接口过滤反而会
+///   漏掉自定义网络容器（与 netmode=default 同一类硬编码假设）。
 async fn ensure_container_dnat(
     session: &crate::remote::connection::RemoteSession,
     container_ip: &str,
@@ -524,7 +532,7 @@ async fn ensure_container_dnat(
     )
     .await?;
     let rule = format!(
-        "iptables -t nat -C PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || iptables -t nat -A PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} >/dev/null 2>&1 || true",
+        "iptables -t nat -C PREROUTING -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || iptables -t nat -A PREROUTING -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} >/dev/null 2>&1 || true",
         crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
         crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
         ip = container_ip,
@@ -542,7 +550,7 @@ pub async fn remove_container_dnat(
     port: u16,
 ) -> Result<(), String> {
     let rule = format!(
-        "iptables -t nat -D PREROUTING -i docker0 -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || true",
+        "iptables -t nat -D PREROUTING -s {ip} -p tcp --dport {port} -j DNAT --to-destination {}:{port} 2>/dev/null || true",
         crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR,
         ip = container_ip,
         port = port
