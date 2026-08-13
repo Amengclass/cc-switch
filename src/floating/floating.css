@@ -286,6 +286,15 @@ body {
 .row-app {
   font-size: 12px;
   font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* app 名前的品牌图标 */
+.row-app-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--fb-fg);
 }
 .row-provider {
   font-size: 10px;

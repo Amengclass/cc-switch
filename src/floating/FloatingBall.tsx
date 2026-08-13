@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
-import type { PointerEvent } from "react";
+import { cloneElement, useCallback, useEffect, useState } from "react";
+import type { PointerEvent, ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Pin } from "lucide-react";
 import { APP_ICON_MAP } from "@/config/appConfig";
 import { type FloatingEntry, type FloatingUsageData } from "./types";
 
-/** app 小图标：按当前 appType 取主应用对应品牌图标（与主窗口 APP_ICON_MAP 一致）。 */
+/** app 小图标：按当前 appType 取主应用对应品牌图标，并强制成指定尺寸。
+ *  APP_ICON_MAP 里的元素是固定 size（14）的 ReactElement，不能直接塞进更小
+ *  (10px) 容器否则会被裁切，用 cloneElement 统一成目标尺寸。 */
 function AppIcon({ size, appType }: { size: number; appType: string }) {
   const cfg = APP_ICON_MAP[appType as keyof typeof APP_ICON_MAP];
   if (!cfg?.icon) return null;
+  const icon = cloneElement(cfg.icon as ReactElement<{ size?: number }>, {
+    size,
+  });
   return (
     <span
       style={{
-        width: size,
-        height: size,
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
@@ -22,7 +25,7 @@ function AppIcon({ size, appType }: { size: number; appType: string }) {
         color: "currentColor",
       }}
     >
-      {cfg.icon}
+      {icon}
     </span>
   );
 }

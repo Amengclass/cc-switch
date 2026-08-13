@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { cloneElement, useCallback, useEffect, useState, type ReactNode } from "react";
+import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Clock, Pin } from "lucide-react";
+import { APP_ICON_MAP } from "@/config/appConfig";
 import {
   statusColor,
   usageValueClass,
@@ -9,6 +11,13 @@ import {
   type FloatingUsageData,
 } from "./types";
 import type { FloatingBallTarget } from "./FloatingBall";
+
+/** app 小图标：按 appType 取主应用品牌图标，统一成指定尺寸（配合行/app 名显示）。 */
+function AppIcon({ size, appType }: { size: number; appType: string }) {
+  const cfg = APP_ICON_MAP[appType as keyof typeof APP_ICON_MAP];
+  if (!cfg?.icon) return null;
+  return cloneElement(cfg.icon as ReactElement<{ size?: number }>, { size });
+}
 
 /** 相对时间：与主窗口 UsageFooter formatRelativeTime 同语义（悬浮窗硬编码中文） */
 function formatRelativeTime(ts: number | null, now: number): string {
@@ -161,7 +170,12 @@ export function FloatingPanel() {
             <div key={e.appType}>
               <div className="row">
                 <div className="row-left">
-                  <span className="row-app">{e.appLabel}</span>
+                  <span className="row-app">
+                    <span className="row-app-icon">
+                      <AppIcon size={11} appType={e.appType} />
+                    </span>
+                    {e.appLabel}
+                  </span>
                   <span
                     className={
                       e.hasProvider
