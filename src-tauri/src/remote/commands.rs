@@ -3003,7 +3003,9 @@ fn load_host(state: &AppState, host_id: &str) -> Result<RemoteHost, String> {
 
 /// 解析连接用密码：优先系统钥匙串；否则要求编辑主机补充密码。
 fn resolve_password(host: &RemoteHost) -> Result<String, String> {
-    log::info!("[remote] resolve_password: id={}", host.id);
+    // debug：38 处远端命令都会调它，每次远程操作都打 info 会让日志暴涨
+    //（实测 17MB 日志里 resolve_password 占约 29%）。需要追踪时调高级别可见。
+    log::debug!("[remote] resolve_password: id={}", host.id);
     let pw = credentials::get_password(&host.id).map_err(|e| {
         log::error!("[remote] 钥匙串读取失败: {e}");
         e

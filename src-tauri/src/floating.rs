@@ -891,7 +891,8 @@ pub async fn get_floating_window_data(
         entries.push(build_floating_entry(&state, &app_type));
     }
 
-    log::info!(
+    // debug：面板 3s 轮询，每轮都 info 会让日志暴涨（实测 17MB 日志里占据大头）
+    log::debug!(
         "[Floating] 面板拉取数据: {}",
         entries
             .iter()
@@ -916,7 +917,8 @@ pub async fn get_floating_ball_detail(
         return Ok(None);
     };
     let entry = build_floating_entry(&state, &app_type);
-    log::info!(
+    // debug：球 5s 轮询每次打 info 会让日志暴涨
+    log::debug!(
         "[Floating] 悬浮球详情: {}={} pinned={}",
         entry.app_label,
         entry.provider_name,
@@ -985,12 +987,20 @@ pub async fn floating_set_pin_app(
             return Err(format!("未知的 app 类型: {at}"));
         }
     }
+    let t0 = std::time::Instant::now();
     crate::settings::set_floating_pin_app(app_type).map_err(|e| e.to_string())?;
-    log::info!("[Floating] 设置悬浮球置顶 app: {:?}", resolve_ball_target().map(|t| t.app_type));
-    // 球对置顶变化要即时响应：单独发 target 事件（轻量，只带 app/isPinned），
-    // 球据此立刻刷新详情，不再依赖全量 data-refresh 的慢路径。
-    let _ = app.emit("floating-pin-changed", resolve_ball_target());
+    log::info!(
+        "[Floating] 设置悬浮球置顶 app: {:?} (写设置耗时 {}ms)",
+        resolve_ball_target().map(|t| t.app_type),
+        t0.elapsed().as_millis()
+    );
+    // 球对置顶变化要即时响应：单独发 target 事件（轻量，只带 app/isPinned）。
+    // 用「按窗口逐个 emit」而非全局 app.emit——实测全局广播到悬浮窗 webview 的
+    // 事件不可靠（球/面板都只按 poll 节奏刷新），逐个 emit_to 保证到达球窗口。
+    let t1 = std::time::Instant::now();
+    emit_pin_changed(&app);
     let _ = app.emit("floating-data-refresh", ());
+    log::info!("[Floating] 置顶事件已发出 (emit 耗时 {}ms)", t1.elapsed().as_millis());
     Ok(())
 }
 
@@ -1008,8 +1018,20 @@ pub async fn floating_record_active_app(
     crate::settings::set_floating_last_app(parsed.as_str().to_string()).map_err(|e| e.to_string())?;
     log::info!("[Floating] 记录最近活跃 app: {}", parsed.as_str());
     // 未置顶时球跟随最近活跃：发 target 事件让球即时更新
-    let _ = app.emit("floating-pin-changed", resolve_ball_target());
+    emit_pin_changed(&app);
     Ok(())
+}
+
+/// 向悬浮球窗口定向发 `floating-pin-changed`（带目标），并向所有窗口发
+/// `floating-data-refresh`。按窗口逐个 emit 比全局广播更可靠地到达浮窗 webview。
+fn emit_pin_changed(app: &tauri::AppHandle) {
+    let target = resolve_ball_target();
+    // 定向发给球窗口
+    if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+        let _ = ball.emit("floating-pin-changed", target);
+    }
+    // 全局广播 data-refresh（面板/球都刷新）
+    let _ = app.emit("floating-data-refresh", ());
 }
 
 // ============================================================
