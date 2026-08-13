@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  Send,
   Settings,
   ArrowLeft,
   Minus,
@@ -110,6 +111,7 @@ import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
+import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
 import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
@@ -220,6 +222,9 @@ function App() {
       isChecking: false,
       hasSkills: false,
     });
+
+  // ===== 批量应用 Provider 面板（入口A：目标选择器栏；入口B：远程主机管理页）=====
+  const [batchApplyOpen, setBatchApplyOpen] = useState(false);
 
   // ===== 目标选择器（本机 / 远程服务器）=====
   const [servers, setServers] = useState<RemoteHost[]>([]);
@@ -2028,15 +2033,26 @@ function App() {
                   </>
                 )}
                 {currentView === "remote" && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => remoteHostsPanelRef.current?.openAdd()}
-                    className="hover:bg-black/5 dark:hover:bg-white/5"
-                  >
-                    <Plus className="w-4 h-4 mr-2" />
-                    {t("remote.add", { defaultValue: "添加远程主机" })}
-                  </Button>
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => remoteHostsPanelRef.current?.openAdd()}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      {t("remote.add", { defaultValue: "添加远程主机" })}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBatchApplyOpen(true)}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      批量应用
+                    </Button>
+                  </>
                 )}
                 {currentView === "skills" && (
                   <>
@@ -2397,6 +2413,14 @@ function App() {
               hostsOnline={hostsOnline}
               onProbeHosts={probeHosts}
             />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setBatchApplyOpen(true)}
+              className="hover:bg-black/5 dark:hover:bg-white/5"
+            >
+              批量应用
+            </Button>
           {currentInstalled === true || currentInstalled === null ? (
             <span
               className={cn(
@@ -2459,6 +2483,16 @@ function App() {
           {renderContent()}
         </div>
       </main>
+
+      {/* 批量应用 Provider 面板：入口A（目标选择器栏）/ 入口B（远程主机管理页）共用 */}
+      <BatchApplyPanel
+        open={batchApplyOpen}
+        onOpenChange={setBatchApplyOpen}
+        app={sharedFeatureApp}
+        hosts={servers}
+        providers={providers}
+        defaultProviderId={effectiveCurrentProviderId || undefined}
+      />
 
       <AddProviderDialog
         open={isAddOpen}
