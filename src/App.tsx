@@ -2485,13 +2485,18 @@ function App() {
       </main>
 
       {/* 批量应用 Provider 面板：入口A（目标选择器栏）/ 入口B（远程主机管理页）共用 */}
+      {/* 批量应用 Provider 面板：Provider 候选池固定取「本机 DB 的供应商」，
+          不随当前目标（远端/容器）变——广播就是用本机这份标准配置推到各远端。
+          ===== 如何改「Provider 池来源」=====
+          当前来源 = 本机 useProvidersQuery（data?.providers）。若未来想改成从其它源取
+          （如当前目标、某份配置文件），改这里的 providers 取值即可，后端广播逻辑不变。 */}
       <BatchApplyPanel
         open={batchApplyOpen}
         onOpenChange={setBatchApplyOpen}
         app={sharedFeatureApp}
         hosts={servers}
-        providers={providers}
-        defaultProviderId={effectiveCurrentProviderId || undefined}
+        providers={data?.providers ?? {}}
+        defaultProviderId={data?.currentProviderId || undefined}
       />
 
       <AddProviderDialog

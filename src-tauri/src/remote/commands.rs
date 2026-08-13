@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 use std::str::FromStr;
-use tauri::State;
+use tauri::{Emitter, State};
 
 use base64::Engine as _;
 use crate::fsops::FileOps as _;
@@ -1173,6 +1173,7 @@ pub async fn switch_remote_provider(
         &provider_id,
         &app,
         container.as_deref(),
+        false, // 单机切换：不自动从本机库兜底，保持原「远端需已配置」严格语义
     )
     .await
 }
@@ -1186,6 +1187,9 @@ async fn switch_remote_provider_target(
     provider_id: &str,
     app: &str,
     container: Option<&str>,
+    // 单机切换传 false（远端未配置该 Provider 即严格报错）；
+    // 批量广播传 true（远端没有时从「Provider 池来源」取定义写入远端再切换）。
+    allow_local_fallback: bool,
 ) -> Result<EffectReport, String> {
     let host = load_host(state, host_id)?;
     let password = resolve_password(&host)?;
@@ -1200,18 +1204,48 @@ async fn switch_remote_provider_target(
     )?;
 
     // 首次访问（SSOT 空）时从远端 live 导入（对齐本机启动导入语义）
-    let ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
-    let provider = ssot
+    let mut ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
+    // 单机切换（switch_remote_provider）：要求远端 SSOT 已有该 Provider，不存在即报错；
+    // 批量广播（broadcast_switch_provider）：远端没有时，把「本机 DB 里的 Provider 完整定义」
+    // 作为标准配置写入远端 SSOT（真正「一处配置、多处生效」），再切换。
+    //
+    // ===== 如何改「Provider 池来源」=====
+    // 当前来源 = 本机 DB（get_provider_by_id）。若未来想改成从其它源取（如某台远端 SSOT、
+    // 某个配置文件），只需改下面这一处「取 Provider 完整定义」的调用即可，写入/切换逻辑不变。
+    let mut provider = ssot
         .providers
         .iter()
         .find(|p| p.id == provider_id)
-        .cloned()
-        .ok_or_else(|| {
-            format!(
-                "供应商 '{provider_id}' 不在远端「{}」的配置中，请先在远端面板添加后再切换",
-                host.name
-            )
-        })?;
+        .cloned();
+    if provider.is_none() && allow_local_fallback {
+        // 批量广播：远端没有该 Provider 时，从「Provider 池来源」取定义写入远端再切换。
+        // 单机切换（allow_local_fallback=false）不走这里 → 保持原「严格报错」行为不变。
+        //
+        // ===== 如何改「Provider 池来源」=====
+        // 当前来源 = 本机 DB（state.db.get_provider_by_id）。若未来想改从其它源取
+        // （如某台远端 SSOT、某配置文件），只需改下面这一处调用即可，写入/切换逻辑不变。
+        if let Ok(Some(p)) = state.db.as_ref().get_provider_by_id(provider_id, app) {
+            // upsert 进远端 SSOT：无则追加，有则覆盖（以「池来源」的定义为标准）
+            if let Some(existing) = ssot.providers.iter_mut().find(|p| p.id == provider_id) {
+                *existing = p.clone();
+            } else {
+                ssot.providers.push(p.clone());
+            }
+            if let Err(e) =
+                crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot)
+                    .await
+            {
+                log::warn!("[remote] 广播时写入远端 SSOT 失败 host_id={host_id}: {e}");
+            }
+            provider = Some(p);
+        }
+    }
+    let provider = provider.ok_or_else(|| {
+        format!(
+            "供应商 '{provider_id}' 不在远端「{}」的配置中，请先在远端面板添加后再切换",
+            host.name
+        )
+    })?;
 
     let report = crate::remote::providers::apply_remote_provider_to_live(
         state.db.as_ref(),
@@ -1315,12 +1349,17 @@ pub struct RemoteSwitchTarget {
 /// 批量切换：把同一个 Provider 应用到多个落点（宿主机/容器）。
 /// 与单机切换语义完全一致，只是循环多落点并聚合每个落点的成功/失败。
 /// 失败不阻断其它落点（某台连不上/切失败，其余照常）。
+///
+/// 逐台进度通过事件 `broadcast-progress` 推送给前端（主窗口监听可靠），
+/// payload = `RemoteSwitchResult`；全部结束后再 emit `broadcast-progress-done`
+/// （带完整结果数组），让前端能做最终态收尾。
 #[tauri::command]
 pub async fn broadcast_switch_provider(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     targets: Vec<RemoteSwitchTarget>,
     provider_id: String,
-    app: String,
+    app_type: String,
 ) -> Result<Vec<RemoteSwitchResult>, String> {
     let mut out = Vec::with_capacity(targets.len());
     for t in &targets {
@@ -1332,15 +1371,16 @@ pub async fn broadcast_switch_provider(
             &state,
             &t.host_id,
             &provider_id,
-            &app,
+            &app_type,
             t.container.as_deref(),
+            true, // 广播：远端没有该 Provider 时从本机库写入并切换（真正「一处配置、多处生效」）
         )
         .await;
-        out.push(match result {
+        let item = match result {
             Ok(report) => RemoteSwitchResult {
                 host_id: t.host_id.clone(),
                 container: t.container.clone(),
-                label,
+                label: label.clone(),
                 ok: true,
                 provider_name: report.provider_name,
                 error: None,
@@ -1353,8 +1393,13 @@ pub async fn broadcast_switch_provider(
                 provider_name: String::new(),
                 error: Some(e),
             },
-        });
+        };
+        out.push(item.clone());
+        // 逐台进度：每切完一台立即发给前端，实时更新对应落点状态
+        let _ = app.emit("broadcast-progress", &item);
     }
+    // 全部完成：把完整结果一次性收尾（前端据此标记结束）
+    let _ = app.emit("broadcast-progress-done", &out);
     Ok(out)
 }
 

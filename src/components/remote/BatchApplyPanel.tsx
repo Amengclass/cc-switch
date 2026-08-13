@@ -19,7 +19,9 @@ import type { Provider } from "@/types";
 import {
   broadcastSwitchProvider,
   listDockerContainers,
+  type BroadcastSwitchResult,
 } from "@/lib/api/remote";
+import { listen } from "@tauri-apps/api/event";
 
 interface Target {
   hostId: string;
@@ -188,14 +190,30 @@ export function BatchApplyPanel({
   const doApply = async () => {
     if (selectedTargets.length === 0 || !providerId) return;
     setRunning(true);
-    const rows: ResultRow[] = selectedTargets.map((t) => ({
-      key: t.container ? `${t.hostId}::${t.container}` : t.hostId,
-      label: t.container ? `${t.hostName} / ${t.container}` : t.hostName,
-      status: "pending",
-    }));
-    setResults(rows);
+    const makeRows = (): ResultRow[] =>
+      selectedTargets.map((t) => ({
+        key: t.container ? `${t.hostId}::${t.container}` : t.hostId,
+        label: t.container ? `${t.hostName} / ${t.container}` : t.hostName,
+        status: "pending",
+      }));
+    setResults(makeRows());
 
-    // 一次调用后端广播命令，逐落点聚合结果（后端逐落点建连切换，失败不阻断其它）
+    const fromResult = (res: BroadcastSwitchResult): ResultRow => ({
+      key: res.container ? `${res.hostId}::${res.container}` : res.hostId,
+      label: res.label,
+      status: res.ok ? "ok" : "fail",
+      message: res.ok ? res.providerName : (res.error ?? "切换失败"),
+    });
+
+    // 监听后端逐台进度事件：每切完一台立即更新对应落点，实时反馈
+    const un = await listen<BroadcastSwitchResult>("broadcast-progress", (ev) => {
+      const row = fromResult(ev.payload);
+      setResults((prev) =>
+        prev.map((r) => (r.key === row.key ? row : r)),
+      );
+    });
+
+    // 一次调用后端广播命令（后端逐落点建连切换并推进度，失败不阻断其它）
     try {
       const results = await broadcastSwitchProvider(
         selectedTargets.map((t) => ({
@@ -205,20 +223,17 @@ export function BatchApplyPanel({
         providerId,
         app,
       );
-      setResults(
-        results.map((res) => ({
-          key: res.container ? `${res.hostId}::${res.container}` : res.hostId,
-          label: res.label,
-          status: res.ok ? "ok" : "fail",
-          message: res.ok ? res.providerName : (res.error ?? "切换失败"),
-        })),
-      );
+      // 权威结果兜底：以 invoke 返回为准（即使事件漏了也能对齐最终态）
+      setResults(results.map(fromResult));
     } catch (e) {
-      // 整个广播调用崩了（如参数错误）：全标失败
-      setResults(
-        rows.map((r) => ({ ...r, status: "fail", message: String(e) })),
+      // 整个广播调用崩了（如参数错误）：当前未完成的全标失败
+      setResults((prev) =>
+        prev.map((r) =>
+          r.status === "pending" ? { ...r, status: "fail", message: String(e) } : r,
+        ),
       );
     }
+    un();
     setRunning(false);
   };
 

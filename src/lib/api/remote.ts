@@ -132,7 +132,7 @@ export async function broadcastSwitchProvider(
   return invoke<BroadcastSwitchResult[]>("broadcast_switch_provider", {
     targets,
     providerId,
-    app,
+    appType: app,
   });
 }
 
