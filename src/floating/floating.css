@@ -122,11 +122,10 @@ body {
   align-self: center;
   transition: background 0.3s ease;
 }
-/* 左半区：固定宽，不收缩（右半区无法挤压它）。
-   加宽到 126px 给供应商球标更多空间（配合 Rust BALL_WIDTH 180→208）。 */
+/* 左半区：固定宽，不收缩（右半区无法挤压它） */
 .ball-left {
-  flex: 0 0 126px;
-  width: 126px;
+  flex: 0 0 98px;
+  width: 98px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
