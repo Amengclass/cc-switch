@@ -125,6 +125,8 @@ impl FailoverSwitchManager {
                 "providerId": provider_id,
                 "source": "failover"  // 标识来源是故障转移
             });
+            // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+            crate::floating::record_active_app_sync(app, app_type);
             if let Err(e) = app.emit("provider-switched", event_data) {
                 log::error!("[Failover] 发射事件失败: {e}");
             }

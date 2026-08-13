@@ -589,6 +589,8 @@ fn handle_auto_click(app: &tauri::AppHandle, app_type: &AppType) -> Result<(), A
         if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
             log::error!("发射 proxy-flags-changed 事件失败: {e}");
         }
+        // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+        crate::floating::record_active_app_sync(app, app_type_str);
         // 发射 provider-switched 事件（保持向后兼容，Auto 切换也算一种切换）
         if let Err(e) = app.emit("provider-switched", event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
@@ -633,6 +635,8 @@ fn handle_provider_click(
         if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
             log::error!("发射 proxy-flags-changed 事件失败: {e}");
         }
+        // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+        crate::floating::record_active_app_sync(app, app_type_str);
         // 发射 provider-switched 事件（保持向后兼容）
         if let Err(e) = app.emit("provider-switched", event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");

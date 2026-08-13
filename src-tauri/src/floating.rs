@@ -1022,6 +1022,24 @@ pub async fn floating_record_active_app(
     Ok(())
 }
 
+/// 后端直接记录「最近活跃 app」并通知球（同步版）。
+///
+/// 各 `provider-switched` 发射点（profile/failover/tray/failover_switch）在切 app
+/// 时同步调它。不再依赖事件回传到悬浮球 webview（实测球收不到跨窗口事件）——
+/// 球改由 1s 轮询读 backend 的 floating_last_app，因此这里把 last_app 写在后端，
+/// 球下一次轮询（≤1s）即可跟随。
+pub fn record_active_app_sync(app_handle: &tauri::AppHandle, app_type: &str) {
+    let Some(parsed) = parse_app_type(app_type) else {
+        return;
+    };
+    if let Err(e) = crate::settings::set_floating_last_app(parsed.as_str().to_string()) {
+        log::warn!("[Floating] 记录活跃 app 失败: {e}");
+        return;
+    }
+    let _ = app_handle.emit("floating-pin-changed", resolve_ball_target());
+    let _ = app_handle.emit("floating-data-refresh", ());
+}
+
 /// 向悬浮球窗口定向发 `floating-pin-changed`（带目标），并向所有窗口发
 /// `floating-data-refresh`。按窗口逐个 emit 比全局广播更可靠地到达浮窗 webview。
 fn emit_pin_changed(app: &tauri::AppHandle) {

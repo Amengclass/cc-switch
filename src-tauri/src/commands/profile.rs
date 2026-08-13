@@ -79,6 +79,9 @@ pub fn emit_profile_apply_events(
             "autoFailoverEnabled": auto_failover_enabled,
             "providerId": provider_id,
         });
+        // 后端同步记录最近活跃 app：悬浮球跟随靠它（球收不到跨窗口事件，
+        // 靠 1s 轮询读 backend 的 last_app）
+        crate::floating::record_active_app_sync(&app, app_str);
         if let Err(e) = app.emit("provider-switched", event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
         }

@@ -162,6 +162,8 @@ pub async fn set_auto_failover_enabled(
         .map_err(|e| e.to_string())?;
 
     if enabled {
+        // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+        crate::floating::record_active_app_sync(&app, &app_type);
         // 发射 provider-switched 事件（让前端刷新当前供应商）
         let event_data = serde_json::json!({
             "appType": app_type,
