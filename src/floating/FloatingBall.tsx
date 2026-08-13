@@ -1,5 +1,5 @@
 import { cloneElement, useCallback, useEffect, useState } from "react";
-import type { PointerEvent, ReactElement } from "react";
+import type { CSSProperties, PointerEvent, ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Pin } from "lucide-react";
@@ -48,6 +48,8 @@ interface Summary {
   usageUnit: string;
   /** 多套餐订阅：每行一个套餐缩写（如 h5% / d20% / m30%），右半区三行显示 */
   usageLines: string[] | null;
+  /** 悬浮窗不透明度（0.2~1.0，设置页滑块调节） */
+  opacity: number;
 }
 
 type UsageLevel = "danger" | "warn" | "good" | "none";
@@ -97,15 +99,17 @@ function planAbbr(name?: string | null): string {
   return "";
 }
 
-/** 悬浮球当前应显示的目标 app（由后端解析：置顶优先，否则最近活跃 app） */
+/** 悬浮窗当前应显示的目标 app（由后端解析：置顶优先，否则最近活跃 app） */
 export interface FloatingBallTarget {
   appType: string;
   isPinned: boolean;
   appLabel: string;
   takeoverActive: boolean;
+  /** 悬浮窗不透明度（0.2~1.0，设置页滑块调节） */
+  opacity: number;
 }
 
-/** 读取悬浮球目标 app 的供应商 / 模型 / 余量。
+/** 读取悬浮窗目标 app 的供应商 / 模型 / 余量。
  *  只用两个轻量命令（get_floating_ball_detail 只查目标一个 app、get_floating_ball_target
  *  只回 app/isPinned），避免面板全量扫描拖慢球的响应。 */
 async function loadSummary(): Promise<Summary> {
@@ -116,6 +120,7 @@ async function loadSummary(): Promise<Summary> {
 
   const isPinned = !!target?.isPinned;
   const takeoverActive = !!target?.takeoverActive;
+  const opacity = target?.opacity ?? 0.97;
 
   if (!entry)
     return {
@@ -130,6 +135,7 @@ async function loadSummary(): Promise<Summary> {
       usageValue: "—",
       usageUnit: "",
       usageLines: null,
+      opacity,
     };
 
   // 多套餐订阅（≥2 个）：右半区每行一个套餐缩写（如 h5% / d20% / m30%）
@@ -165,11 +171,12 @@ async function loadSummary(): Promise<Summary> {
     usageValue,
     usageUnit,
     usageLines,
+    opacity,
   };
 }
 
 /**
- * 悬浮球（方案C：240×56 横向胶囊条，本身就是信息条——左 app/模型，右 余量）：
+ * 悬浮窗（方案C：240×56 横向胶囊条，本身就是信息条——左 app/模型，右 余量）：
  * - 拖动：按下/松开只发信号给 Rust，Rust 用 GetCursorPos 轮询全局光标 + set_position
  *   移动窗口（绕开 WebView 事件），松手自动吸附，无位移即单击→打开主窗口
  * - 悬停展开面板，离开时通知后端宽限隐藏
@@ -187,6 +194,7 @@ export function FloatingBall() {
     usageValue: "—",
     usageUnit: "",
     usageLines: null,
+    opacity: 0.97,
   });
 
   const refresh = useCallback(() => {
@@ -219,7 +227,7 @@ export function FloatingBall() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
-    // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮球 webview 不可靠，球常只按
+    // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮窗 webview 不可靠，球常只按
     // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
     // 保证置顶/跟随任何变化 ≤1s 生效。
     const timer = setInterval(refresh, 1_000);
@@ -239,7 +247,8 @@ export function FloatingBall() {
   return (
     <div
       className={`ball${summary.takeoverActive ? " route-service-live" : ""}`}
-      title={summary.takeoverActive ? "此 app 正处远端接管，请求经本机代理/远端隧道转发" : undefined}
+      title={summary.takeoverActive ? "此 app 已开启路由纳管（请求经本机代理转发）" : undefined}
+      style={{ "--ball-alpha": summary.opacity } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
       onPointerCancel={() => void invoke("floating_drag_end")}

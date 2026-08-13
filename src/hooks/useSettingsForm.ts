@@ -51,6 +51,10 @@ const sanitizeDir = (value?: string | null): string | undefined => {
   return trimmed.length > 0 ? trimmed : undefined;
 };
 
+// 悬浮窗不透明度取值范围 0.2~1.0（与后端/滑块一致），收敛异常值
+const clampOpacity = (v: number): number =>
+  Math.min(1, Math.max(0.2, Math.round(v * 100) / 100));
+
 export interface UseSettingsFormResult {
   settings: SettingsFormState | null;
   isLoading: boolean;
@@ -117,6 +121,7 @@ export function useSettingsForm(): UseSettingsFormResult {
       silentStartup: data.silentStartup ?? false,
       skipClaudeOnboarding: data.skipClaudeOnboarding ?? false,
       enableFloatingWindow: data.enableFloatingWindow ?? false,
+      floatingOpacity: clampOpacity(data.floatingOpacity ?? 0.97),
       preserveCodexOfficialAuthOnSwitch:
         data.preserveCodexOfficialAuthOnSwitch ?? false,
       unifyCodexSessionHistory: data.unifyCodexSessionHistory ?? false,

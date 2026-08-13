@@ -528,18 +528,20 @@ function App() {
     status: proxyStatus,
   } = useProxyStatus();
   const isCurrentAppTakeoverActive = takeoverStatus?.[activeApp] || false;
-  // 悬浮球「远端接管」状态同步：主窗口当前目标(主机/容器)+ 当前 app 的远端接管
-  // 是否开启，算好后写入后端设置，球靠 1s 轮询读它显示流动边框。
+  // 悬浮窗「路由接管」状态同步：本应显示「当前 app 是否开启路由」，故本机与远端
+  // 都要算。本机看本机接管开关；远端看所选主机/容器上该 app 的路由接管开关。
+  // 算好后写入后端设置，球靠 1s 轮询读它显示流动边框。
   // （activeRemoteHost 已在上方 line 401 定义）
-  const isRemoteTakeoverActive = !!(
-    remoteTargetId &&
-    activeRemoteHost &&
-    (remoteContainerId
-      ? activeRemoteHost.routeProxyContainerApps?.[remoteContainerId]?.[
-          sharedFeatureApp
-        ]
-      : activeRemoteHost.routeProxyApps?.[sharedFeatureApp])
-  );
+  const isRemoteTakeoverActive = remoteTargetId
+    ? !!(
+        activeRemoteHost &&
+        (remoteContainerId
+          ? activeRemoteHost.routeProxyContainerApps?.[remoteContainerId]?.[
+              sharedFeatureApp
+            ]
+          : activeRemoteHost.routeProxyApps?.[sharedFeatureApp])
+      )
+    : isCurrentAppTakeoverActive;
   useEffect(() => {
     void invoke("floating_set_remote_takeover", {
       active: isRemoteTakeoverActive,
@@ -1002,7 +1004,7 @@ function App() {
     };
   }, []);
 
-  // 悬浮球右键菜单「设置」：打开主窗口后切到设置页（与 Ctrl+, 同一入口）
+  // 悬浮窗右键菜单「设置」：打开主窗口后切到设置页（与 Ctrl+, 同一入口）
   useTauriEvent("open-settings", () => {
     if (managementBusyRef.current) return;
     setCurrentView("settings");

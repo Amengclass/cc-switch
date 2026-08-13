@@ -115,7 +115,11 @@ export function ProxyTabContent({
               </div>
               <Badge
                 variant={isRunning ? "default" : "secondary"}
-                className="gap-1.5 h-6 ml-auto mr-2"
+                className={`gap-1.5 h-6 ml-auto mr-2 border-transparent ${
+                  isRunning
+                    ? "!bg-green-500 !text-white"
+                    : "dark:border-white/10"
+                }`}
               >
                 <Activity
                   className={`h-3 w-3 ${isRunning ? "status-heartbeat" : ""}`}

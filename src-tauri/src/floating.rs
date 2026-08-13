@@ -619,6 +619,9 @@ pub struct FloatingEntry {
     /// 用量查询时间戳（毫秒），供面板显示「刚刚 / x分钟前」（与主窗口一致）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub queried_at: Option<i64>,
+    /// 该 app 的路由纳管是否开启（proxy_config.enabled，与主窗口 takeoverStatus 同源），
+    /// 面板据此每行显示「纳管中」标签。OpenCode/OpenClaw 不支持，恒为 false。
+    pub takeover_active: bool,
 }
 
 const UNKNOWN_PROVIDER: &str = "未设置";
@@ -818,11 +821,19 @@ fn floating_queried_at(
     None
 }
 
-/// 构建单个 app 的悬浮窗行条目（当前供应商 / 模型 / 用量）。
+/// 构建单个 app 的悬浮窗行条目（当前供应商 / 模型 / 用量 / 路由纳管）。
 /// 面板（`get_floating_window_data` 遍历所有可见 app）与悬浮球
 /// （`get_floating_ball_detail` 只取目标 app）共用，保证两者数据一致。
-fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingEntry {
+async fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingEntry {
     let app_type_str = app_type.as_str();
+
+    // 路由纳管状态与主窗口 takeoverStatus 同源（proxy_config.enabled）
+    let takeover_active = state
+        .db
+        .get_proxy_config_for_app(app_type_str)
+        .await
+        .map(|c| c.enabled)
+        .unwrap_or(false);
 
     let current_id =
         crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None);
@@ -871,6 +882,7 @@ fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingEntry {
         worst_pct,
         usage,
         queried_at,
+        takeover_active,
     }
 }
 
@@ -888,7 +900,7 @@ pub async fn get_floating_window_data(
         if !visible_apps.is_visible(&app_type) {
             continue;
         }
-        entries.push(build_floating_entry(&state, &app_type));
+        entries.push(build_floating_entry(&state, &app_type).await);
     }
 
     // debug：面板 3s 轮询，每轮都 info 会让日志暴涨（实测 17MB 日志里占据大头）
@@ -916,7 +928,7 @@ pub async fn get_floating_ball_detail(
     let Some(app_type) = parse_app_type(&target.app_type) else {
         return Ok(None);
     };
-    let entry = build_floating_entry(&state, &app_type);
+    let entry = build_floating_entry(&state, &app_type).await;
     // debug：球 5s 轮询每次打 info 会让日志暴涨
     log::debug!(
         "[Floating] 悬浮球详情: {}={} pinned={}",
@@ -939,6 +951,8 @@ pub struct FloatingBallTarget {
     pub app_label: &'static str,
     /// 该 app 是否处「远端接管」（主窗口算好写入设置，球据此显示流动边框）
     pub takeover_active: bool,
+    /// 悬浮球不透明度（0.2~1.0；设置页滑块调节）
+    pub opacity: f32,
 }
 
 /// 解析 app 类型字符串（非法/未识别返回 None）
@@ -951,6 +965,11 @@ fn parse_app_type(s: &str) -> Option<AppType> {
 fn resolve_ball_target() -> Option<FloatingBallTarget> {
     let settings = crate::settings::get_settings();
     let takeover_active = settings.floating_remote_takeover.unwrap_or(false);
+    // 不透明度随设置走；None 回退到默认 0.97（与 current --fb-bg 相仿）
+    let opacity = settings
+        .floating_opacity
+        .unwrap_or(0.97)
+        .clamp(0.2, 1.0);
     if let Some(pin) = settings.floating_pin_app.as_deref() {
         if let Some(app_type) = parse_app_type(pin) {
             return Some(FloatingBallTarget {
@@ -958,6 +977,7 @@ fn resolve_ball_target() -> Option<FloatingBallTarget> {
                 is_pinned: true,
                 app_label: app_label(&app_type),
                 takeover_active,
+                opacity,
             });
         }
     }
@@ -968,6 +988,7 @@ fn resolve_ball_target() -> Option<FloatingBallTarget> {
                 is_pinned: false,
                 app_label: app_label(&app_type),
                 takeover_active,
+                opacity,
             });
         }
     }
@@ -987,9 +1008,22 @@ pub async fn floating_set_remote_takeover(
 }
 
 /// 悬浮球拉取「显示哪个 app」：置顶优先，否则最近活跃 app。
+/// takeover_active 用目标 app 自身的 proxy_config.enabled（与悬浮面板每行同源），
+/// 而非全局 floating_remote_takeover——否则球会跟主窗口当前 tab 而不跟置顶的 app。
 #[tauri::command]
-pub async fn get_floating_ball_target() -> Result<Option<FloatingBallTarget>, String> {
-    Ok(resolve_ball_target())
+pub async fn get_floating_ball_target(
+    state: tauri::State<'_, AppState>,
+) -> Result<Option<FloatingBallTarget>, String> {
+    let Some(mut target) = resolve_ball_target() else {
+        return Ok(None);
+    };
+    target.takeover_active = state
+        .db
+        .get_proxy_config_for_app(&target.app_type)
+        .await
+        .map(|c| c.enabled)
+        .unwrap_or(false);
+    Ok(Some(target))
 }
 
 /// 置顶悬浮球到指定 app（None 取消置顶，恢复跟随最近活跃 app）。

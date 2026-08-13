@@ -102,12 +102,12 @@ function UsageDetail({
 export function FloatingPanel() {
   const [entries, setEntries] = useState<FloatingEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  /** 当前置顶到悬浮球的 app（未置顶 = null；每行据此高亮图钉） */
+  /** 当前置顶到悬浮窗的 app（未置顶 = null；每行据此高亮图钉） */
   const [pinnedApp, setPinnedApp] = useState<string | null>(null);
   // 相对时间基准，每 30s 推进一次（与主窗口 UsageFooter 相同节奏）
   const [now, setNow] = useState(Date.now());
 
-  // 读取悬浮球当前置顶的 app（与球同源：get_floating_ball_target）
+  // 读取悬浮窗当前置顶的 app（与球同源：get_floating_ball_target）
   const reloadPin = useCallback(() => {
     void (invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>)
       .then((t) => setPinnedApp(t?.isPinned ? t.appType : null))
@@ -128,7 +128,7 @@ export function FloatingPanel() {
     }
   }, [reloadPin]);
 
-  // 逐行置顶/取消置顶悬浮球显示。乐观更新：先本地置 `pinnedApp` 让按钮立即响应，
+  // 逐行置顶/取消置顶悬浮窗显示。乐观更新：先本地置 `pinnedApp` 让按钮立即响应，
   // 再写后端（settings 落盘 + 发事件驱动球/设置页刷新）。
   const togglePin = useCallback((appType: string, currentlyPinned: boolean) => {
     const next = currentlyPinned ? null : appType;
@@ -181,7 +181,10 @@ export function FloatingPanel() {
             hasUsage && e.usage!.length > 1 ? e.usage!.slice(1) : [];
           return (
             <div key={e.appType}>
-              <div className="row">
+              <div
+                className={`row${e.takeoverActive ? " row-takeover" : ""}`}
+                title={e.takeoverActive ? "此 app 已开启路由纳管（请求经本机代理转发）" : undefined}
+              >
                 <div className="row-left">
                   <span className="row-app">
                     <span className="row-app-icon">
@@ -261,13 +264,13 @@ export function FloatingPanel() {
                   }
                   title={
                     pinnedApp === e.appType
-                      ? `取消置顶「${e.appLabel}」到悬浮球`
-                      : `置顶「${e.appLabel}」到悬浮球`
+                      ? `取消置顶「${e.appLabel}」到悬浮窗`
+                      : `置顶「${e.appLabel}」到悬浮窗`
                   }
                   aria-label={
                     pinnedApp === e.appType
-                      ? "取消置顶到悬浮球"
-                      : "置顶到悬浮球"
+                      ? "取消置顶到悬浮窗"
+                      : "置顶到悬浮窗"
                   }
                   onClick={() =>
                     togglePin(e.appType, pinnedApp === e.appType)

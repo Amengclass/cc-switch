@@ -84,7 +84,7 @@ body {
   --fb-danger-hover: rgba(239, 68, 68, 0.4);
 }
 
-/* ---- 悬浮球（方案C：180×40 横向胶囊条，cc-switch 风格） ----
+/* ---- 悬浮窗（方案C：180×40 横向胶囊条，cc-switch 风格） ----
  * 白/深底卡片 + 细边框 + 蓝色强调 + 小字号；用量状态色用左侧小圆点表达。
  */
 .ball {
@@ -92,8 +92,11 @@ body {
   height: 40px;
   flex-shrink: 0;
   border-radius: 20px;
-  background: var(--fb-bg);
-  border: 1px solid var(--fb-outline);
+  /* 背景/边框不透明度：默认 0.97（--fb-bg 同款），设置页滑块通过内联
+     --ball-alpha 覆盖它。用 rgb(from ...) 只改 alpha 通道，文字(--fb-fg)不受影响。 */
+  --ball-alpha: 0.97;
+  background: rgb(from var(--fb-bg) r g b / var(--ball-alpha));
+  border: 1px solid rgb(from var(--fb-outline) r g b / var(--ball-alpha));
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -108,11 +111,21 @@ body {
 }
 /* 悬停：边框提为品牌蓝，提示可点 */
 .ball:hover {
-  border-color: var(--fb-primary);
+  border-color: rgb(from var(--fb-primary) r g b / var(--ball-alpha));
 }
 /* 按下/拖动：轻微缩放，给拖动手感 */
 .ball:active {
   transform: scale(0.97);
+}
+/* 路由纳管中：球边框转绿 + 极浅绿底（与悬浮面板行同款审美，无动画），
+   当前 app 开启路由接管时加 route-service-live 类；边框色也随 --ball-alpha 透明度。 */
+.ball.route-service-live {
+  border-color: rgb(16 185 129 / var(--ball-alpha)); /* emerald-500 */
+  background: rgba(16, 185, 129, 0.06);
+}
+.dark .ball.route-service-live {
+  border-color: rgb(52 211 153 / var(--ball-alpha)); /* emerald-400 */
+  background: rgba(16, 185, 129, 0.1);
 }
 /* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中，
    间距由 .ball 的 gap:6px 提供，不再额外 margin） */
@@ -288,24 +301,40 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px 8px 14px;
-  border-bottom: 1px solid var(--fb-border);
-  transition: background 0.15s ease;
+  padding: 8px 10px;
+  margin: 2px 4px;
+  border-radius: 8px;
+  box-sizing: border-box;
+  /* 用真 `border: 1px`（供应商页面同款细边框），而非 box-shadow：
+     box-shadow 在高 DPI 下 1px 会显粗，真 border 是标准单一线宽，观感最细。 */
+  border: 1px solid var(--fb-border);
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-/* 行悬停：浅背景 + 圆角，增加可感知度 */
+.dark .row {
+  border-color: rgba(255, 255, 255, 0.14);
+}
+/* hover（未开路由）：边框变蓝，提示当前悬停在这个 app（只换色，线宽不变） */
 .row:hover {
-  background: var(--fb-hover);
+  border-color: #60a5fa; /* blue-400 */
 }
-/* 行内 hover 时的左侧蓝色强调条，提升聚焦感 */
-.row:hover::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 20%;
-  bottom: 20%;
-  width: 3px;
-  border-radius: 0 2px 2px 0;
-  background: var(--fb-primary);
+.dark .row:hover {
+  border-color: #93c5fd;
+}
+/* 开路由的行：平时常显绿边框 + 浅绿底（不依赖 hover），区别于其它行的灰底 */
+.row-takeover {
+  border-color: #10b981; /* emerald-500 */
+  background: rgba(16, 185, 129, 0.06);
+}
+.dark .row-takeover {
+  border-color: #34d399;
+  background: rgba(16, 185, 129, 0.1);
+}
+/* hover（开路由）：绿框提亮一档，提示聚焦；保持绿系不翻蓝 */
+.row-takeover:hover {
+  border-color: #34d399;
+}
+.dark .row-takeover:hover {
+  border-color: #6ee7b7;
 }
 .row-left {
   flex: 1 1 auto; /* 左区占满剩余,把余量/图钉推到右侧,形成清晰左中右分区 */
@@ -344,7 +373,7 @@ body {
   color: var(--fb-muted);
   white-space: nowrap; /* 单行不折行 */
 }
-/* 已设置供应商：淡品牌蓝底胶囊（与悬浮球供应商球标 .ball-tag-model 一致） */
+/* 已设置供应商：淡品牌蓝底胶囊（与悬浮窗供应商球标 .ball-tag-model 一致） */
 .row-provider-set {
   display: inline-flex;
   align-items: center;
@@ -383,7 +412,7 @@ body {
   /* 面板空间有限（300px、最多 8 行），余量字号取小保证每行紧凑 */
   font-size: 10px;
 }
-/* 逐行置顶悬浮球显示：图钉按钮，激活态着色 */
+/* 逐行置顶悬浮窗显示：图钉按钮，激活态着色 */
 .row-pin {
   flex-shrink: 0;
   display: inline-flex;
@@ -503,7 +532,7 @@ body {
   gap: 3px;
   max-width: 100%;
 }
-/* 多套餐缩写 chip：扁平小胶囊，横向铺开省空间（对齐悬浮球右半区多套餐样式） */
+/* 多套餐缩写 chip：扁平小胶囊，横向铺开省空间（对齐悬浮窗右半区多套餐样式） */
 .usage-chip {
   display: inline-flex;
   align-items: baseline;
@@ -606,57 +635,6 @@ body {
   flex-shrink: 0;
 }
 
-/* ===== 悬浮球「远端接管」流动边框（与主界面 RemoteRouteToggle 的走马灯一致）=====
-   当前 app 开启远端接管时，.ball 加 route-service-live，
-   ::before 画一圈 conic 光斑沿圆角轮廓流动（@property 只旋角度，不旋元素）。 */
-@property --route-border-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-.ball.route-service-live {
-  position: relative;
-}
-
-.ball.route-service-live::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 2px;
-  background: conic-gradient(
-    from var(--route-border-angle),
-    transparent 0deg,
-    transparent 280deg,
-    #10b981 330deg,
-    transparent 360deg
-  );
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-  animation: route-border-spin 2s linear infinite;
-  pointer-events: none;
-  z-index: 0;
-}
-
-@keyframes route-border-spin {
-  to {
-    --route-border-angle: 360deg;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ball.route-service-live::before {
-    animation: none;
-    background: #10b981;
-  }
-}
 .menu-item:hover .menu-icon {
   color: var(--fb-fg);
 }

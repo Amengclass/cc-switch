@@ -352,18 +352,20 @@ export interface Settings {
   enableClaudePluginIntegration?: boolean;
   // 跳过 Claude Code 初次安装确认（写入 ~/.claude.json 的 hasCompletedOnboarding）
   skipClaudeOnboarding?: boolean;
-  // 是否启用桌面悬浮球（加速球）
+  // 是否启用桌面悬浮窗（加速球）
   enableFloatingWindow?: boolean;
-  // 悬浮球位置（逻辑像素坐标）
+  // 悬浮窗位置（逻辑像素坐标）
   floatingWindowPosition?: { x: number; y: number };
   // 吸附动画时长（毫秒）；0 = 立即吸附
   floatingSnapSpeedMs?: number;
-  // 悬浮球是否固定当前位置（固定后不可拖动/不吸附）
+  // 悬浮窗是否固定当前位置（固定后不可拖动/不吸附）
   floatingLocked?: boolean;
-  // 悬浮球置顶显示的 app（None = 跟随最近活跃 app）
+  // 悬浮窗置顶显示的 app（None = 跟随最近活跃 app）
   floatingPinApp?: string;
   // 最近一次活跃的 app（provider-switched 更新，供球跟随）
   floatingLastApp?: string;
+  // 悬浮窗背景/边框不透明度（0.2~1.0；设置页滑块）
+  floatingOpacity?: number;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）

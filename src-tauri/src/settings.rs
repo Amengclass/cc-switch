@@ -438,6 +438,9 @@ pub struct AppSettings {
     /// 球当前显示的 app 是否处「远端接管」（主窗口计算后写入；球据此显示流动边框）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_remote_takeover: Option<bool>,
+    /// 悬浮球背景/边框不透明度（0.2~1.0；设置页滑块调节）。None = 默认 0.97。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_opacity: Option<f32>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -565,6 +568,7 @@ impl Default for AppSettings {
             floating_pin_app: None,
             floating_last_app: None,
             floating_remote_takeover: None,
+            floating_opacity: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,

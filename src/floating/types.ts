@@ -25,6 +25,8 @@ export interface FloatingEntry {
   usage: FloatingUsageData[] | null;
   /** 用量查询时间戳（毫秒），供显示「刚刚 / x分钟前」 */
   queriedAt: number | null;
+  /** 该 app 的路由纳管是否开启（与主窗口 takeoverStatus 同源），面板据此显示「纳管中」 */
+  takeoverActive: boolean;
 }
 
 /** 利用率 → 状态色（与后端 emoji_for_utilization 阈值一致） */

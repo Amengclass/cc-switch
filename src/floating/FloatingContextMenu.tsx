@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { EyeOff, Settings } from "lucide-react";
 
 /**
- * 悬浮球右键菜单（floating-menu 透明窗，瘦高样式）：
+ * 悬浮窗右键菜单（floating-menu 透明窗，瘦高样式）：
  * - 与面板同款样式（同一套 CSS 变量 + floating.css），非系统原生菜单
  * - 菜单项顺序：设置 / 分隔线 / 隐藏
  * - 点击任意项即收起；不悬停自动关闭（由 Rust 端失焦“点击别处”收起）

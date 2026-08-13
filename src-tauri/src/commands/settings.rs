@@ -53,6 +53,10 @@ fn merge_settings_for_save(
     if incoming.floating_locked.is_none() {
         incoming.floating_locked = existing.floating_locked.clone();
     }
+    // floating_opacity 同理：设置页滑块；旧版/未携带该字段的保存路径不清掉已有值。
+    if incoming.floating_opacity.is_none() {
+        incoming.floating_opacity = existing.floating_opacity.clone();
+    }
     incoming
 }
 
