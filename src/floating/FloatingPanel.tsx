@@ -289,15 +289,6 @@ export function FloatingPanel() {
           <div className="empty">暂无数据</div>
         )}
       </div>
-
-      <div className="panel-footer">
-        <button onClick={() => void invoke("open_main_window")}>
-          打开主界面
-        </button>
-        <button onClick={() => void invoke("disable_floating_window")}>
-          关闭悬浮窗
-        </button>
-      </div>
     </div>
   );
 }
