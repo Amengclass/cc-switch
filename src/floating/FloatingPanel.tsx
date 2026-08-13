@@ -19,6 +19,16 @@ function AppIcon({ size, appType }: { size: number; appType: string }) {
   return cloneElement(cfg.icon as ReactElement<{ size?: number }>, { size });
 }
 
+/** 套餐名 → 缩写（小时/天/周/月/年；与悬浮球 planAbbr 一致）。匹配不到返回空。 */
+function planAbbr(name?: string | null): string {
+  const n = name?.toLowerCase() ?? "";
+  if (/hour|小时/.test(n)) return "h";
+  if (/week|周/.test(n)) return "w";
+  if (/day|天/.test(n)) return "d";
+  if (/month|月/.test(n)) return "m";
+  return "";
+}
+
 /** 相对时间：与主窗口 UsageFooter formatRelativeTime 同语义（悬浮窗硬编码中文） */
 function formatRelativeTime(ts: number | null, now: number): string {
   if (ts == null) return "从未更新";
@@ -237,11 +247,28 @@ export function FloatingPanel() {
               </div>
               {extraItems.length > 0 && (
                 <div className="row-sub">
-                  {extraItems.map((d, i) => (
-                    <div className="row-sub-item" key={i}>
-                      <UsageDetail d={d} showPlan />
-                    </div>
-                  ))}
+                  {/* 多套餐：紧凑缩写+百分比 chips（对齐悬浮球右半区），
+                      而非逐条占行的「planName 剩余:X 单位」，省空间 */}
+                  {extraItems.map((d, i) => {
+                    const r = d.remaining;
+                    const hasVal = r != null && isFinite(r);
+                    return (
+                      <span className="usage-chip" key={i}>
+                        {d.planName ? (
+                          <span className="usage-chip-plan">
+                            {planAbbr(d.planName)}
+                          </span>
+                        ) : null}
+                        {hasVal ? (
+                          <span className={usageValueClass(d)}>
+                            {Math.round(r!)}%
+                          </span>
+                        ) : (
+                          <span>—</span>
+                        )}
+                      </span>
+                    );
+                  })}
                 </div>
               )}
             </div>

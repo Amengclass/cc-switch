@@ -489,14 +489,26 @@ body {
 }
 /* 余量型用量（如「剩余：47.22 CNY」）可能较长，允许换行而不顶破面板 */
 .row-sub {
-  padding: 0 14px 7px;
+  padding: 2px 14px 8px;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
-.row-sub-item {
-  font-size: 10px; /* 与主行用量一致，面板紧凑 */
-  text-align: left;
+/* 多套餐缩写 chip：扁平小胶囊，横向铺开省空间（对齐悬浮球右半区多套餐样式） */
+.usage-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.12);
+  font-size: 9px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.usage-chip-plan {
+  color: var(--fb-muted);
+  font-weight: 600;
 }
 .empty {
   padding: 20px;
