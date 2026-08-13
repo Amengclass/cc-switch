@@ -176,15 +176,18 @@ export function FloatingPanel() {
                     </span>
                     {e.appLabel}
                   </span>
-                  <span
-                    className={
-                      e.hasProvider
-                        ? "row-provider row-provider-set"
-                        : "row-provider"
-                    }
-                  >
-                    {e.providerName}
-                    {e.model ? ` · ${e.model}` : ""}
+                  <span className="row-provider-line">
+                    {/* 供应商：淡蓝底胶囊；模型：灰色小字，二者分开避免叠在一起 */}
+                    {e.hasProvider ? (
+                      <span className="row-provider row-provider-set">
+                        {e.providerName}
+                      </span>
+                    ) : (
+                      <span className="row-provider">{e.providerName}</span>
+                    )}
+                    {e.model ? (
+                      <span className="row-model">{e.model}</span>
+                    ) : null}
                   </span>
                 </div>
                 <span
