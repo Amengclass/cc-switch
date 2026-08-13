@@ -1,8 +1,22 @@
 import { useTranslation } from "react-i18next";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { SettingsFormState } from "@/hooks/useSettings";
-import { AppWindow, CircleDot, Lock } from "lucide-react";
+import { AppWindow, CircleDot, Lock, Pin } from "lucide-react";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { AnimatePresence, motion } from "framer-motion";
+
+/** 悬浮球可置顶显示的 app 列表（key 与 AppType::as_str 一致） */
+const FLOATING_PIN_APPS: Array<{ key: string; label: string }> = [
+  { key: "claude", label: "Claude" },
+  { key: "claude-desktop", label: "Claude Desktop" },
+  { key: "codex", label: "Codex" },
+  { key: "gemini", label: "Gemini" },
+  { key: "grokbuild", label: "Grok Build" },
+  { key: "opencode", label: "OpenCode" },
+  { key: "openclaw", label: "OpenClaw" },
+  { key: "hermes", label: "Hermes" },
+];
 
 interface FloatingWindowSettingsProps {
   settings: SettingsFormState;
@@ -17,6 +31,35 @@ export function FloatingWindowSettings({
   onChange,
 }: FloatingWindowSettingsProps) {
   const { t } = useTranslation();
+  // 置顶 app（None = 跟随最近活跃）：直接从后端读，避免与主设置表单耦合；
+  // 面板每行图钉与这里共用 floating_set_pin_app，保持一个数据源。
+  const [pinApp, setPinApp] = useState<string | null>(null);
+  const [pinLoaded, setPinLoaded] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (
+      invoke(
+        "get_floating_ball_target",
+      ) as Promise<{ appType: string; isPinned: boolean } | null>
+    )
+      .then((target) => {
+        if (!alive) return;
+        setPinApp(target?.isPinned ? target.appType : null);
+        setPinLoaded(true);
+      })
+      .catch((e) => console.error("[Settings] 读取悬浮球置顶 app 失败", e));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const changePin = (value: string) => {
+    setPinApp(value || null);
+    void invoke("floating_set_pin_app", { appType: value || null }).catch((e) =>
+      console.error("[Settings] 设置置顶 app 失败", e),
+    );
+  };
 
   return (
     <section className="space-y-4">
@@ -50,6 +93,29 @@ export function FloatingWindowSettings({
                 checked={!!settings.floatingLocked}
                 onCheckedChange={(value) => onChange({ floatingLocked: value })}
               />
+              <div className="flex items-center justify-between gap-3 py-2 pl-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-1 text-sm font-medium leading-none">
+                    <Pin className="h-3.5 w-3.5 text-rose-500" />
+                    置顶到悬浮球
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    选择后悬浮球一直显示该 app；选「跟随最近使用」则切换 app 时自动更新
+                  </div>
+                </div>
+                <select
+                  value={pinLoaded ? (pinApp ?? "") : ""}
+                  onChange={(e) => changePin(e.target.value)}
+                  className="h-8 rounded-md border border-border/40 bg-background px-2 text-sm text-foreground outline-none"
+                >
+                  <option value="">跟随最近使用</option>
+                  {FLOATING_PIN_APPS.map((a) => (
+                    <option key={a.key} value={a.key}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center justify-between gap-3 py-2 pl-4">
                 <div className="space-y-1">
                   <div className="text-sm font-medium leading-none">

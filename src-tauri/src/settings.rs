@@ -428,6 +428,13 @@ pub struct AppSettings {
     /// 悬浮球是否固定当前位置（设置页「固定当前位置」开关；固定后不可拖动/不吸附）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_locked: Option<bool>,
+    /// 悬浮球置顶显示的 app（持久化）：Some(app) 时球只显示该 app；
+    /// None = 跟随最近活跃 app（provider-switched 事件更新 floating_last_app）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_pin_app: Option<String>,
+    /// 最近一次活跃的 app（provider-switched 事件写入，供球跟随）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_last_app: Option<String>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -552,6 +559,8 @@ impl Default for AppSettings {
             floating_window_position: None,
             floating_snap_speed_ms: None,
             floating_locked: None,
+            floating_pin_app: None,
+            floating_last_app: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,
@@ -1058,6 +1067,20 @@ pub fn get_effective_current_provider(
 pub fn set_floating_window_position(position: Option<FloatingWindowPosition>) -> Result<(), AppError> {
     mutate_settings(|settings| {
         settings.floating_window_position = position;
+    })
+}
+
+/// 设置悬浮球置顶显示的 app（None = 关闭置顶，改为跟随最近活跃 app）
+pub fn set_floating_pin_app(app_type: Option<String>) -> Result<(), AppError> {
+    mutate_settings(|settings| {
+        settings.floating_pin_app = app_type;
+    })
+}
+
+/// 记录最近一次活跃的 app（供球在未置顶时跟随）
+pub fn set_floating_last_app(app_type: String) -> Result<(), AppError> {
+    mutate_settings(|settings| {
+        settings.floating_last_app = Some(app_type);
     })
 }
 

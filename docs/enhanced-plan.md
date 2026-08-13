@@ -263,6 +263,13 @@
 - 主题:跟随主应用外观(light/dark/system),`storage` 事件同步 + `set_window_theme`
 - 设置:「悬浮组件」独立区块(开关 + 吸附速度)+ 托盘右键「悬浮窗」开关,两处联动
 - 余量数据:**只读 `UsageCache` 缓存,绝不主动查 API**;查询全部由主窗口(useUsageQuery / 手动刷新)和托盘悬停发起,面板 3s 轮询 + `usage-cache-updated` / `floating-data-refresh` 事件同步
+- **悬浮球显示目标(置顶 app / 跟随最近活跃,2026-08-13)**:修掉「球固定显示 Claude」的不合理
+  - 后端 `settings.rs` 新增 `floating_pin_app`(持久化置顶 app)与 `floating_last_app`(provider-switched 事件写入的最近活跃 app)
+  - `get_floating_ball_target` 解析目标:**置顶优先,否则最近活跃**,两者皆无退化为默认
+  - `floating.rs` 新增 `floating_set_pin_app`(置顶/取消置顶,None=跟随)与 `floating_record_active_app`(球前端 `provider-switched` 时记录)
+  - **悬浮球**:不再硬编码 `find(appType==="claude")`,改为读 `get_floating_ball_target` 找对应行;置顶时 app 名旁显示锁图标(`.ball-pin`)
+  - **悬浮面板**:每行加图钉按钮(激活态蓝色锁 / 常态灰解锁)单击置顶该 app 到球、再点取消;置顶行高亮(`.row-pin-active`)
+  - **设置页「置顶到悬浮球」下拉**:直接读写 `floating_set_pin_app`/`get_floating_ball_target`,与面板图钉同一数据源;选项含「跟随最近使用」
 - 余量样式对齐主窗口:标签灰、数值状态色(绿/橙/红,阈值与主窗口一致)+ 等宽数字、刷新时间(时钟图标 + 「刚刚/x分钟前」);供应商/模型名已设置时用主窗口链接蓝(`--primary`)高亮,未设置保持灰
 - 多套餐:主行显示第一条,其余套餐逐条补行
 - 右键菜单:自定义 HTML 菜单窗口(`floating-menu`,瘦高样式、与面板同款配色);设置 / 分隔线 / 隐藏悬浮窗;与面板**互斥**(同刻只出一个);「固定当前位置」开关在设置页「悬浮组件」区块(固定后不可拖动/不吸附,单击仍开主窗)

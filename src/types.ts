@@ -360,6 +360,10 @@ export interface Settings {
   floatingSnapSpeedMs?: number;
   // 悬浮球是否固定当前位置（固定后不可拖动/不吸附）
   floatingLocked?: boolean;
+  // 悬浮球置顶显示的 app（None = 跟随最近活跃 app）
+  floatingPinApp?: string;
+  // 最近一次活跃的 app（provider-switched 更新，供球跟随）
+  floatingLastApp?: string;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）

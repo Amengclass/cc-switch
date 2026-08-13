@@ -148,6 +148,16 @@ body {
   height: 100%;
   display: block;
 }
+/* 置顶锁图标：继承前景色，覆盖上面 svg 100% 的通用规则保持小尺寸 */
+.ball-pin {
+  flex-shrink: 0;
+  opacity: 0.75;
+  margin-left: 1px;
+}
+.ball-app .ball-pin {
+  width: 9px;
+  height: 9px;
+}
 .ball-model {
   display: flex;
   align-items: center;
@@ -297,6 +307,32 @@ body {
   gap: 2px;
   /* 面板空间有限（300px、最多 8 行），余量字号取小保证每行紧凑 */
   font-size: 10px;
+}
+/* 逐行置顶悬浮球显示：图钉按钮，激活态着色 */
+.row-pin {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fb-muted);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.row-pin:hover {
+  color: var(--fb-fg);
+  background: var(--fb-border);
+}
+.row-pin-active {
+  color: #1f8fff; /* 主窗口链接蓝，与 .row-provider-set 一致 */
+}
+.dark .row-pin-active {
+  color: #148aff;
 }
 /* 查询时间（主窗口 text-[10px] gray-500/dark:gray-400） */
 .usage-time {

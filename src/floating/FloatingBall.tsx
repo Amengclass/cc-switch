@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PointerEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { Lock } from "lucide-react";
 import { getIcon } from "@/icons/extracted";
 import { type FloatingEntry, type FloatingUsageData } from "./types";
 
@@ -29,6 +30,8 @@ interface Summary {
   level: UsageLevel;
   color: string;
   app: string;
+  /** 是否手动置顶（面板/设置页图钉圈定）；置顶时球显示锁图标 */
+  isPinned: boolean;
   provider: string;
   model: string;
   /** 余量数值（状态色；单套餐用） */
@@ -86,15 +89,30 @@ function planAbbr(name?: string | null): string {
   return "";
 }
 
-/** 读取 Claude Code 的 app / 供应商 / 模型 / 余量 */
+/** 悬浮球当前应显示的目标 app（由后端解析：置顶优先，否则最近活跃 app） */
+export interface FloatingBallTarget {
+  appType: string;
+  isPinned: boolean;
+  appLabel: string;
+}
+
+/** 读取悬浮球目标 app 的供应商 / 模型 / 余量。
+ *  目标由后端决定（置顶优先，否则跟随最近活跃 app）；后端无目标时退化为「CC」。 */
 async function loadSummary(): Promise<Summary> {
-  const entries = (await invoke("get_floating_window_data")) as FloatingEntry[];
-  const entry = entries.find((e) => e.appType === "claude");
+  const [entries, target] = (await Promise.all([
+    invoke("get_floating_window_data") as Promise<FloatingEntry[]>,
+    invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>,
+  ])) as [FloatingEntry[], FloatingBallTarget | null];
+
+  const entry = target ? entries.find((e) => e.appType === target.appType) : undefined;
+  const isPinned = !!target?.isPinned;
+
   if (!entry)
     return {
       level: "none",
       color: "#94a3b8",
-      app: "CC",
+      app: target?.appLabel ?? "CC",
+      isPinned,
       provider: "—",
       model: "—",
       usageValue: "—",
@@ -127,6 +145,7 @@ async function loadSummary(): Promise<Summary> {
     level,
     color: ballStatusColor(level),
     app: entry.appLabel,
+    isPinned,
     provider: entry.providerName ?? "",
     model: entry.model ?? "",
     usageValue,
@@ -146,6 +165,7 @@ export function FloatingBall() {
     level: "none",
     color: "#94a3b8",
     app: "CC",
+    isPinned: false,
     provider: "—",
     model: "—",
     usageValue: "—",
@@ -162,10 +182,20 @@ export function FloatingBall() {
   useEffect(() => {
     refresh();
     const unlisteners: Array<() => void> = [];
+
+    // provider-switched：记录最近活跃 app（供未置顶时跟随）+ 刷新球
+    void listen<{ appType?: string }>("provider-switched", (ev) => {
+      const appType = ev.payload?.appType;
+      if (appType) {
+        void invoke("floating_record_active_app", { appType }).catch((e) =>
+          console.error("[Floating] 记录活跃 app 失败", e),
+        );
+      }
+      refresh();
+    }).then((u) => unlisteners.push(u));
     void listen("floating-data-refresh", refresh).then((u) =>
       unlisteners.push(u),
     );
-    void listen("provider-switched", refresh).then((u) => unlisteners.push(u));
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
@@ -205,6 +235,11 @@ export function FloatingBall() {
           />
           <AppIcon size={10} />
           <span className="ball-app-text">{summary.app}</span>
+          {summary.isPinned && (
+            <span className="ball-pin" title="已置顶此 app" aria-label="已置顶">
+              <Lock size={9} />
+            </span>
+          )}
         </span>
         <span className="ball-model">
           {summary.provider && (

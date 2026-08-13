@@ -902,6 +902,85 @@ pub async fn get_floating_window_data(
     Ok(entries)
 }
 
+/// 悬浮球当前应显示的 app 目标
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FloatingBallTarget {
+    /// 目标 app 类型（as_str）
+    pub app_type: String,
+    /// 是否处于手动置顶状态（否则是跟随最近活跃 app）
+    pub is_pinned: bool,
+    /// 目标 app 的显示名
+    pub app_label: &'static str,
+}
+
+/// 解析 app 类型字符串（非法/未识别返回 None）
+fn parse_app_type(s: &str) -> Option<AppType> {
+    s.parse::<AppType>().ok()
+}
+
+/// 读取悬浮球当前目标 app：置顶优先，否则跟随最近活跃 app。
+/// 两者都无时返回 None（球端退化为通用「CC」）。
+fn resolve_ball_target() -> Option<FloatingBallTarget> {
+    let settings = crate::settings::get_settings();
+    if let Some(pin) = settings.floating_pin_app.as_deref() {
+        if let Some(app_type) = parse_app_type(pin) {
+            return Some(FloatingBallTarget {
+                app_type: app_type.as_str().to_string(),
+                is_pinned: true,
+                app_label: app_label(&app_type),
+            });
+        }
+    }
+    if let Some(last) = settings.floating_last_app.as_deref() {
+        if let Some(app_type) = parse_app_type(last) {
+            return Some(FloatingBallTarget {
+                app_type: app_type.as_str().to_string(),
+                is_pinned: false,
+                app_label: app_label(&app_type),
+            });
+        }
+    }
+    None
+}
+
+/// 悬浮球拉取「显示哪个 app」：置顶优先，否则最近活跃 app。
+#[tauri::command]
+pub async fn get_floating_ball_target() -> Result<Option<FloatingBallTarget>, String> {
+    Ok(resolve_ball_target())
+}
+
+/// 置顶悬浮球到指定 app（None 取消置顶，恢复跟随最近活跃 app）。
+/// 写入设置并通知悬浮窗刷新。
+#[tauri::command]
+pub async fn floating_set_pin_app(
+    app: tauri::AppHandle,
+    app_type: Option<String>,
+) -> Result<(), String> {
+    if let Some(ref at) = app_type {
+        if parse_app_type(at).is_none() {
+            return Err(format!("未知的 app 类型: {at}"));
+        }
+    }
+    crate::settings::set_floating_pin_app(app_type).map_err(|e| e.to_string())?;
+    log::info!("[Floating] 设置悬浮球置顶 app: {:?}", resolve_ball_target().map(|t| t.app_type));
+    let _ = app.emit("floating-data-refresh", ());
+    Ok(())
+}
+
+/// 记录最近一次活跃的 app（球未置顶时跟随它）。由悬浮球前端在收到
+/// provider-switched 事件时调用；主窗口切 app 即可实时影响球。
+#[tauri::command]
+pub async fn floating_record_active_app(app_type: String) -> Result<(), String> {
+    let Some(parsed) = parse_app_type(&app_type) else {
+        log::debug!("[Floating] 忽略未知活跃 app: {app_type}");
+        return Ok(());
+    };
+    crate::settings::set_floating_last_app(parsed.as_str().to_string()).map_err(|e| e.to_string())?;
+    log::info!("[Floating] 记录最近活跃 app: {}", parsed.as_str());
+    Ok(())
+}
+
 // ============================================================
 // 面板显示/隐藏与悬停协调
 // ============================================================

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock } from "lucide-react";
+import { Clock, Lock, Unlock } from "lucide-react";
 import {
   statusColor,
   usageValueClass,
   type FloatingEntry,
   type FloatingUsageData,
 } from "./types";
+import type { FloatingBallTarget } from "./FloatingBall";
 
 /** 相对时间：与主窗口 UsageFooter formatRelativeTime 同语义（悬浮窗硬编码中文） */
 function formatRelativeTime(ts: number | null, now: number): string {
@@ -79,8 +80,17 @@ function UsageDetail({
 export function FloatingPanel() {
   const [entries, setEntries] = useState<FloatingEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  /** 当前置顶到悬浮球的 app（未置顶 = null；每行据此高亮图钉） */
+  const [pinnedApp, setPinnedApp] = useState<string | null>(null);
   // 相对时间基准，每 30s 推进一次（与主窗口 UsageFooter 相同节奏）
   const [now, setNow] = useState(Date.now());
+
+  // 读取悬浮球当前置顶的 app（与球同源：get_floating_ball_target）
+  const reloadPin = useCallback(() => {
+    void (invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>)
+      .then((t) => setPinnedApp(t?.isPinned ? t.appType : null))
+      .catch((e) => console.error("[Floating] 读取置顶 app 失败", e));
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -88,11 +98,18 @@ export function FloatingPanel() {
         "get_floating_window_data",
       )) as FloatingEntry[];
       setEntries(data);
+      reloadPin();
     } catch (e) {
       console.error("[Floating] 面板加载失败", e);
     } finally {
       setLoading(false);
     }
+  }, [reloadPin]);
+
+  // 逐行置顶/取消置顶悬浮球显示
+  const togglePin = useCallback((appType: string, currentlyPinned: boolean) => {
+    void invoke("floating_set_pin_app", { appType: currentlyPinned ? null : appType })
+      .catch((e) => console.error("[Floating] 设置置顶失败", e));
   }, []);
 
   useEffect(() => {
@@ -167,6 +184,33 @@ export function FloatingPanel() {
                     (e.usageSummary ?? "—")
                   )}
                 </span>
+                <button
+                  type="button"
+                  className={
+                    pinnedApp === e.appType
+                      ? "row-pin row-pin-active"
+                      : "row-pin"
+                  }
+                  title={
+                    pinnedApp === e.appType
+                      ? `取消置顶「${e.appLabel}」到悬浮球`
+                      : `置顶「${e.appLabel}」到悬浮球`
+                  }
+                  aria-label={
+                    pinnedApp === e.appType
+                      ? "取消置顶到悬浮球"
+                      : "置顶到悬浮球"
+                  }
+                  onClick={() =>
+                    togglePin(e.appType, pinnedApp === e.appType)
+                  }
+                >
+                  {pinnedApp === e.appType ? (
+                    <Lock size={10} />
+                  ) : (
+                    <Unlock size={10} />
+                  )}
+                </button>
               </div>
               {extraItems.length > 0 && (
                 <div className="row-sub">
