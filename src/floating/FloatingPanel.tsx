@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock, Lock, Unlock } from "lucide-react";
+import { Clock, Pin } from "lucide-react";
 import {
   statusColor,
   usageValueClass,
@@ -106,11 +106,18 @@ export function FloatingPanel() {
     }
   }, [reloadPin]);
 
-  // 逐行置顶/取消置顶悬浮球显示
+  // 逐行置顶/取消置顶悬浮球显示。乐观更新：先本地置 `pinnedApp` 让按钮立即响应，
+  // 再写后端（settings 落盘 + 发事件驱动球/设置页刷新）。
   const togglePin = useCallback((appType: string, currentlyPinned: boolean) => {
-    void invoke("floating_set_pin_app", { appType: currentlyPinned ? null : appType })
-      .catch((e) => console.error("[Floating] 设置置顶失败", e));
-  }, []);
+    const next = currentlyPinned ? null : appType;
+    setPinnedApp(next);
+    void invoke("floating_set_pin_app", { appType: next })
+      .catch((e) => {
+        console.error("[Floating] 设置置顶失败", e);
+        // 失败回滚到后端真实值，避免按钮停留在错误的置顶态
+        reloadPin();
+      });
+  }, [reloadPin]);
 
   useEffect(() => {
     void refresh();
@@ -205,11 +212,10 @@ export function FloatingPanel() {
                     togglePin(e.appType, pinnedApp === e.appType)
                   }
                 >
-                  {pinnedApp === e.appType ? (
-                    <Lock size={10} />
-                  ) : (
-                    <Unlock size={10} />
-                  )}
+                  <Pin
+                    size={11}
+                    fill={pinnedApp === e.appType ? "currentColor" : "none"}
+                  />
                 </button>
               </div>
               {extraItems.length > 0 && (
