@@ -384,7 +384,7 @@
 
 | 事项 | 说明 |
 |---|---|
-| 广播模式 | 🟡 开发中(2026-08-14):前端「批量应用 Provider」面板已完成并上仓(全屏面板,宿主机/容器多选 + 搜索 + 容器数 + 已选清单),入口A=主界面目标栏、入口B=远程主机管理页;后端 `broadcast_switch_provider` 命令已实现(循环调单机 `switch_remote_provider_target`,逐落点聚合成功/失败,失败不阻断)待编译验证。**未含「本机」落点**(当前仅远程宿主/容器) |
+| ~~广播模式~~ | ✅ 已完成(2026-08-14):前端「批量应用 Provider」全屏面板(宿主机/容器多选 + 搜索 + 容器数 + 已选清单 + 逐台事件推送实时进度),入口A=主界面目标栏、入口B=远程主机管理页;后端 `broadcast_switch_provider` 命令(抽单机 `switch_remote_provider_target` 复用,逐落点聚合成功/失败,失败不阻断;A「逐台进度」走 `broadcast-progress` 事件推送)。**方案B**:广播时远端无该 Provider 则从「Provider 池来源」(当前=本机 DB,app.tsx 面板处 + commands.rs 均标了改点注释)写入远端 SSOT 再切换——本机一处配置、多处生效;**单机切换仍严格报错不受影响**(allow_local_fallback=false)。**未含「本机」落点**(当前仅远程宿主/容器)。后续可优化:B=连接复用/并行切换 |
 | 密钥认证 | 支持私钥文件 `~/.ssh/id_*` / ssh-agent;数据模型已预留 `auth_method` 字段(connection.rs Key 分支当前直接报错) |
 | `~/.ssh/config` 兼容 | 解析别名、ProxyJump/跳板机配置 |
 | ~~远端「发现」安装 Skills~~ | ✅ 已完成(2026-08-08 核实):`useInstallRemoteSkillFromDiscoverable`(useSkills.ts:186) + 后端 `install_remote_skill_from_discoverable`(commands.rs:2203) |
