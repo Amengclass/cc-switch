@@ -376,6 +376,9 @@ function App() {
       setRemoteContainerId("");
       return;
     }
+    // 切主机后先清空旧容器列表再拉取：effect 在渲染之后才跑，若不清空，
+    // 拉取期间的渲染窗口会显示上一台主机的容器（下拉串台）。
+    setContainers([]);
     let active = true;
     listDockerContainers(remoteTargetId)
       .then((list) => {
@@ -2362,7 +2365,12 @@ function App() {
             <TargetBreadcrumb
               remoteTargetId={remoteTargetId}
               remoteContainerId={remoteContainerId}
-              setRemoteTargetId={setRemoteTargetId}
+              setRemoteTargetId={(value) => {
+                setRemoteTargetId(value);
+                // 切主机同步清空旧容器列表（handleSelectHost 只清 containerId，
+                // 不清列表，导致下拉在拉取完成前显示上一台主机的容器）
+                setContainers([]);
+              }}
               setRemoteContainerId={setRemoteContainerId}
               servers={servers}
               containers={containers}
