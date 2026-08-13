@@ -88,7 +88,7 @@ body {
  * 白/深底卡片 + 细边框 + 蓝色强调 + 小字号；用量状态色用左侧小圆点表达。
  */
 .ball {
-  width: 180px;
+  width: 192px;
   height: 40px;
   flex-shrink: 0;
   border-radius: 20px;
@@ -97,7 +97,7 @@ body {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 0;
+  gap: 6px;
   padding: 0 10px;
   cursor: pointer;
   box-sizing: border-box;
@@ -114,14 +114,14 @@ body {
 .ball:active {
   transform: scale(0.97);
 }
-/* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中） */
+/* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中，
+   间距由 .ball 的 gap:6px 提供，不再额外 margin） */
 .ball-status-col {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   flex-shrink: 0;
   align-self: center;
-  margin-right: 4px;
   transition: background 0.3s ease;
 }
 /* 中区（原左半区）：占满剩余宽度且可收缩，避免固定 98px 时 app 名长短不一
@@ -158,11 +158,11 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 置顶图钉：右端固定(margin-left:auto)，不占名宽、永不被裁切 */
+/* 置顶图钉：右端固定(margin-left:auto 把图钉推到中区右端点)，不占名宽、永不被裁切 */
 .ball-pin {
   flex-shrink: 0;
   color: var(--fb-muted);
-  margin-left: 6px;
+  margin-left: auto;
 }
 .ball-app .ball-pin {
   width: 9px;
