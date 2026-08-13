@@ -249,15 +249,12 @@ export function FloatingBall() {
           )}
         </span>
         <span className="ball-model">
-          {summary.provider && (
-            <span className="ball-tag ball-tag-provider">
-              {summary.provider}
-            </span>
+          {/* 只显示供应商；用模型那套淡品牌蓝底蓝字突出，模型名工具内已可见不重复 */}
+          {summary.provider ? (
+            <span className="ball-tag ball-tag-model">{summary.provider}</span>
+          ) : (
+            <span>—</span>
           )}
-          {summary.model && (
-            <span className="ball-tag ball-tag-model">{summary.model}</span>
-          )}
-          {!summary.provider && !summary.model && <span>—</span>}
         </span>
       </div>
       <span
