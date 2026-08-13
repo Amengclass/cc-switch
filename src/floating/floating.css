@@ -371,7 +371,8 @@ body {
   flex-shrink: 1;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: flex-end; /* 右对齐：时间/主用量/多套餐 chips 统一基准 */
+  text-align: right;
   gap: 2px;
   /* 面板空间有限（300px、最多 8 行），余量字号取小保证每行紧凑 */
   font-size: 10px;
@@ -420,9 +421,10 @@ body {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: baseline;
-  justify-content: flex-start;
+  justify-content: flex-end;
   gap: 1px 7px;
-  max-width: 170px;
+  max-width: 100%;
+  text-align: right;
 }
 .usage-plan {
   color: #4b5563; /* gray-600 */
@@ -487,12 +489,13 @@ body {
 .dark .usage-value-danger {
   color: #f87171; /* red-400 */
 }
-/* 余量型用量（如「剩余：47.22 CNY」）可能较长，允许换行而不顶破面板 */
-.row-sub {
-  padding: 2px 14px 8px;
-  display: flex;
+/* 多套餐 chips 容器：在余量列内横向换行、右对齐（和主用量同一右基准） */
+.usage-chips {
+  display: inline-flex;
   flex-wrap: wrap;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 3px;
+  max-width: 100%;
 }
 /* 多套餐缩写 chip：扁平小胶囊，横向铺开省空间（对齐悬浮球右半区多套餐样式） */
 .usage-chip {

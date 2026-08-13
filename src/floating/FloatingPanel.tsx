@@ -206,6 +206,8 @@ export function FloatingPanel() {
                     hasUsage ? undefined : { color: statusColor(e.worstPct) }
                   }
                 >
+                  {/* 统一余量列：时间在上、主用量在下、多套餐 chips 横向铺开，
+                      全列右对齐，每行视觉一致 */}
                   {hasUsage ? (
                     <>
                       <span className="usage-time">
@@ -213,6 +215,30 @@ export function FloatingPanel() {
                         {formatRelativeTime(e.queriedAt, now)}
                       </span>
                       <UsageDetail d={e.usage![0]} />
+                      {extraItems.length > 0 && (
+                        <span className="usage-chips">
+                          {extraItems.map((d, i) => {
+                            const r = d.remaining;
+                            const hasVal = r != null && isFinite(r);
+                            return (
+                              <span className="usage-chip" key={i}>
+                                {d.planName ? (
+                                  <span className="usage-chip-plan">
+                                    {planAbbr(d.planName)}
+                                  </span>
+                                ) : null}
+                                {hasVal ? (
+                                  <span className={usageValueClass(d)}>
+                                    {Math.round(r!)}%
+                                  </span>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      )}
                     </>
                   ) : (
                     (e.usageSummary ?? "—")
@@ -245,32 +271,6 @@ export function FloatingPanel() {
                   />
                 </button>
               </div>
-              {extraItems.length > 0 && (
-                <div className="row-sub">
-                  {/* 多套餐：紧凑缩写+百分比 chips（对齐悬浮球右半区），
-                      而非逐条占行的「planName 剩余:X 单位」，省空间 */}
-                  {extraItems.map((d, i) => {
-                    const r = d.remaining;
-                    const hasVal = r != null && isFinite(r);
-                    return (
-                      <span className="usage-chip" key={i}>
-                        {d.planName ? (
-                          <span className="usage-chip-plan">
-                            {planAbbr(d.planName)}
-                          </span>
-                        ) : null}
-                        {hasVal ? (
-                          <span className={usageValueClass(d)}>
-                            {Math.round(r!)}%
-                          </span>
-                        ) : (
-                          <span>—</span>
-                        )}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
             </div>
           );
         })}
