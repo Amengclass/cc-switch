@@ -308,7 +308,9 @@ body {
   background: var(--fb-primary);
 }
 .row-left {
+  flex: 1 1 auto; /* 左区占满剩余,把余量/图钉推到右侧,形成清晰左中右分区 */
   min-width: 0;
+  overflow: hidden; /* 内容过长截断,不顶破余量区 */
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -366,14 +368,20 @@ body {
   min-width: 0;
   max-width: 160px;
 }
+/* 中区/余量：右对齐独立一列；左侧细分隔线把「左信息 | 右余量 | 右图钉」区隔开 */
 .row-usage {
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 46%;
   flex-shrink: 1;
   display: flex;
   flex-direction: column;
   align-items: flex-end; /* 右对齐：时间/主用量/多套餐 chips 统一基准 */
   text-align: right;
   gap: 2px;
+  border-left: 1px solid var(--fb-border);
+  padding-left: 10px;
+  margin-left: 6px;
   /* 面板空间有限（300px、最多 8 行），余量字号取小保证每行紧凑 */
   font-size: 10px;
 }
