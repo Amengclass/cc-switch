@@ -1,4 +1,4 @@
-import { cloneElement, useCallback, useEffect, useState } from "react";
+import { cloneElement, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -8,6 +8,7 @@ import {
   statusColor,
   usageValueClass,
   type FloatingEntry,
+  type FloatingUsageData,
 } from "./types";
 import type { FloatingBallTarget } from "./FloatingBall";
 
@@ -18,7 +19,7 @@ function AppIcon({ size, appType }: { size: number; appType: string }) {
   return cloneElement(cfg.icon as ReactElement<{ size?: number }>, { size });
 }
 
-/** 套餐名 → 缩写（小时/周/月；维度只有 h/w/m，无天）。匹配不到返回空。 */
+/** 套餐名 → 缩写（只有 h/w/m 维度，无天）。返回空则不显示维度前缀。 */
 function planAbbr(name?: string | null): string {
   const n = name?.toLowerCase() ?? "";
   if (/hour|小时/.test(n)) return "h";
@@ -35,6 +36,61 @@ function formatRelativeTime(ts: number | null, now: number): string {
   if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
   if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
   return `${Math.floor(diff / 86400)} 天前`;
+}
+
+/**
+ * 单个用量数据 → 主窗口 UsageFooter 同款结构：标签灰、数值状态色+等宽数字、单位灰。
+ * showPlan 用于多套餐的补行（主窗口完整模式有套餐名，inline 主行没有）。
+ */
+function UsageDetail({
+  d,
+  showPlan = false,
+  dimPrefix,
+}: {
+  d: FloatingUsageData;
+  showPlan?: boolean;
+  /** 主用量的维度前缀（如 "h"），渲染成「剩余：h 100%」 */
+  dimPrefix?: string;
+}) {
+  const hasRemaining = d.remaining != null && isFinite(d.remaining);
+  const hasUsed = d.used != null && isFinite(d.used);
+  const nodes: ReactNode[] = [];
+
+  if (d.planName && showPlan) {
+    nodes.push(
+      <span key="plan" className="usage-plan">
+        {d.planName}
+      </span>,
+    );
+  }
+  if (hasUsed) {
+    nodes.push(
+      <span key="used" className="usage-item">
+        <span className="usage-label">已用：</span>
+        <span className="usage-value">{d.used!.toFixed(2)}</span>
+      </span>,
+    );
+  }
+  if (hasRemaining) {
+    nodes.push(
+      <span key="rem" className="usage-item">
+        <span className="usage-label">剩余：</span>
+        <span className={`usage-value ${usageValueClass(d)}`}>
+          {dimPrefix ? `${dimPrefix} ` : ""}
+          {d.remaining!.toFixed(2)}
+        </span>
+        {d.unit && <span className="usage-unit">{d.unit}</span>}
+      </span>,
+    );
+  }
+  if (d.extra) {
+    nodes.push(
+      <span key="extra" className="usage-extra">
+        {d.extra}
+      </span>,
+    );
+  }
+  return <span className="usage-line">{nodes}</span>;
 }
 
 /**
@@ -121,6 +177,8 @@ export function FloatingPanel() {
       <div className="panel-list">
         {entries.map((e) => {
           const hasUsage = e.usage && e.usage.length > 0;
+          const extraItems =
+            hasUsage && e.usage!.length > 1 ? e.usage!.slice(1) : [];
           return (
             <div key={e.appType}>
               <div className="row">
@@ -151,37 +209,44 @@ export function FloatingPanel() {
                     hasUsage ? undefined : { color: statusColor(e.worstPct) }
                   }
                 >
-                  {/* 统一余量列：时间在上，下面所有 tier(含第一条)都以「维度缩写 + 百分比」
-                      的 chip 平铺，右对齐。维度统一(h/w/m)，不再有孤零零无维度的数值。
-                      每条 = [planAbbr] % */}
+                  {/* 统一余量列：时间在上、主用量在下、多套餐 chips 横向铺开，
+                      全列右对齐，每行视觉一致 */}
                   {hasUsage ? (
                     <>
                       <span className="usage-time">
                         <Clock size={10} />
                         {formatRelativeTime(e.queriedAt, now)}
                       </span>
-                      <span className="usage-chips">
-                        {e.usage!.map((d, i) => {
-                          const r = d.remaining;
-                          const hasVal = r != null && isFinite(r);
-                          return (
-                            <span className="usage-chip" key={i}>
-                              {d.planName ? (
-                                <span className="usage-chip-plan">
-                                  {planAbbr(d.planName)}
-                                </span>
-                              ) : null}
-                              {hasVal ? (
-                                <span className={usageValueClass(d)}>
-                                  {Math.round(r!)}%
-                                </span>
-                              ) : (
-                                <span>—</span>
-                              )}
-                            </span>
-                          );
-                        })}
-                      </span>
+                      <UsageDetail
+                        d={e.usage![0]}
+                        dimPrefix={
+                          planAbbr(e.usage![0].planName) || undefined
+                        }
+                      />
+                      {extraItems.length > 0 && (
+                        <span className="usage-chips">
+                          {extraItems.map((d, i) => {
+                            const r = d.remaining;
+                            const hasVal = r != null && isFinite(r);
+                            return (
+                              <span className="usage-chip" key={i}>
+                                {d.planName ? (
+                                  <span className="usage-chip-plan">
+                                    {planAbbr(d.planName)}
+                                  </span>
+                                ) : null}
+                                {hasVal ? (
+                                  <span className={usageValueClass(d)}>
+                                    {Math.round(r!)}%
+                                  </span>
+                                ) : (
+                                  <span>—</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      )}
                     </>
                   ) : (
                     (e.usageSummary ?? "—")
