@@ -95,6 +95,9 @@
   禁了 `AllowTcpForwarding`)→ 按直连写入 + `EffectReport.warnings` 醒目提示 + **DB 开关回退为 false**
   (reapply 与 switch 双路径一致)
 - **远端目标隐藏 Claude Desktop**:远端无此应用,AppSwitcher 过滤 claude-desktop tab + 切远端自动跳回 claude
+- **claude-desktop 下远端入口全隐藏(2026-08-14)**:除「选远端后才切回 claude」外,补成在 claude-desktop 标签下
+  自身就把所有远端入口隐藏(`remoteAvailableForApp` 门控 = `remoteFeatureEnabled && activeApp !== "claude-desktop"`):
+  远程主机导航按钮、目标选择器(含远端主机/容器下拉项)、批量应用按钮、远端状态栏、BatchApplyPanel 挂载全隐藏,还原本机体验。
 - **进程生命周期**:任一 app 远端接管(含容器)开启 → 自动拉起本机代理;全关 → 自动停止(any_route_consumer
   含容器判断,stop_with_restore 连容器字段一起清空并异步重写远端直连)
 - **宿主机仅需开放 22 端口**:隧道复用 SSH 连接,15721 由 sshd 监听在回环,无需额外开放端口
@@ -331,6 +334,7 @@
 | 安装检测全 app(08-07) | `check_remote_cli_installed(app)` / `check_local_cli_installed(app)` + `cli_binary_for_app` 映射;徽标动态「{App} 已安装/未安装」+ `APP_INSTALL_CMDS` 按 app 给安装命令 |
 | **全 app 远程切换(08-07)** | gemini(.env+settings.json 读-改-写)/grokbuild(TOML)/opencode(additive upsert)/openclaw(JSON5)/hermes(YAML) 五个分支,全部复用本机纯变换产出一致;connection 加 read_remote_text(exec cat,容器兼容) |
 | 功能按钮远端适配(08-07) | 卡片测试按钮经 SSH 在远端 curl base_url(复用 resolve_base_url);删除 remove 清远端 live(additive 3 app)/delete 只删 DB+清远端记录(对齐本机) |
+| 批量应用面板增强(08-14) | 批量应用 Provider 面板底部固定框加「当前 app 标识」徽章(ProviderIcon 品牌图标 + `t(apps.<app>)` 多语言名,复用 AppSwitcher 的 APP_ICON_NAME 映射;claude-desktop 兜底映射 claude);Provider 下拉边框加深;面板标题「批量应用 Provider」→「批量应用」 |
 | 远端路由/接管(08-11) | 反向隧道按意图对账(不重建连接)+ 端口动态化;per-container DNAT(按容器 IP);容器×app 独立接管开关(`route_proxy_container_apps`);隧道失败降级直连 + warnings 提示 + 开关回退(reapply/switch 双路径);远端隐藏 claude-desktop;宿主机仅需 22 端口 |
 | 隧道回连地址动态化(08-11) | `TUNNEL_HOST` 全局同步本机代理监听地址(0.0.0.0→127.0.0.1、::→::1);`server_channel_open_forwarded_tcpip` 回连改 `tunnel_host():tunnel_port()`——本机监听地址改任意 IP 远端仍可用 |
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
