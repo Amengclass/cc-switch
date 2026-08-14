@@ -115,6 +115,8 @@ export interface BroadcastSwitchTarget {
 /** 批量切换单个落点的结果 */
 export interface BroadcastSwitchResult {
   hostId: string;
+  /** 主机名（展示用，查不到回退 hostId；区分不同宿主机重名容器需结合 hostId） */
+  hostName: string;
   container?: string | null;
   /** 展示名（宿主机 或 宿主机/容器） */
   label: string;

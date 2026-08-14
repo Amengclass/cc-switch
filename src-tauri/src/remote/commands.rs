@@ -1368,9 +1368,16 @@ pub async fn broadcast_switch_provider(
 ) -> Result<Vec<RemoteSwitchResult>, String> {
     let mut out = Vec::with_capacity(targets.len());
     for t in &targets {
+        // 主机名 + 主机 id 一起返回（区分重名容器）：不同服务器的容器名可能重复，
+        // 只靠名字无法区分，必须带唯一 id。名字用于展示，id 用于绝对唯一标识。
+        let host_meta = state.db.get_remote_host(&t.host_id).ok().flatten();
+        let host_name = host_meta
+            .as_ref()
+            .map(|h| h.name.clone())
+            .unwrap_or_else(|| t.host_id.clone());
         let label = match t.container.as_deref() {
-            Some(c) => format!("{} / {}", t.host_id, c),
-            None => t.host_id.clone(),
+            Some(c) => format!("{} / {}", host_name, c),
+            None => host_name.clone(),
         };
         let result = switch_remote_provider_target(
             &state,
@@ -1384,14 +1391,16 @@ pub async fn broadcast_switch_provider(
         let item = match result {
             Ok(report) => RemoteSwitchResult {
                 host_id: t.host_id.clone(),
+                host_name,
                 container: t.container.clone(),
-                label: label.clone(),
+                label,
                 ok: true,
                 provider_name: report.provider_name,
                 error: None,
             },
             Err(e) => RemoteSwitchResult {
                 host_id: t.host_id.clone(),
+                host_name,
                 container: t.container.clone(),
                 label,
                 ok: false,
@@ -1413,6 +1422,8 @@ pub async fn broadcast_switch_provider(
 #[serde(rename_all = "camelCase")]
 pub struct RemoteSwitchResult {
     pub host_id: String,
+    /// 主机名（展示用，查不到回退 host_id）
+    pub host_name: String,
     pub container: Option<String>,
     /// 展示名（宿主机 或 宿主机/容器）
     pub label: String,
@@ -3014,8 +3025,14 @@ pub async fn list_docker_containers(
 ) -> Result<Vec<String>, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    crate::remote::docker::list_docker_containers(&session.channel).await
+    // 结构化错误前缀：前端据此区分「SSH 层失败」与「docker 命令失败」，
+    // 不依赖匹配错误文案（文案可读作人话，类型靠前缀判定）。
+    let session = connection::connect(&host, Some(&password))
+        .await
+        .map_err(|e| format!("SSH_ERR:{e}"))?;
+    crate::remote::docker::list_docker_containers(&session.channel)
+        .await
+        .map_err(|e| format!("DOCKER_ERR:{e}"))
 }
 
 /// 检测 CLI 是否安装的**标记**（命令命中时输出；调用方按 `contains` 判断）。
