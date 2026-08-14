@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
   ChevronRight,
@@ -12,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { ProviderIcon } from "@/components/ProviderIcon";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
 import type { Provider } from "@/types";
@@ -61,6 +63,24 @@ export function BatchApplyPanel({
   providers,
   defaultProviderId,
 }: BatchApplyPanelProps) {
+  const { t } = useTranslation();
+  // 当前应用标识：sharedFeatureApp 已把 claude-desktop 映射为 claude，这里再兜底一次。
+  // 图标名复用 AppSwitcher 的 APP_ICON_NAME 映射（claude→claude / codex→openai /
+  // gemini→gemini / grokbuild→grok / opencode→opencode / openclaw→openclaw /
+  // hermes→hermes），经 ProviderIcon 渲染品牌图标；文本名用 t(`apps.<app>`) 多语言。
+  const APP_ICON_NAME: Record<string, string> = {
+    claude: "claude",
+    "claude-desktop": "claude",
+    codex: "openai",
+    gemini: "gemini",
+    grokbuild: "grok",
+    opencode: "opencode",
+    openclaw: "openclaw",
+    hermes: "hermes",
+  };
+  const appDisplayName = t(`apps.${app}`, { defaultValue: app });
+  const appIconName = APP_ICON_NAME[app];
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [containersMap, setContainersMap] = useState<
@@ -243,20 +263,31 @@ export function BatchApplyPanel({
   return (
     <FullScreenPanel
       isOpen={open}
-      title="批量应用 Provider"
+      title="批量应用"
       onClose={() => onOpenChange(false)}
       contentClassName="px-6 py-6 w-full flex flex-col gap-4"
       footer={
         <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
           {/* 底部固定条·左侧：Provider 选择（始终可见，不用滚动即可选） */}
           <div className="flex min-w-0 flex-1 items-center gap-3">
+            {/* 当前应用标识：醒目告知这批 Provider 是给哪个 app 推 */}
+            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-sm font-medium text-foreground">
+              {appIconName ? (
+                <ProviderIcon
+                  icon={appIconName}
+                  name={appDisplayName}
+                  size={16}
+                />
+              ) : null}
+              <span className="whitespace-nowrap">{appDisplayName}</span>
+            </span>
             <span className="whitespace-nowrap text-sm text-muted-foreground">
               应用
             </span>
             <select
               value={providerId}
               onChange={(e) => setProviderId(e.target.value)}
-              className="h-9 max-w-[200px] rounded-lg border border-border/40 bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-primary/40"
+              className="h-9 max-w-[200px] rounded-lg border border-border bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-primary/40"
             >
               {providerList.length === 0 && (
                 <option value="">（无可用 Provider）</option>
