@@ -22,6 +22,11 @@ import {
   type BroadcastSwitchResult,
 } from "@/lib/api/remote";
 import { listen } from "@tauri-apps/api/event";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 interface Target {
   hostId: string;
@@ -68,8 +73,6 @@ export function BatchApplyPanel({
   const [providerId, setProviderId] = useState<string>("");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [running, setRunning] = useState(false);
-  // 卡片②「已选清单」是否展开（b1：默认紧凑，点开看全）
-  const [showSelected, setShowSelected] = useState(false);
 
   const providerList = useMemo(() => Object.values(providers), [providers]);
 
@@ -176,6 +179,9 @@ export function BatchApplyPanel({
     });
   };
 
+  // 清空所有选中的落点
+  const clearSelected = () => setSelected(new Set());
+
   const selectedTargets: Target[] = useMemo(() => {
     const list: Target[] = [];
     for (const key of selected) {
@@ -242,40 +248,144 @@ export function BatchApplyPanel({
       isOpen={open}
       title="批量应用 Provider"
       onClose={() => onOpenChange(false)}
-      contentClassName="px-6 py-6 space-y-6 w-full"
+      contentClassName="px-6 py-6 w-full flex flex-col gap-4"
       footer={
-        <>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={running}
-          >
-            取消
-          </Button>
-          <Button
-            disabled={
-              running ||
-              selectedTargets.length === 0 ||
-              !providerId ||
-              providerList.length === 0
-            }
-            onClick={() => void doApply()}
-          >
-            {running ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Send className="mr-2 h-4 w-4" />
-            )}
-            批量应用 ({selectedTargets.length})
-          </Button>
-        </>
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+          {/* 底部固定条·左侧：Provider 选择（始终可见，不用滚动即可选） */}
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="whitespace-nowrap text-sm text-muted-foreground">
+              应用到
+            </span>
+            <select
+              value={providerId}
+              onChange={(e) => setProviderId(e.target.value)}
+              className="h-9 max-w-[200px] rounded-lg border border-border/40 bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-primary/40"
+            >
+              {providerList.length === 0 && (
+                <option value="">（无可用 Provider）</option>
+              )}
+              {providerList.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {/* 底部固定条·右侧：取消 / 批量应用 */}
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={running}
+            >
+              取消
+            </Button>
+            <Button
+              disabled={
+                running ||
+                selectedTargets.length === 0 ||
+                !providerId ||
+                providerList.length === 0
+              }
+              onClick={() => void doApply()}
+            >
+              {running ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="mr-2 h-4 w-4" />
+              )}
+              批量应用 ({selectedTargets.length})
+            </Button>
+          </div>
+        </div>
       }
     >
-      {/* ① 选落点 */}
-      <div className="glass rounded-xl p-6 border border-white/10 space-y-6 flex-shrink-0">
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60 mb-4">
-          选落点 · 勾整台 = 含其容器
-        </h4>
+      {/* ① 选落点（占满剩余空间，内部列表滚动，底部固定条始终可见） */}
+      <div className="glass flex min-h-0 flex-1 flex-col rounded-xl p-6 border border-white/10 space-y-6">
+        <div className="flex items-center justify-between gap-2">
+          <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
+            选落点 · 勾整台 = 含其容器
+          </h4>
+          {/* 已选浮层：点开悬浮列表查看所选落点，不占布局空间 */}
+          {selectedTargets.length > 0 && (
+            <Popover>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground/70 hover:text-foreground"
+                >
+                  已选{" "}
+                  <span className="font-semibold text-primary">
+                    {selectedTargets.length}
+                  </span>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="end"
+                className="w-80 p-0"
+              >
+                <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                  <span className="text-xs font-semibold text-foreground/80">
+                    已选 {selectedTargets.length} 个落点
+                  </span>
+                  <button
+                    type="button"
+                    onClick={clearSelected}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    清空
+                  </button>
+                </div>
+                <div className="max-h-[40vh] overflow-y-auto p-2">
+                  <div className="space-y-0.5">
+                    {selectedTargets.map((t) => {
+                      const isContainer = !!t.container;
+                      return (
+                        <div
+                          key={
+                            t.container
+                              ? contKey(t.hostId, t.container)
+                              : t.hostId
+                          }
+                          className={cn(
+                            "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                            isContainer
+                              ? "bg-muted/40 text-muted-foreground"
+                              : "bg-primary/8 text-primary",
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1",
+                              isContainer
+                                ? "bg-background text-muted-foreground ring-border"
+                                : "bg-background text-primary ring-primary/30",
+                            )}
+                          >
+                            {isContainer ? (
+                              <Container className="h-3.5 w-3.5" />
+                            ) : (
+                              <Server className="h-3.5 w-3.5" />
+                            )}
+                          </div>
+                          <span className="min-w-0 flex-1 truncate">
+                            {t.container ? t.container : t.hostName}
+                          </span>
+                          {!isContainer && (
+                            <span className="shrink-0 text-xs opacity-70">
+                              宿主机
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
 
         <div className="space-y-2">
           <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background px-2.5 py-1.5 focus-within:ring-1 focus-within:ring-primary/40">
@@ -289,7 +399,7 @@ export function BatchApplyPanel({
           </div>
         </div>
 
-        <div className="h-[40vh] space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
+        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
           {filteredHosts.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">
               {hosts.length === 0
@@ -377,82 +487,19 @@ export function BatchApplyPanel({
 
       </div>
 
-      {/* ② 选择 Provider + 执行结果 */}
-      <div className="glass rounded-xl p-6 border border-white/10 space-y-6 flex-shrink-0">
-        <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60 mb-4">
-          应用到 · Provider
-        </h4>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-sm font-medium text-foreground/80">
-            {providers[providerId]?.name ?? "（请选择 Provider）"}
-          </span>
-          <select
-            value={providerId}
-            onChange={(e) => setProviderId(e.target.value)}
-            className="h-9 max-w-[240px] rounded-lg border border-border/40 bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-primary/40"
-          >
-            {providerList.length === 0 && (
-              <option value="">（无可用 Provider）</option>
-            )}
-            {providerList.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* 已选清单（b1：默认只显示计数，点开展开具体落点） */}
-        {selectedTargets.length > 0 && (
-          <div className="border-t border-border/60 pt-4">
-            <button
-              type="button"
-              onClick={() => setShowSelected((v) => !v)}
-              className="flex w-full items-center justify-between text-sm text-foreground/80 hover:text-foreground"
-            >
-              <span>
-                已选 <span className="font-semibold text-primary">{selectedTargets.length}</span> 个落点
-              </span>
-              <ChevronRight
-                className={cn(
-                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform",
-                  showSelected && "rotate-90",
-                )}
-              />
-            </button>
-            {showSelected && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedTargets.map((t) => {
-                  const isContainer = !!t.container;
-                  return (
-                    <span
-                      key={t.container ? contKey(t.hostId, t.container) : t.hostId}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs",
-                        isContainer
-                          ? "bg-muted text-muted-foreground"
-                          : "bg-primary/10 text-primary",
-                      )}
-                    >
-                      {isContainer ? (
-                        <Container className="h-3 w-3 shrink-0" />
-                      ) : (
-                        <Server className="h-3 w-3 shrink-0" />
-                      )}
-                      <span>{t.container ? t.container : t.hostName}</span>
-                      {!isContainer && (
-                        <span className="opacity-70">宿主机</span>
-                      )}
-                    </span>
-                  );
-                })}
-              </div>
-            )}
+      {/* 执行结果（独立展示在落点下方、底部固定条上方） */}
+      {results.length > 0 && (
+        <div className="glass rounded-xl p-4 border border-white/10 space-y-1 flex-shrink-0">
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground/60">
+            执行结果
+            <span className="font-medium normal-case text-emerald-500">
+              成功 {results.filter((r) => r.status === "ok").length}
+            </span>
+            <span className="font-medium normal-case text-red-500">
+              失败 {results.filter((r) => r.status === "fail").length}
+            </span>
           </div>
-        )}
-
-        {results.length > 0 && (
-          <div className="mt-5 space-y-1">
+          <div className="max-h-[26vh] space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
             {results.map((r) => (
               <div
                 key={r.key}
@@ -482,8 +529,8 @@ export function BatchApplyPanel({
               </div>
             ))}
           </div>
-        )}
-            </div>
+        </div>
+      )}
     </FullScreenPanel>
   );
 }
