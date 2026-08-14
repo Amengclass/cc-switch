@@ -290,6 +290,12 @@ function App() {
     () => localStorage.getItem("cc-switch-remote-feature-enabled") !== "0",
   );
 
+  // claude-desktop 没有远端概念（远端只有 claude/codex/gemini/grokbuild/openclaw/
+  // openclaw/hermes），其配置本就回并到 claude：在 claude-desktop 标签下完全隐藏
+  // 远端入口（目标选择器远端项、批量应用、远程主机导航、远端状态栏），还原本机体验。
+  const remoteAvailableForApp =
+    remoteFeatureEnabled && activeApp !== "claude-desktop";
+
   const handleRemoteFeatureEnabledChange = useCallback(
     (next: boolean) => {
       setRemoteFeatureEnabled(next);
@@ -2262,7 +2268,7 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              {remoteFeatureEnabled && (
+                              {remoteAvailableForApp && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -2341,7 +2347,7 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              {remoteFeatureEnabled && (
+                              {remoteAvailableForApp && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -2405,7 +2411,7 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              {remoteFeatureEnabled && (
+                              {remoteAvailableForApp && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -2448,7 +2454,7 @@ function App() {
             远端功能关闭时整条目标选择器/远端状态栏隐藏，还原原生 cc-switch。 */}
         {currentView !== "settings" &&
           currentView !== "remote" &&
-          remoteFeatureEnabled && (
+          remoteAvailableForApp && (
           <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
             <TargetBreadcrumb
               remoteTargetId={remoteTargetId}
@@ -2542,7 +2548,7 @@ function App() {
           ===== 如何改「Provider 池来源」=====
           当前来源 = 本机 useProvidersQuery（data?.providers）。若未来想改成从其它源取
           （如当前目标、某份配置文件），改这里的 providers 取值即可，后端广播逻辑不变。 */}
-      {remoteFeatureEnabled && (
+      {remoteAvailableForApp && (
         <BatchApplyPanel
           open={batchApplyOpen}
           onOpenChange={setBatchApplyOpen}
