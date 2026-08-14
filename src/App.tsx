@@ -192,6 +192,10 @@ const VALID_VIEWS: View[] = [
 ];
 
 const getInitialView = (): View => {
+  // 远端功能关闭时不起始于「远程主机管理」视图（还原原生）
+  if (localStorage.getItem("cc-switch-remote-feature-enabled") === "0") {
+    return "providers";
+  }
   const saved = localStorage.getItem(VIEW_STORAGE_KEY) as View | null;
   if (saved && VALID_VIEWS.includes(saved)) {
     return saved;
@@ -280,6 +284,31 @@ function App() {
     localStorage.getItem("cc-switch-remote-auto-import-default") !== "0",
   );
 
+  // ===== 远端功能总开关：关 = 还原原生 cc-switch（隐藏所有远端入口）=====
+  // 默认开启（不存在该 key 时视为开），仅在设置页主动关闭才隐藏远端。
+  const [remoteFeatureEnabled, setRemoteFeatureEnabled] = useState<boolean>(
+    () => localStorage.getItem("cc-switch-remote-feature-enabled") !== "0",
+  );
+
+  const handleRemoteFeatureEnabledChange = useCallback(
+    (next: boolean) => {
+      setRemoteFeatureEnabled(next);
+      localStorage.setItem(
+        "cc-switch-remote-feature-enabled",
+        next ? "1" : "0",
+      );
+      // 关闭时若正停留在远端视图/选中远端目标，立刻还原成本机视图
+      if (!next) {
+        setCurrentView((v) => (v === "remote" ? "providers" : v));
+        setRemoteTargetId("");
+        setRemoteContainerId("");
+        setContainers([]);
+        setHostsOnline({});
+      }
+    },
+    [setCurrentView],
+  );
+
   // 开关切换后使远端面板查询失效（refetch 用新值），并持久化
   const handleAutoImportDefaultChange = useCallback((next: boolean) => {
     setAutoImportDefault(next);
@@ -315,6 +344,15 @@ function App() {
   }, [sharedFeatureApp]);
 
   useEffect(() => {
+    // 远端功能关闭：不加载远端主机列表（还原原生，不与任何主机建连）
+    if (!remoteFeatureEnabled) {
+      setServers([]);
+      setRemoteTargetId("");
+      setRemoteContainerId("");
+      setContainers([]);
+      setHostsOnline({});
+      return;
+    }
     listRemoteHosts()
       .then((list) => {
         // 禁用的主机从目标选择/操作中排除（不显示、不可选、探活跳过）；
@@ -329,7 +367,7 @@ function App() {
     // 注：切回主界面时刷新远端当前供应商 + 安装状态的工作，由下方依赖
     // `[remoteTargetId, remoteContainerId]` 的 effect 统一负责（它拿到最新容器）。
     // 这里不重复刷新，避免两个 effect 用不同 container 并行覆盖 setRemoteInstalled。
-  }, [currentView]);
+  }, [currentView, remoteFeatureEnabled]);
 
   // 选中服务器时：读取远端当前生效的供应商（按 base_url 匹配本地供应商）
   // 并检测远端 Claude Code 安装状态（用于主面板横幅徽标）。
@@ -1468,6 +1506,8 @@ function App() {
               defaultTab={settingsDefaultTab}
               autoImportDefault={autoImportDefault}
               onAutoImportDefaultChange={handleAutoImportDefaultChange}
+              remoteFeatureEnabled={remoteFeatureEnabled}
+              onRemoteFeatureEnabledChange={handleRemoteFeatureEnabledChange}
             />
           );
         case "prompts":
@@ -2222,17 +2262,19 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setCurrentView("remote")}
-                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
-                                title={t("remote.title", {
-                                  defaultValue: "远程主机",
-                                })}
-                              >
-                                <Server className="flex-shrink-0 w-4 h-4" />
-                              </Button>
+                              {remoteFeatureEnabled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCurrentView("remote")}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
+                                >
+                                  <Server className="flex-shrink-0 w-4 h-4" />
+                                </Button>
+                              )}
                             </>
                           ) : activeApp === "openclaw" ? (
                             <>
@@ -2299,17 +2341,19 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setCurrentView("remote")}
-                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
-                                title={t("remote.title", {
-                                  defaultValue: "远程主机",
-                                })}
-                              >
-                                <Server className="flex-shrink-0 w-4 h-4" />
-                              </Button>
+                              {remoteFeatureEnabled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCurrentView("remote")}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
+                                >
+                                  <Server className="flex-shrink-0 w-4 h-4" />
+                                </Button>
+                              )}
                             </>
                           ) : (
                             <>
@@ -2361,17 +2405,19 @@ function App() {
                               >
                                 <McpIcon size={16} />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setCurrentView("remote")}
-                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
-                                title={t("remote.title", {
-                                  defaultValue: "远程主机",
-                                })}
-                              >
-                                <Server className="flex-shrink-0 w-4 h-4" />
-                              </Button>
+                              {remoteFeatureEnabled && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCurrentView("remote")}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
+                                >
+                                  <Server className="flex-shrink-0 w-4 h-4" />
+                                </Button>
+                              )}
                             </>
                           )}
                         </motion.div>
@@ -2398,8 +2444,11 @@ function App() {
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
         {/* 设置页/远程主机管理页不需要目标选择器/远端状态栏：设置里无切换场景，
-            远程主机面板管理的是全部主机（不针对当前目标），显示了反而误导 */}
-        {currentView !== "settings" && currentView !== "remote" && (
+            远程主机面板管理的是全部主机（不针对当前目标），显示了反而误导。
+            远端功能关闭时整条目标选择器/远端状态栏隐藏，还原原生 cc-switch。 */}
+        {currentView !== "settings" &&
+          currentView !== "remote" &&
+          remoteFeatureEnabled && (
           <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
             <TargetBreadcrumb
               remoteTargetId={remoteTargetId}
@@ -2493,14 +2542,16 @@ function App() {
           ===== 如何改「Provider 池来源」=====
           当前来源 = 本机 useProvidersQuery（data?.providers）。若未来想改成从其它源取
           （如当前目标、某份配置文件），改这里的 providers 取值即可，后端广播逻辑不变。 */}
-      <BatchApplyPanel
-        open={batchApplyOpen}
-        onOpenChange={setBatchApplyOpen}
-        app={sharedFeatureApp}
-        hosts={servers}
-        providers={data?.providers ?? {}}
-        defaultProviderId={data?.currentProviderId || undefined}
-      />
+      {remoteFeatureEnabled && (
+        <BatchApplyPanel
+          open={batchApplyOpen}
+          onOpenChange={setBatchApplyOpen}
+          app={sharedFeatureApp}
+          hosts={servers}
+          providers={data?.providers ?? {}}
+          defaultProviderId={data?.currentProviderId || undefined}
+        />
+      )}
 
       <AddProviderDialog
         open={isAddOpen}

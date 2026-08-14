@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
 import {
   CheckCircle2,
   ChevronRight,
@@ -62,8 +61,6 @@ export function BatchApplyPanel({
   providers,
   defaultProviderId,
 }: BatchApplyPanelProps) {
-  const { t } = useTranslation();
-
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [containersMap, setContainersMap] = useState<

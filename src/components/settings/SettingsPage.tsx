@@ -68,6 +68,9 @@ interface SettingsDialogProps {
   /** 远端非 additive 面板是否每次自动读入当前 live 配置（default 卡） */
   autoImportDefault?: boolean;
   onAutoImportDefaultChange?: (next: boolean) => void;
+  /** 远端功能总开关：关 = 还原原生 cc-switch */
+  remoteFeatureEnabled?: boolean;
+  onRemoteFeatureEnabledChange?: (next: boolean) => void;
 }
 
 export function SettingsPage({
@@ -77,6 +80,8 @@ export function SettingsPage({
   defaultTab = "general",
   autoImportDefault = true,
   onAutoImportDefaultChange,
+  remoteFeatureEnabled = true,
+  onRemoteFeatureEnabledChange,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
   const {
@@ -300,6 +305,10 @@ export function SettingsPage({
                       }
                     />
                     <RemoteProviderSettings
+                      featureEnabled={remoteFeatureEnabled}
+                      onFeatureEnabledChange={(next) =>
+                        onRemoteFeatureEnabledChange?.(next)
+                      }
                       value={autoImportDefault}
                       onChange={(next) => onAutoImportDefaultChange?.(next)}
                     />
