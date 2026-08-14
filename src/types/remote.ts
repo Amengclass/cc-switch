@@ -15,6 +15,8 @@ export interface RemoteHost {
   routeProxyApps: Record<string, boolean>;
   /** per-container×app 远端接管开关：{"<容器名>":{"claude":true,...}}——容器目标各自独立 */
   routeProxyContainerApps?: Record<string, Record<string, boolean>>;
+  /** 是否被软禁用（来自后端 remote_hosts.disabled）：禁用主机不进目标选择/操作，管理页可见可恢复 */
+  disabled?: boolean;
   createdAt: number;
   updatedAt: number;
 }

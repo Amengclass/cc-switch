@@ -13,6 +13,7 @@ import {
   Trash2,
   PlugZap,
   Loader2,
+  Ban,
   ShieldAlert,
   Eye,
   EyeOff,
@@ -219,6 +220,8 @@ export const RemoteHostsPanel = React.forwardRef<
       routeProxyApps: draft.routeProxyApps,
       // 表单不编辑容器开关：编辑主机时保留已有容器开关，避免误清空
       routeProxyContainerApps: editing?.routeProxyContainerApps,
+      // 编辑时保留禁用态（表单不编辑禁用；重用行内禁用/启用按钮切换）
+      disabled: editing?.disabled ?? false,
       createdAt: editing?.createdAt ?? now,
       updatedAt: now,
     };
@@ -259,6 +262,25 @@ export const RemoteHostsPanel = React.forwardRef<
       });
     } finally {
       setTestingId(null);
+    }
+  };
+
+  // 禁用/启用某台主机（软禁用：不删除，目标选择/操作排除，管理页仍可恢复）
+  const handleToggleDisabled = async (host: RemoteHost) => {
+    const next = { ...host, disabled: !host.disabled };
+    try {
+      await saveRemoteHost(next, undefined);
+      toast.success(
+        next.disabled
+          ? t("remote.disabled", { defaultValue: `已禁用 ${host.name}`, name: host.name })
+          : t("remote.enabled", { defaultValue: `已启用 ${host.name}`, name: host.name }),
+      );
+      load();
+    } catch (error) {
+      console.error("Failed to toggle disabled:", error);
+      toast.error(t("remote.disableFailed", { defaultValue: "操作失败" }), {
+        description: String(error),
+      });
     }
   };
 
@@ -435,11 +457,20 @@ export const RemoteHostsPanel = React.forwardRef<
                 "group rounded-xl border bg-card p-4 shadow-sm transition-all duration-300 hover:border-border-active hover:shadow-sm",
                 editing?.id === host.id &&
                   "ring-2 ring-primary/60 border-primary/40",
+                // 禁用态：底色明显变暗 + 虚线边框 + 更强降透明，一眼可辨「这台已停用」
+                host.disabled && "border-dashed bg-muted/70 opacity-70",
               )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="truncate font-medium">{host.name}</p>
+                  <p className="truncate font-medium">
+                    {host.name}
+                    {host.disabled && (
+                      <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600">
+                        已禁用
+                      </span>
+                    )}
+                  </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     <span className="text-foreground/70">{host.username}</span>
                     <span className="text-muted-foreground/60">@</span>
@@ -482,7 +513,7 @@ export const RemoteHostsPanel = React.forwardRef<
                   variant="outline"
                   size="sm"
                   onClick={() => void handleTest(host)}
-                  disabled={testingId === host.id}
+                  disabled={host.disabled || testingId === host.id}
                 >
                   {testingId === host.id ? (
                     <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
@@ -497,15 +528,34 @@ export const RemoteHostsPanel = React.forwardRef<
                   variant="outline"
                   size="sm"
                   onClick={() => void openEnvDialog(host)}
+                  disabled={host.disabled}
                 >
                   <ShieldAlert className="mr-1 h-3.5 w-3.5" />
                   {t("remote.env", { defaultValue: "环境变量" })}
+                </Button>
+                <Button
+                  variant={host.disabled ? "outline" : "ghost"}
+                  size="icon"
+                  className={cn(
+                    "h-7 w-7",
+                    host.disabled && "text-muted-foreground",
+                    !host.disabled && "text-muted-foreground/60 hover:text-foreground",
+                  )}
+                  onClick={() => void handleToggleDisabled(host)}
+                  title={
+                    host.disabled
+                      ? t("remote.enable", { defaultValue: "启用" })
+                      : t("remote.disable", { defaultValue: "禁用（操作排除）" })
+                  }
+                >
+                  <Ban className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="ml-auto h-7 w-7"
                   onClick={() => openEdit(host)}
+                  disabled={host.disabled}
                   title={t("common.edit", { defaultValue: "编辑" })}
                 >
                   <Pencil className="h-3.5 w-3.5" />
@@ -515,6 +565,7 @@ export const RemoteHostsPanel = React.forwardRef<
                   size="icon"
                   className="h-7 w-7 text-destructive hover:text-destructive"
                   onClick={() => setDeleteConfirm({ open: true, host })}
+                  disabled={host.disabled}
                   title={t("common.delete", { defaultValue: "删除" })}
                 >
                   <Trash2 className="h-3.5 w-3.5" />

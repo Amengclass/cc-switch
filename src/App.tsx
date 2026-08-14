@@ -317,9 +317,12 @@ function App() {
   useEffect(() => {
     listRemoteHosts()
       .then((list) => {
-        setServers(list);
+        // 禁用的主机从目标选择/操作中排除（不显示、不可选、探活跳过）；
+        // 恢复需到远程主机管理页「启用」。
+        const enabled = list.filter((s) => !s.disabled);
+        setServers(enabled);
         setRemoteTargetId((prev) =>
-          prev && !list.some((s) => s.id === prev) ? "" : prev,
+          prev && !enabled.some((s) => s.id === prev) ? "" : prev,
         );
       })
       .catch(() => {});

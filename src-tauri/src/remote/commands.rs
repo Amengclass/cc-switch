@@ -393,12 +393,16 @@ pub(crate) async fn any_route_consumer(state: &AppState) -> bool {
         Err(e) => log::warn!("[remote] 检查本机接管状态失败: {e}"),
     }
     match state.db.list_remote_hosts() {
-        Ok(hosts) => hosts.iter().any(|h| {
-            h.route_proxy_apps.values().any(|&v| v)
-                || h.route_proxy_container_apps
-                    .values()
-                    .any(|m| m.values().any(|&v| v))
-        }),
+        Ok(hosts) => hosts
+            .iter()
+            // 禁用的主机不参与「是否有路由接管意图」判定：残留的接管意图不再自动拉起本机代理
+            .filter(|h| !h.disabled)
+            .any(|h| {
+                h.route_proxy_apps.values().any(|&v| v)
+                    || h.route_proxy_container_apps
+                        .values()
+                        .any(|m| m.values().any(|&v| v))
+            }),
         Err(e) => {
             log::warn!("[remote] 检查远端路由意图失败: {e}");
             false
@@ -456,6 +460,7 @@ pub async fn test_remote_connection_info(
         route_through_local_proxy: false,
         route_proxy_apps: std::collections::HashMap::new(),
         route_proxy_container_apps: std::collections::HashMap::new(),
+        disabled: false,
         created_at: 0,
         updated_at: 0,
     };
@@ -3127,11 +3132,17 @@ pub async fn set_remote_openclaw_default_model(
 
 /// 按 id 加载主机，不存在时报错。
 fn load_host(state: &AppState, host_id: &str) -> Result<RemoteHost, String> {
-    state
+    let host = state
         .db
         .get_remote_host(host_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| "远程主机不存在，可能已被删除".to_string())
+        .ok_or_else(|| "远程主机不存在，可能已被删除".to_string())?;
+    // 软禁用兜底：所有远端命令都经 load_host（约 40 处），此处拦截即全量拒绝。
+    // 即使前端漏过滤，禁用的主机也无法被任何操作读到。
+    if host.disabled {
+        return Err(format!("远程主机「{}」已被禁用，请先在远程主机管理页启用后再操作", host.name));
+    }
+    Ok(host)
 }
 
 /// 解析连接用密码：优先系统钥匙串；否则要求编辑主机补充密码。

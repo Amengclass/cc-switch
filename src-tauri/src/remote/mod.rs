@@ -75,6 +75,9 @@ pub struct RemoteHost {
     #[serde(default = "default_route_proxy_container_apps")]
     pub route_proxy_container_apps:
         std::collections::HashMap<String, std::collections::HashMap<String, bool>>,
+    /// 是否被禁用（软禁用，不删除）：禁用的主机不可被目标选择/操作，远程管理页仍可见可恢复。
+    #[serde(default)]
+    pub disabled: bool,
     pub created_at: i64,
     pub updated_at: i64,
 }

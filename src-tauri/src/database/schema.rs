@@ -356,6 +356,7 @@ impl Database {
                 route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0,
                 route_proxy_apps TEXT NOT NULL DEFAULT '{}',
                 route_proxy_container_apps TEXT NOT NULL DEFAULT '{}',
+                disabled BOOLEAN NOT NULL DEFAULT 0,
                 created_at INTEGER,
                 updated_at INTEGER
             )",
@@ -456,6 +457,13 @@ impl Database {
         // （JSON：{"<容器名>":{"claude":true,...}}）。旧库升级后容器侧默认空 = 不接管。
         let _ = conn.execute(
             "ALTER TABLE remote_hosts ADD COLUMN route_proxy_container_apps TEXT NOT NULL DEFAULT '{}'",
+            [],
+        );
+
+        // 尝试添加 disabled 列（软禁用）：旧库升级补列，新库建表已含。
+        // 禁用 = 目标选择/操作排除 + load_host 拦截兜底，远程管理页仍可见可恢复（不删除）。
+        let _ = conn.execute(
+            "ALTER TABLE remote_hosts ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0",
             [],
         );
 
