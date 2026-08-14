@@ -254,7 +254,7 @@ export function BatchApplyPanel({
           {/* 底部固定条·左侧：Provider 选择（始终可见，不用滚动即可选） */}
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="whitespace-nowrap text-sm text-muted-foreground">
-              应用到
+              应用
             </span>
             <select
               value={providerId}

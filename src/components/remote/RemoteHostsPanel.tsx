@@ -14,6 +14,8 @@ import {
   PlugZap,
   Loader2,
   Ban,
+  CircleDot,
+  ListFilter,
   ShieldAlert,
   Eye,
   EyeOff,
@@ -52,6 +54,13 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { ManagementListSearch } from "@/components/common/ManagementListSearch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
@@ -118,6 +127,8 @@ export const RemoteHostsPanel = React.forwardRef<
 
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  // 状态过滤：all=全部 / enabled=仅启用 / disabled=仅禁用。禁用主机始终排在后面（B）。
+  const [statusFilter, setStatusFilter] = useState<"all" | "enabled" | "disabled">("all");
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<RemoteHost | null>(null);
@@ -388,17 +399,22 @@ export const RemoteHostsPanel = React.forwardRef<
     [t],
   );
 
-  // 搜索过滤：按名称 / 地址 / 用户名匹配
+  // 搜索 + 状态过滤：按名称/地址/用户名匹配；按状态过滤（列表顺序保持原始创建顺序，不沉底）。
   const filteredHosts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return hosts;
-    return hosts.filter(
-      (h) =>
-        h.name.toLowerCase().includes(q) ||
-        h.host.toLowerCase().includes(q) ||
-        h.username.toLowerCase().includes(q),
-    );
-  }, [hosts, searchQuery]);
+    let list = hosts;
+    if (q) {
+      list = list.filter(
+        (h) =>
+          h.name.toLowerCase().includes(q) ||
+          h.host.toLowerCase().includes(q) ||
+          h.username.toLowerCase().includes(q),
+      );
+    }
+    if (statusFilter === "enabled") list = list.filter((h) => !h.disabled);
+    else if (statusFilter === "disabled") list = list.filter((h) => h.disabled);
+    return list;
+  }, [hosts, searchQuery, statusFilter]);
 
   return (
     <TooltipProvider>
@@ -406,18 +422,47 @@ export const RemoteHostsPanel = React.forwardRef<
       {/* 添加按钮在顶部导航右侧（remote.add），此处仅保留页面描述 */}
       <p className="text-sm text-muted-foreground">{description}</p>
 
-      {/* 搜索 + 计数（对齐 MCP 管理面板） */}
-      <ManagementListSearch
-        value={searchQuery}
-        onValueChange={setSearchQuery}
-        placeholder={t("remote.searchPlaceholder", {
-          defaultValue: "搜索主机名称 / 地址 / 用户名…",
-        })}
-        ariaLabel={t("remote.searchAriaLabel", {
-          defaultValue: "搜索远程主机",
-        })}
-        clearLabel={t("common.clear", { defaultValue: "清除" })}
-      />
+      {/* 搜索 + 状态过滤 + 计数（对齐 MCP 管理面板） */}
+      <div className="flex items-center gap-2">
+        {/* -mb-4 抵消 ManagementListSearch 自带的 mb-4 下边距，使搜索框与状态下拉垂直对齐 */}
+        <div className="-mb-4 flex-1">
+          <ManagementListSearch
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+            placeholder={t("remote.searchPlaceholder", {
+              defaultValue: "搜索主机名称 / 地址 / 用户名…",
+            })}
+            ariaLabel={t("remote.searchAriaLabel", {
+              defaultValue: "搜索远程主机",
+            })}
+            clearLabel={t("common.clear", { defaultValue: "清除" })}
+          />
+        </div>
+        {/* 状态过滤：全部 / 仅启用 / 仅禁用（带记录数，shadcn Select） */}
+        <Select
+          value={statusFilter}
+          onValueChange={(v) =>
+            setStatusFilter(v as "all" | "enabled" | "disabled")
+          }
+        >
+          <SelectTrigger className="h-9 w-auto shrink-0 gap-1.5 border-border/40 px-2.5">
+            <ListFilter className="h-3.5 w-3.5 text-muted-foreground" />
+            {/* SelectValue 会自动显示选中项的文本，不要再额外放同名 span，否则文本重复 */}
+            <SelectValue placeholder="状态" />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="all">
+              {t("remote.filterAll", { defaultValue: "全部" })}
+            </SelectItem>
+            <SelectItem value="enabled">
+              {t("remote.filterEnabled", { defaultValue: "仅启用" })}
+            </SelectItem>
+            <SelectItem value="disabled">
+              {t("remote.filterDisabled", { defaultValue: "仅禁用" })}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* 主机列表 */}
       {loading ? (
@@ -465,11 +510,27 @@ export const RemoteHostsPanel = React.forwardRef<
                 <div className="min-w-0">
                   <p className="truncate font-medium">
                     {host.name}
-                    {host.disabled && (
-                      <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-600">
-                        已禁用
-                      </span>
-                    )}
+                    {/* 状态 pill（仅状态展示，切换由右上角 Switch 负责）：启用=绿/禁用=红 */ }
+                    <span
+                      className={cn(
+                        "ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
+                        host.disabled
+                          ? "border-red-500/30 bg-red-500/10 text-red-600"
+                          : "border-border/60 bg-muted/60 text-muted-foreground",
+                      )}
+                    >
+                      {host.disabled ? (
+                        <>
+                          <Ban className="h-3 w-3" />
+                          已禁用
+                        </>
+                      ) : (
+                        <>
+                          <CircleDot className="h-3 w-3" />
+                          启用中
+                        </>
+                      )}
+                    </span>
                   </p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     <span className="text-foreground/70">{host.username}</span>
@@ -503,7 +564,33 @@ export const RemoteHostsPanel = React.forwardRef<
                     </span>
                   </p>
                 </div>
-                <Server className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-primary" />
+                {/* 右上角禁用/启用开关：Tooltip 悬停提示。
+                    注意：TooltipTrigger 用 asChild 直接包 Switch 会破坏 Switch 渲染（轨道变白），
+                    因此改包一层中介 <span>，悬停 span 触发提示、Switch 自身正常渲染。 */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex">
+                      <Switch
+                        checked={!host.disabled}
+                        onCheckedChange={() => void handleToggleDisabled(host)}
+                        aria-label={
+                          host.disabled
+                            ? t("remote.enable", { defaultValue: "点击启用" })
+                            : t("remote.disable", { defaultValue: "点击禁用（操作排除）" })
+                        }
+                      />
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {host.disabled
+                      ? t("remote.switchTooltipDisabled", {
+                          defaultValue: "已禁用此主机：点击开关启用（恢复可操作）",
+                        })
+                      : t("remote.switchTooltipEnabled", {
+                          defaultValue: "启用中：点击开关禁用（操作排除，可随时恢复）",
+                        })}
+                  </TooltipContent>
+                </Tooltip>
               </div>
 
               {/* 测试结果通过 toast 提示，卡片不常驻状态行（仅按钮文案反映已测过） */}
@@ -532,23 +619,6 @@ export const RemoteHostsPanel = React.forwardRef<
                 >
                   <ShieldAlert className="mr-1 h-3.5 w-3.5" />
                   {t("remote.env", { defaultValue: "环境变量" })}
-                </Button>
-                <Button
-                  variant={host.disabled ? "outline" : "ghost"}
-                  size="icon"
-                  className={cn(
-                    "h-7 w-7",
-                    host.disabled && "text-muted-foreground",
-                    !host.disabled && "text-muted-foreground/60 hover:text-foreground",
-                  )}
-                  onClick={() => void handleToggleDisabled(host)}
-                  title={
-                    host.disabled
-                      ? t("remote.enable", { defaultValue: "启用" })
-                      : t("remote.disable", { defaultValue: "禁用（操作排除）" })
-                  }
-                >
-                  <Ban className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="ghost"
