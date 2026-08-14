@@ -47,12 +47,28 @@ interface BatchApplyPanelProps {
 interface ResultRow {
   key: string;
   label: string;
+  /** 容器名；宿主机落点为 null/undefined（用于渲染「宿主机」标识） */
+  container?: string | null;
   status: "pending" | "running" | "ok" | "fail";
   message?: string;
 }
 
 const contKey = (id: string, c: string) => `${id}::${c}`;
 const splitKey = (key: string) => key.split("::");
+
+/** 根据容器列表拉取的错误信息，判定失败层。
+ *  后端 list_docker_containers 已结构化加前缀：SSH 层失败 = `SSH_ERR:<detail>`，
+ *  docker 命令失败 = `DOCKER_ERR:<detail>`。前端只认前缀，不依赖具体文案。 */
+const classifyHostError = (err: unknown): "ssh" | "docker" => {
+  const msg = String(err);
+  if (msg.startsWith("SSH_ERR:")) return "ssh";
+  if (msg.startsWith("DOCKER_ERR:")) return "docker";
+  // 老后端（未加前缀）兜底：仅凭文案含连接类关键词判为 ssh
+  if (/连接.*失败|连接.*超时|SSH 连接失败|认证失败|最近一次连接未成功/.test(msg)) {
+    return "ssh";
+  }
+  return "docker";
+};
 
 /** 批量应用 Provider 面板：搜索 + 整台勾选（含容器）+ 顶部已选 chips + 逐落点切换 */
 export function BatchApplyPanel({
@@ -86,6 +102,11 @@ export function BatchApplyPanel({
   const [containersMap, setContainersMap] = useState<
     Record<string, string[] | null>
   >({});
+  // 每台主机的连接异常类型："ssh" = SSH 层连接/认证/超时失败（宿主机本体也不可用）；
+  // "docker" = SSH 通但容器列表拉取失败（宿主机本体仍可应用，只是候选容器未知）。
+  const [hostErrors, setHostErrors] = useState<
+    Record<string, "ssh" | "docker" | undefined>
+  >({});
   const [search, setSearch] = useState<string>("");
   const [providerId, setProviderId] = useState<string>("");
   const [results, setResults] = useState<ResultRow[]>([]);
@@ -106,20 +127,27 @@ export function BatchApplyPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // 打开面板即批量拉取所有主机的容器列表：每台行尾常驻显示「N 容器」，无需逐个展开
+  // 打开面板即批量拉取所有主机的容器列表：每台行尾常驻显示「N 容器」，无需逐个展开。
+  // 拉取失败记录到 hostErrors（区分 SSH 挂 / docker 挂），供展开区与主行提示。
   useEffect(() => {
     if (!open || hosts.length === 0) return;
     let alive = true;
     setContainersMap({});
+    setHostErrors({});
     hosts.forEach((host) => {
       listDockerContainers(host.id)
         .then((list) => {
           if (alive)
             setContainersMap((prev) => ({ ...prev, [host.id]: list }));
         })
-        .catch(() => {
-          if (alive)
+        .catch((e) => {
+          if (alive) {
             setContainersMap((prev) => ({ ...prev, [host.id]: [] }));
+            setHostErrors((prev) => ({
+              ...prev,
+              [host.id]: classifyHostError(e),
+            }));
+          }
         });
     });
     return () => {
@@ -139,8 +167,13 @@ export function BatchApplyPanel({
       try {
         const list = await listDockerContainers(host.id);
         setContainersMap((prev) => ({ ...prev, [host.id]: list }));
-      } catch {
+        setHostErrors((prev) => ({ ...prev, [host.id]: undefined }));
+      } catch (e) {
         setContainersMap((prev) => ({ ...prev, [host.id]: [] }));
+        setHostErrors((prev) => ({
+          ...prev,
+          [host.id]: classifyHostError(e),
+        }));
       }
     }
   };
@@ -217,6 +250,7 @@ export function BatchApplyPanel({
       selectedTargets.map((t) => ({
         key: t.container ? `${t.hostId}::${t.container}` : t.hostId,
         label: t.container ? `${t.hostName} / ${t.container}` : t.hostName,
+        container: t.container,
         status: "pending",
       }));
     setResults(makeRows());
@@ -224,6 +258,7 @@ export function BatchApplyPanel({
     const fromResult = (res: BroadcastSwitchResult): ResultRow => ({
       key: res.container ? `${res.hostId}::${res.container}` : res.hostId,
       label: res.label,
+      container: res.container,
       status: res.ok ? "ok" : "fail",
       message: res.ok ? res.providerName : (res.error ?? "切换失败"),
     });
@@ -376,35 +411,26 @@ export function BatchApplyPanel({
                               ? contKey(t.hostId, t.container)
                               : t.hostId
                           }
-                          className={cn(
-                            "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-                            isContainer
-                              ? "bg-muted/40 text-muted-foreground"
-                              : "bg-primary/8 text-primary",
-                          )}
+                          className="flex items-center gap-2 rounded-md border border-border/40 px-2 py-1.5 text-sm"
                         >
-                          <div
-                            className={cn(
-                              "flex h-6 w-6 shrink-0 items-center justify-center rounded-md ring-1",
-                              isContainer
-                                ? "bg-background text-muted-foreground ring-border"
-                                : "bg-background text-primary ring-primary/30",
-                            )}
-                          >
-                            {isContainer ? (
-                              <Container className="h-3.5 w-3.5" />
-                            ) : (
-                              <Server className="h-3.5 w-3.5" />
-                            )}
-                          </div>
+                          {isContainer ? (
+                            <Container className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          ) : (
+                            <Server className="h-4 w-4 shrink-0 text-primary" />
+                          )}
                           <span className="min-w-0 flex-1 truncate">
                             {t.container ? t.container : t.hostName}
                           </span>
-                          {!isContainer && (
-                            <span className="shrink-0 text-xs opacity-70">
-                              宿主机
-                            </span>
-                          )}
+                          <span
+                            className={cn(
+                              "shrink-0 rounded px-1.5 py-0.5 text-xs font-medium",
+                              isContainer
+                                ? "bg-muted/50 text-muted-foreground"
+                                : "bg-primary/15 text-primary",
+                            )}
+                          >
+                            {isContainer ? "容器" : "宿主机"}
+                          </span>
                         </div>
                       );
                     })}
@@ -438,6 +464,8 @@ export function BatchApplyPanel({
           {filteredHosts.map((host) => {
             const cs = containersMap[host.id];
             const fullyChecked = isHostFullyChecked(host);
+            // SSH 层失败：宿主机本体与容器都不可用，禁止勾选并提示
+            const sshDown = hostErrors[host.id] === "ssh";
             return (
               <div
                 key={host.id}
@@ -451,9 +479,17 @@ export function BatchApplyPanel({
                 <div className="flex items-center gap-2 px-2 py-2">
                   <Checkbox
                     checked={fullyChecked}
+                    disabled={sshDown}
                     onCheckedChange={() => toggleHost(host)}
                   />
-                  <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Server
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      sshDown
+                        ? "text-red-500/70"
+                        : "text-muted-foreground",
+                    )}
+                  />
                   <button
                     type="button"
                     onClick={() => void toggleExpand(host)}
@@ -475,37 +511,56 @@ export function BatchApplyPanel({
                   {cs === null && (
                     <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground/60" />
                   )}
+                  {sshDown && (
+                    <span className="ml-auto shrink-0 text-xs text-red-500">
+                      无法连接
+                    </span>
+                  )}
+                  {!sshDown && hostErrors[host.id] === "docker" && (
+                    <span className="ml-auto shrink-0 text-xs text-amber-500">
+                      容器不可用
+                    </span>
+                  )}
                 </div>
                 {expanded.has(host.id) && (
                   <div className="space-y-1 border-l border-border/60 pl-4 pb-2">
-                    {/* 宿主机账号：与容器并列，代表该宿主机本身（仅账号，不含容器），主色标识 */}
-                    <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm">
-                      <Checkbox
-                        checked={selected.has(host.id)}
-                        onCheckedChange={() => toggleHostOnly(host.id)}
-                      />
-                      <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-                      <span className="truncate font-medium text-primary">宿主机</span>
-                    </label>
-                    <div className="border-t border-border/50" />
-                    {cs && cs.length === 0 && (
-                      <div className="px-2 py-1 text-xs text-muted-foreground">
-                        无容器（或不可用）
+                    {sshDown ? (
+                      /* SSH 层失败：宿主机本体与容器都不可用，不可选 */
+                      <div className="px-2 py-1 text-xs text-red-500">
+                        无法连接该主机（SSH 连接失败），不可应用
                       </div>
+                    ) : (
+                      <>
+                        {/* 宿主机账号：与容器并列，代表该宿主机本身（仅账号，不含容器），主色标识 */}
+                        <label className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm">
+                          <Checkbox
+                            checked={selected.has(host.id)}
+                            onCheckedChange={() => toggleHostOnly(host.id)}
+                          />
+                          <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
+                          <span className="truncate font-medium text-primary">宿主机</span>
+                        </label>
+                        <div className="border-t border-border/50" />
+                        {cs != null && cs.length === 0 && (
+                          <div className="px-2 py-1 text-xs text-muted-foreground">
+                            无容器（或不可用）
+                          </div>
+                        )}
+                        {(cs ?? []).map((c) => (
+                          <label
+                            key={c}
+                            className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm text-muted-foreground"
+                          >
+                            <Checkbox
+                              checked={selected.has(contKey(host.id, c))}
+                              onCheckedChange={() => toggleContainer(host.id, c)}
+                            />
+                            <Container className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{c}</span>
+                          </label>
+                        ))}
+                      </>
                     )}
-                    {(cs ?? []).map((c) => (
-                      <label
-                        key={c}
-                        className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm text-muted-foreground"
-                      >
-                        <Checkbox
-                          checked={selected.has(contKey(host.id, c))}
-                          onCheckedChange={() => toggleContainer(host.id, c)}
-                        />
-                        <Container className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{c}</span>
-                      </label>
-                    ))}
                   </div>
                 )}
               </div>
@@ -546,6 +601,16 @@ export function BatchApplyPanel({
                   <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
                 )}
                 <span className="min-w-0 flex-1 truncate">{r.label}</span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded px-1.5 py-0.5 text-xs font-medium",
+                    r.container
+                      ? "bg-muted/50 text-muted-foreground"
+                      : "bg-primary/15 text-primary",
+                  )}
+                >
+                  {r.container ? "容器" : "宿主机"}
+                </span>
                 {r.status === "ok" && (
                   <span className="text-xs text-muted-foreground">已切换</span>
                 )}
