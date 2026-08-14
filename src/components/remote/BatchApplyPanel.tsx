@@ -466,6 +466,8 @@ export function BatchApplyPanel({
             const fullyChecked = isHostFullyChecked(host);
             // SSH 层失败：宿主机本体与容器都不可用，禁止勾选并提示
             const sshDown = hostErrors[host.id] === "ssh";
+            // 加载中（容器列表检测中，未知是否可用）：禁止勾选，鼠标禁用
+            const hostLoading = cs == null;
             return (
               <div
                 key={host.id}
@@ -479,7 +481,10 @@ export function BatchApplyPanel({
                 <div className="flex items-center gap-2 px-2 py-2">
                   <Checkbox
                     checked={fullyChecked}
-                    disabled={sshDown}
+                    disabled={sshDown || hostLoading}
+                    className={cn(
+                      (sshDown || hostLoading) && "cursor-not-allowed",
+                    )}
                     onCheckedChange={() => toggleHost(host)}
                   />
                   <Server
@@ -492,8 +497,12 @@ export function BatchApplyPanel({
                   />
                   <button
                     type="button"
+                    disabled={hostLoading}
                     onClick={() => void toggleExpand(host)}
-                    className="flex min-w-0 flex-1 items-center gap-1 text-left text-sm font-medium"
+                    className={cn(
+                      "flex min-w-0 flex-1 items-center gap-1 text-left text-sm font-medium",
+                      hostLoading && "cursor-not-allowed",
+                    )}
                   >
                     <ChevronRight
                       className={cn(
@@ -508,7 +517,7 @@ export function BatchApplyPanel({
                       {cs.length} 容器
                     </span>
                   )}
-                  {cs === null && (
+                  {cs == null && (
                     <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground/60" />
                   )}
                   {sshDown && (
@@ -524,7 +533,12 @@ export function BatchApplyPanel({
                 </div>
                 {expanded.has(host.id) && (
                   <div className="space-y-1 border-l border-border/60 pl-4 pb-2">
-                    {sshDown ? (
+                    {hostLoading ? (
+                      /* 检测中：未知能否应用，不可选 */
+                      <div className="px-2 py-1 text-xs text-muted-foreground">
+                        检测中…
+                      </div>
+                    ) : sshDown ? (
                       /* SSH 层失败：宿主机本体与容器都不可用，不可选 */
                       <div className="px-2 py-1 text-xs text-red-500">
                         无法连接该主机（SSH 连接失败），不可应用
