@@ -6,6 +6,7 @@
 use super::subscription::{
     CredentialStatus, QuotaTier, SubscriptionQuota, TIER_FIVE_HOUR, TIER_MONTHLY, TIER_WEEKLY_LIMIT,
 };
+use regex::Regex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ── 供应商检测 ──────────────────────────────────────────────
@@ -1276,7 +1277,24 @@ pub async fn get_coding_plan_quota(
     coding_plan_provider: Option<&str>,
     team_organization_id: Option<&str>,
     team_project_id: Option<&str>,
+    workspace_id: Option<&str>,
+    auth_cookie: Option<&str>,
 ) -> Result<SubscriptionQuota, String> {
+    // OpenCode Go：抓取网页用量（不用 api_key/base_url，靠 workspace_id + auth_cookie）。
+    if coding_plan_provider
+        .map(|p| p.eq_ignore_ascii_case("opencode_go"))
+        .unwrap_or(false)
+    {
+        let ws = workspace_id.unwrap_or("").trim();
+        let cookie = auth_cookie.unwrap_or("").trim();
+        if ws.is_empty() || cookie.is_empty() {
+            return Ok(coding_plan_not_found(
+                "OpenCode Go usage query needs the workspace ID + auth cookie",
+            ));
+        }
+        return query_opencode_go(ws, cookie).await;
+    }
+
     // 智谱团队版：base_url 与个人版智谱（open.bigmodel.cn）相同，detect_provider 无法
     // 区分，必须靠显式 coding_plan_provider == "zhipu_team" 路由。需 api_key + 组织 ID
     // + 项目 ID 三者齐全，缺任一返回 NotFound 引导补全。
@@ -1332,6 +1350,466 @@ pub async fn get_coding_plan_quota(
             unreachable!("volcengine handled via AK/SK branch above")
         }
     }
+}
+
+// ── OpenCode Go（抓取网页，本地聚合）──────────────────────────────
+//
+// OpenCode 已废弃 /go 仪表盘的 quota 接口（rolling/weekly/monthly 全 null），
+// 只能抓 `https://opencode.ai/workspace/{id}/usage` 页面（SolidJS SSR），从内嵌的
+// `$R[n]=[...]` 数组抠出逐条请求记录（inputTokens/outputTokens/cost/timeCreated），
+// 再按 滚动5h / 每周 / 每月 三个窗口本地聚合 cost ÷ 套餐额度 得已用百分比。
+//
+// LIMITS 来自 https://opencode.ai/docs/go（滚动 $12 / 每周 $30 / 每月 $60）。
+
+#[allow(dead_code)]
+const OPENCODE_GO_LIMITS: [(&str, f64); 3] = [
+    (TIER_FIVE_HOUR, 12.0),
+    (TIER_WEEKLY_LIMIT, 30.0),
+    (TIER_MONTHLY, 60.0),
+];
+
+/// 把 SolidJS SSR 的 JS 对象文本清洗成合法 JSON：
+/// `new Date("...")` → 字符串、`undefined` → null、去 `$R[n]=` 前缀。
+/// 将 JS 对象字面量转换为合法 JSON（对齐 opencode-go-usage 的 js_object_to_json）：
+/// - `new Date("...")` → 字符串
+/// - `!0` / `!1` → true / false
+/// - `undefined` → null
+/// - 去掉 `$R[n]=` 引用前缀
+/// - 逐字符给未加引号的属性名加引号（跳过字符串内内容、正确处理嵌套对象）
+#[allow(dead_code)]
+fn js_object_to_json(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    let mut out = String::with_capacity(n);
+    while i < n {
+        let ch = chars[i];
+        // 字符串字面量内：原样复制
+        if ch == '"' || ch == '\'' {
+            let quote = ch;
+            out.push(ch);
+            i += 1;
+            while i < n {
+                let c = chars[i];
+                out.push(c);
+                if c == '\\' && i + 1 < n {
+                    i += 1;
+                    out.push(chars[i]);
+                } else if c == quote {
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        // `{` / `,` 之后可能是未加引号的 key
+        if ch == '{' || ch == ',' {
+            out.push(ch);
+            i += 1;
+            while i < n && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t') {
+                out.push(chars[i]);
+                i += 1;
+            }
+            if i < n && (chars[i].is_ascii_alphabetic() || chars[i] == '_' || chars[i] == '$') {
+                let key_start = i;
+                while i < n
+                    && (chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '$')
+                {
+                    i += 1;
+                }
+                let key: String = chars[key_start..i].iter().collect();
+                while i < n && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t') {
+                    i += 1;
+                }
+                if i < n && chars[i] == ':' {
+                    out.push('"');
+                    out.push_str(&key);
+                    out.push_str("\":");
+                    i += 1;
+                } else {
+                    out.push_str(&key);
+                }
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
+    }
+    let s = out;
+    // 剩余替换（可在加引号前整体做，此处为对齐语义补几步）
+    let re_nd = Regex::new(r#"new\s+Date\(\s*['"]([^'"]*)['"]\s*\)"#).unwrap();
+    let re_undef = Regex::new(r#"\bundefined\b"#).unwrap();
+    let re_ref = Regex::new(r#"\$R\[\d+\]\s*=\s*"#).unwrap();
+    let mut s = re_nd.replace_all(&s, r#""$1""#).into_owned();
+    s = s.replace("!0", "true").replace("!1", "false");
+    s = re_undef.replace_all(&s, "null").into_owned();
+    re_ref.replace_all(&s, "").into_owned()
+}
+
+async fn query_opencode_go(
+    workspace_id: &str,
+    auth_cookie: &str,
+) -> Result<SubscriptionQuota, String> {
+    // 抓 `/go` 仪表盘页（官方 SSR 自带 rollingUsage/weeklyUsage/monthlyUsage 的现成百分比），
+    // 比抓 /usage 抠逐条记录再聚合更简单且官方准确。对齐 opencode-go-usage 的
+    // `extract_quota_from_go_page`。
+    let url = format!("https://opencode.ai/workspace/{workspace_id}/go");
+    let client = crate::proxy::http_client::get();
+    let resp = client
+        .get(&url)
+        .header("Cookie", format!("auth={auth_cookie}"))
+        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,*/*")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("OpenCode Go 页面请求失败: {e}"))?;
+
+    let status = resp.status();
+    if status == reqwest::StatusCode::UNAUTHORIZED
+        || status == reqwest::StatusCode::FORBIDDEN
+    {
+        return Ok(coding_plan_not_found(
+            "OpenCode auth cookie 失效或未授权（请重新获取 auth cookie）",
+        ));
+    }
+    if !status.is_success() {
+        return Ok(coding_plan_not_found(&format!(
+            "OpenCode Go 页面返回 HTTP {status}"
+        )));
+    }
+    let html = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取 OpenCode Go 页面失败: {e}"))?;
+
+    // 提取 `XXXUsage:$R[n]={status:"ok",resetInSec:N,usagePercent:P}`
+    let re = Regex::new(
+        r#"(rollingUsage|weeklyUsage|monthlyUsage):\$R\[\d+\]=\{status:"ok",resetInSec:(\d+),usagePercent:(\d+)\}"#,
+    )
+    .unwrap();
+
+    let mut rolling: Option<(u64, f64)> = None;
+    let mut weekly: Option<(u64, f64)> = None;
+    let mut monthly: Option<(u64, f64)> = None;
+
+    for cap in re.captures_iter(&html) {
+        let name = &cap[1];
+        let reset: u64 = cap[2].parse().unwrap_or(0);
+        let pct: f64 = cap[3].parse().unwrap_or(0.0);
+        let ent = (reset, pct);
+        match name {
+            "rollingUsage" => rolling = Some(ent),
+            "weeklyUsage" => weekly = Some(ent),
+            "monthlyUsage" => monthly = Some(ent),
+            _ => {}
+        }
+    }
+
+    if rolling.is_none() && weekly.is_none() && monthly.is_none() {
+        return Ok(coding_plan_not_found(
+            "未能从 OpenCode Go 页面解析出用量配额（页面结构可能已变化）",
+        ));
+    }
+
+    // 重置时间 = 当前时刻 + resetInSec（转 ISO）。
+    let reset_to_iso = |reset_sec: u64| -> Option<String> {
+        millis_to_iso8601(now_millis() + (reset_sec as i64) * 1000)
+    };
+
+    let mut tiers = Vec::new();
+    if let Some((r, p)) = rolling {
+        tiers.push(QuotaTier {
+            name: TIER_FIVE_HOUR.to_string(),
+            utilization: p,
+            resets_at: reset_to_iso(r),
+            used_value_usd: None,
+            max_value_usd: None,
+        });
+    }
+    if let Some((r, p)) = weekly {
+        tiers.push(QuotaTier {
+            name: TIER_WEEKLY_LIMIT.to_string(),
+            utilization: p,
+            resets_at: reset_to_iso(r),
+            used_value_usd: None,
+            max_value_usd: None,
+        });
+    }
+    if let Some((r, p)) = monthly {
+        tiers.push(QuotaTier {
+            name: TIER_MONTHLY.to_string(),
+            utilization: p,
+            resets_at: reset_to_iso(r),
+            used_value_usd: None,
+            max_value_usd: None,
+        });
+    }
+
+    Ok(SubscriptionQuota {
+        tool: "coding_plan".to_string(),
+        credential_status: CredentialStatus::Valid,
+        credential_message: Some("OpenCode Go".to_string()),
+        success: true,
+        tiers,
+        extra_usage: None,
+        error: None,
+        queried_at: Some(now_millis()),
+    })
+}
+
+/// 从 SolidJS SSR 的 `<script>` 中提取含 `inputTokens` 的 `$R[n]=[...]` 数组，
+/// 输出逐条记录 JSON（id / timeCreated / cost 等）。
+/// 从 SolidJS SSR 脚本里提取用量记录（对齐 opencode-go-usage 的 extract_records_from_script）：
+/// 找到 `$R[n]=[` 数组起点，平衡匹配外层 `[]`，再逐个用平衡 `{}` 提取对象、清洗成 JSON。
+/// 只在 HTML 里含 `$R[n]=[`（渲染脚本）的区域解析，已实测其中含 inputTokens/cost。
+#[allow(dead_code)]
+fn extract_usage_records(html: &str) -> Vec<serde_json::Value> {
+    let chars: Vec<char> = html.chars().collect();
+    let n = chars.len();
+    let mut records = Vec::new();
+    let _ = n;
+
+    // 直接在整段 HTML 中定位每个 `{id:"usg_` 对象起点，用平衡匹配取完整对象
+    // （正确跨过嵌套 `$R[n]={plan:"lite"}` 这类子对象），再清洗成 JSON。
+    let needle = "{id:\"usg_";
+    let mut search = 0;
+    while let Some(rel) = html[search..].find(needle) {
+        let start = search + rel;
+        // 平衡匹配该对象的 `{}`
+        let (mut bdepth, mut in_str, mut str_char, mut j) = (1usize, false, ' ', start + 1);
+        while j < n && bdepth > 0 {
+            let ch = chars[j];
+            if in_str {
+                if ch == '\\' {
+                    j += 2;
+                    continue;
+                }
+                if ch == str_char {
+                    in_str = false;
+                }
+            } else if ch == '"' || ch == '\'' {
+                in_str = true;
+                str_char = ch;
+            } else if ch == '{' {
+                bdepth += 1;
+            } else if ch == '}' {
+                bdepth -= 1;
+            }
+            j += 1;
+        }
+        if bdepth == 0 {
+            let obj_text: String = chars[start..j].iter().collect();
+            let clean = js_object_to_json(&obj_text);
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&clean) {
+                if v.get("cost").is_some() || v.get("timeCreated").is_some() {
+                    records.push(v);
+                }
+            }
+            search = j;
+        } else {
+            // 括号不闭合：中止（页面结构异常）
+            break;
+        }
+    }
+
+    records
+}
+
+/// 按 opencode-go-usage 的 `calc_windows` 算法，从记录算三个窗口的已用金额（USD）。
+/// - rolling(five_hour)：近 5 小时内的记录累计
+/// - weekly(weekly_limit)：本周一(UTC 00:00) 到 now 的累计
+/// - monthly：基于「最早记录」锚定的订阅月周期内的累计
+/// cost 字段单位是 1e-8（USD），此处已统一转成 USD 金额。
+#[allow(dead_code)]
+fn opencode_windows(records: &[serde_json::Value], now: f64) -> std::collections::HashMap<&'static str, f64> {
+    use std::collections::HashMap;
+
+    // 解析所有有效记录 (ts, cost_usd)
+    let mut parsed: Vec<(f64, f64)> = Vec::new();
+    for r in records {
+        let cost = r.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let ts = r
+            .get("timeCreated")
+            .and_then(|v| v.as_str())
+            .and_then(|s| parse_date_ts(s));
+        if let Some(ts) = ts {
+            if cost > 0.0 {
+                parsed.push((ts, cost / 100_000_000.0));
+            }
+        }
+    }
+    parsed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut out = HashMap::new();
+    if parsed.is_empty() {
+        out.insert(TIER_FIVE_HOUR, 0.0);
+        out.insert(TIER_WEEKLY_LIMIT, 0.0);
+        out.insert(TIER_MONTHLY, 0.0);
+        return out;
+    }
+
+    // rolling：近 5 小时
+    let rolling_start = now - 5.0 * 3600.0;
+    let rolling_cost: f64 = parsed
+        .iter()
+        .filter(|(ts, _)| *ts >= rolling_start)
+        .map(|(_, c)| *c)
+        .sum();
+    out.insert(TIER_FIVE_HOUR, rolling_cost);
+
+    // weekly：本周一 UTC 00:00 起
+    let (wy, wm, wd) = epoch_to_ymd(now as i64);
+    let today_epoch = days_from_civil(wy, wm, wd) * 86400;
+    // 1970-01-01 is Thursday. weekday: Mon=0..Sun=6 => ((days mod 7)+3) mod 7
+    let now_days = days_from_civil(wy, wm, wd);
+    let weekday = (((now_days % 7) + 7) % 7 + 3) % 7; // Mon=0
+    let week_start = today_epoch as f64 - (weekday as f64) * 86400.0;
+    let week_end = week_start + 7.0 * 86400.0;
+    let weekly_cost: f64 = parsed
+        .iter()
+        .filter(|(ts, _)| *ts >= week_start && *ts < week_end)
+        .map(|(_, c)| *c)
+        .sum();
+    out.insert(TIER_WEEKLY_LIMIT, weekly_cost);
+
+    // monthly：订阅月锚定最早记录
+    let earliest_ts = parsed[0].0;
+    let (ey, em, ed) = epoch_to_ymd(earliest_ts as i64);
+    let eh = ((earliest_ts as i64 % 86400) / 3600) as i32;
+    let emin = ((earliest_ts as i64 % 3600) / 60) as i32;
+    let esec = (earliest_ts as i64 % 60) as i32;
+    let (m_start, m_end) = subscription_month_bounds(now as i64, ey, em, ed, eh, emin, esec);
+    let monthly_cost: f64 = parsed
+        .iter()
+        .filter(|(ts, _)| *ts >= (m_start as f64) && *ts < (m_end as f64))
+        .map(|(_, c)| *c)
+        .sum();
+    out.insert(TIER_MONTHLY, monthly_cost);
+
+    out
+}
+
+/// epoch 秒 → (年, 月, 日)（UTC）。days_from_civil 的逆运算。
+#[allow(dead_code)]
+fn epoch_to_ymd(epoch: i64) -> (i64, i64, i64) {
+    let days = epoch.div_euclid(86400);
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// 订阅月边界（对齐 _subscription_month_bounds）：以最早记录日/时/分/秒为锚，推到当前周期的起止 epoch
+/// 秒。入参 anchor_* 为最早记录的 UTC 日期/时分秒。
+#[allow(dead_code)]
+fn subscription_month_bounds(
+    now: i64,
+    anchor_y: i64,
+    anchor_m: i64,
+    anchor_d: i64,
+    anchor_h: i32,
+    anchor_min: i32,
+    anchor_sec: i32,
+) -> (i64, i64) {
+    let (ny, nm, nd) = epoch_to_ymd(now);
+    // 当前周期起始
+    let (start_y, start_m, start_d) = if nd >= anchor_d {
+        (ny, nm, anchor_d)
+    } else {
+        // 回退到上个月
+        let (py, pm) = prev_month(ny, nm);
+        let max_day = anchor_d.min(days_in_month(py, pm));
+        (py, pm, max_day)
+    };
+    // 下个周期起始
+    let (next_y, next_m) = next_month(start_y, start_m);
+    let max_day = anchor_d.min(days_in_month(next_y, next_m));
+    let end_d = max_day;
+
+    let start = days_from_civil(start_y, start_m, start_d) * 86400
+        + (anchor_h as i64) * 3600
+        + (anchor_min as i64) * 60
+        + anchor_sec as i64;
+    let end = days_from_civil(next_y, next_m, end_d) * 86400
+        + (anchor_h as i64) * 3600
+        + (anchor_min as i64) * 60
+        + anchor_sec as i64;
+    (start, end)
+}
+
+#[allow(dead_code)]
+fn prev_month(y: i64, m: i64) -> (i64, i64) {
+    if m == 1 {
+        (y - 1, 12)
+    } else {
+        (y, m - 1)
+    }
+}
+
+#[allow(dead_code)]
+fn next_month(y: i64, m: i64) -> (i64, i64) {
+    if m == 12 {
+        (y + 1, 1)
+    } else {
+        (y, m + 1)
+    }
+}
+
+#[allow(dead_code)]
+fn days_in_month(y: i64, m: i64) -> i64 {
+    match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    }
+}
+
+/// 解析 ISO8601 时间 `2026-08-15T05:42:17.000Z` → epoch 秒。
+#[allow(dead_code)]
+fn parse_date_ts(s: &str) -> Option<f64> {
+    // 简化解析：datetime -> UNIX。用 Serde json 的 DateTime 不可用，手写基本解析。
+    // 格式: YYYY-MM-DDTHH:MM:SS(.fff)?Z
+    let re = Regex::new(
+        r#"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?"#,
+    )
+    .unwrap();
+    let c = re.captures(s)?;
+    let y: f64 = c[1].parse().ok()?;
+    let mo: f64 = c[2].parse().ok()?;
+    let d: f64 = c[3].parse().ok()?;
+    let h: f64 = c[4].parse().ok()?;
+    let mi: f64 = c[5].parse().ok()?;
+    let se: f64 = c[6].parse().ok()?;
+    // 用 days-math 近似：1970-01-01 起算（简化，仅用于窗口比较，误差<一天）。
+    let days = days_from_civil(y as i64, mo as i64, d as i64);
+    Some(days as f64 * 86400.0 + h * 3600.0 + mi * 60.0 + se)
+}
+
+/// 公历日期 → 自 1970-01-01 的天数（Howard Hinnant 算法）。
+#[allow(dead_code)]
+fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146097 + doe - 719468
 }
 
 #[cfg(test)]
@@ -2012,6 +2490,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .await;
         let err = result.expect_err("send 失败必须走 Err 通道（瞬时，前端 reject 后重试）");
@@ -2023,7 +2503,7 @@ mod tests {
         ensure_no_proxy_for_loopback();
         let (base_url, handle) = spawn_once_server(None);
 
-        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None).await;
+        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
         let err = result.expect_err("响应前连接中断必须走 Err 通道（瞬时）");
         assert!(err.contains("Network error"), "err={err}");
         handle.join().expect("server thread");
@@ -2040,7 +2520,7 @@ mod tests {
                 .to_string(),
         ));
 
-        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None).await;
+        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
         let err = result.expect_err("读体中断必须走 Err 通道（瞬时，前端 reject 后重试）");
         assert!(err.contains("Failed to read response"), "err={err}");
         handle.join().expect("server thread");
@@ -2051,7 +2531,7 @@ mod tests {
         ensure_no_proxy_for_loopback();
         let (base_url, handle) = spawn_once_server(Some(http_response("401 Unauthorized", "{}")));
 
-        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None)
+        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None)
             .await
             .expect("鉴权失败是确定性失败，必须保持 Ok(success:false) 展示文案");
         assert!(!quota.success);
@@ -2067,7 +2547,7 @@ mod tests {
         let (base_url, handle) =
             spawn_once_server(Some(http_response("429 Too Many Requests", "slow down")));
 
-        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None)
+        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None)
             .await
             .expect("非 2xx 保持 Ok(success:false)，状态码留在文案里交前端分类");
         assert!(!quota.success);
@@ -2084,7 +2564,7 @@ mod tests {
         // 完整读到响应体但不是 JSON → is_decode → 确定性解析失败
         let (base_url, handle) = spawn_once_server(Some(http_response("200 OK", "not-json")));
 
-        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None)
+        let quota = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None)
             .await
             .expect("完整但非法的响应体是确定性失败，必须保持 Ok(success:false)");
         assert!(!quota.success);
@@ -2151,6 +2631,8 @@ mod tests {
                 Some("zhipu_team"),
                 org,
                 project,
+                None,
+                None,
             )
             .await
             .expect("凭据缺失是确定性失败，保持 Ok(success:false)");
@@ -2168,6 +2650,8 @@ mod tests {
             None,
             None,
             Some("Zhipu_Team"),
+            None,
+            None,
             None,
             None,
         )

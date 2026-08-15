@@ -610,6 +610,9 @@ async fn query_provider_usage_inner(
         let coding_plan_provider = usage_script.and_then(|s| s.coding_plan_provider.clone());
         let team_organization_id = usage_script.and_then(|s| s.team_organization_id.clone());
         let team_project_id = usage_script.and_then(|s| s.team_project_id.clone());
+        // OpenCode Go：workspace_id + auth_cookie（网页登录态抓 /usage 页用）
+        let workspace_id = usage_script.and_then(|s| s.workspace_id.clone());
+        let auth_cookie = usage_script.and_then(|s| s.auth_cookie.clone());
 
         let quota = crate::services::coding_plan::get_coding_plan_quota(
             &base_url,
@@ -619,6 +622,8 @@ async fn query_provider_usage_inner(
             coding_plan_provider.as_deref(),
             team_organization_id.as_deref(),
             team_project_id.as_deref(),
+            workspace_id.as_deref(),
+            auth_cookie.as_deref(),
         )
         .await
         .map_err(|e| format!("Failed to query coding plan: {e}"))?;

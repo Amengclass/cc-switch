@@ -11,6 +11,9 @@ pub async fn get_coding_plan_quota(
     coding_plan_provider: Option<String>,
     team_organization_id: Option<String>,
     team_project_id: Option<String>,
+    // OpenCode Go：workspace_id + auth_cookie（抓 /usage 页用）
+    workspace_id: Option<String>,
+    auth_cookie: Option<String>,
 ) -> Result<SubscriptionQuota, String> {
     crate::services::coding_plan::get_coding_plan_quota(
         &base_url,
@@ -20,6 +23,8 @@ pub async fn get_coding_plan_quota(
         coding_plan_provider.as_deref(),
         team_organization_id.as_deref(),
         team_project_id.as_deref(),
+        workspace_id.as_deref(),
+        auth_cookie.as_deref(),
     )
     .await
 }

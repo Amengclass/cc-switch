@@ -18,6 +18,9 @@ export const subscriptionApi = {
     codingPlanProvider?: string,
     teamOrganizationId?: string,
     teamProjectId?: string,
+    // OpenCode Go：workspace_id + auth_cookie（抓 /usage 页用）
+    workspaceId?: string,
+    authCookie?: string,
   ): Promise<SubscriptionQuota> =>
     invoke("get_coding_plan_quota", {
       baseUrl,
@@ -27,6 +30,8 @@ export const subscriptionApi = {
       codingPlanProvider,
       teamOrganizationId,
       teamProjectId,
+      workspaceId,
+      authCookie,
     }),
   getBalance: (
     baseUrl: string,

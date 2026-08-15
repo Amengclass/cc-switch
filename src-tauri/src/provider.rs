@@ -300,6 +300,14 @@ pub struct UsageScript {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "teamProjectId")]
     pub team_project_id: Option<String>,
+    /// OpenCode Go：workspace ID（用量查询抓取目标 /workspace/{id}/usage）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "workspaceId")]
+    pub workspace_id: Option<String>,
+    /// OpenCode Go：网页登录态 auth cookie（抓 /usage 页用，明文存 DB 对齐 coding_plan 惯例）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "authCookie")]
+    pub auth_cookie: Option<String>,
 }
 
 /// 用量数据

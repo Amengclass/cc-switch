@@ -66,6 +66,8 @@ export interface UsageScript {
   secretAccessKey?: string; // 火山方舟 SecretAccessKey
   teamOrganizationId?: string; // 智谱团队套餐组织 ID（请求头 bigmodel-organization）
   teamProjectId?: string; // 智谱团队套餐项目 ID（请求头 bigmodel-project）
+  workspaceId?: string; // OpenCode Go：workspace ID（抓 /workspace/{id}/usage）
+  authCookie?: string; // OpenCode Go：网页登录态 auth cookie（抓 /usage 页）
   codingPlanProvider?: string; // Coding Plan 供应商标识（如 "kimi", "zhipu", "minimax"）
   autoQueryInterval?: number; // 自动查询间隔（单位：分钟，0 表示禁用）
   autoIntervalMinutes?: number; // 自动查询间隔（分钟）- 别名字段
