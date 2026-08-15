@@ -210,6 +210,15 @@ function App() {
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
+
+  // 悬浮球「跟随最近使用」= 跟随主窗口当前 app tab：切 app 即同步记录 last_app，
+  // 而非只在 provider-switched（供应商切换）时更新——否则球会停在上次切供应商
+  // 的 app。置顶（pin）时 resolve 仍优先 floating_pin_app，这里记录 last_app 无碍。
+  useEffect(() => {
+    void invoke("floating_record_active_app", { appType: activeApp }).catch(
+      () => {},
+    );
+  }, [activeApp]);
   const [currentView, setCurrentView] = useState<View>(getInitialView);
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");

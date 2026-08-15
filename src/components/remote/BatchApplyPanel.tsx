@@ -518,7 +518,10 @@ export function BatchApplyPanel({
                     </span>
                   )}
                   {cs == null && (
-                    <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground/60" />
+                    <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground/70">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      检测中
+                    </span>
                   )}
                   {sshDown && (
                     <span className="ml-auto shrink-0 text-xs text-red-500">
@@ -534,9 +537,10 @@ export function BatchApplyPanel({
                 {expanded.has(host.id) && (
                   <div className="space-y-1 border-l border-border/60 pl-4 pb-2">
                     {hostLoading ? (
-                      /* 检测中：未知能否应用，不可选 */
-                      <div className="px-2 py-1 text-xs text-muted-foreground">
-                        检测中…
+                      /* 检测中：明确告知正在尝试连接/拉容器，配合主行转圈 */
+                      <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        检测中
                       </div>
                     ) : sshDown ? (
                       /* SSH 层失败：宿主机本体与容器都不可用，不可选 */

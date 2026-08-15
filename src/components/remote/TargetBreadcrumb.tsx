@@ -147,15 +147,25 @@ export function TargetBreadcrumb({
                 value={remoteContainerId}
                 onValueChange={setRemoteContainerId}
               >
-                <DropdownMenuRadioItem value="">
-                  {t("remote.targetHost", { defaultValue: "宿主机" })}
+                <DropdownMenuRadioItem value="" className="pr-2">
+                  <span className="flex w-full items-center justify-between gap-2">
+                    {t("remote.targetHost", { defaultValue: "宿主机" })}
+                    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-primary/15 text-primary">
+                      宿主机
+                    </span>
+                  </span>
                 </DropdownMenuRadioItem>
                 {containers.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
                     {containers.map((c) => (
-                      <DropdownMenuRadioItem key={c} value={c}>
-                        {c}
+                      <DropdownMenuRadioItem key={c} value={c} className="pr-2">
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate">{c}</span>
+                          <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted/50 text-muted-foreground">
+                            容器
+                          </span>
+                        </span>
                       </DropdownMenuRadioItem>
                     ))}
                   </>

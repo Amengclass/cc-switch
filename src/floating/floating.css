@@ -117,15 +117,32 @@ body {
 .ball:active {
   transform: scale(0.97);
 }
-/* 路由纳管中：球边框转绿 + 极浅绿底（与悬浮面板行同款审美，无动画），
-   当前 app 开启路由接管时加 route-service-live 类；边框色也随 --ball-alpha 透明度。 */
+/* 路由纳管中：球的【白底】保持 .ball 原本实色，仅在此基础上叠一层很浅的绿 tint，
+   再加绿色边框。浅绿用 background-image 叠在 background-color 之上（不替换白底），
+   且随 --ball-alpha——不透明度 100% 时是「白底 + 淡淡绿」，透明度调低才随之更淡。 */
 .ball.route-service-live {
   border-color: rgb(16 185 129 / var(--ball-alpha)); /* emerald-500 */
-  background: rgba(16, 185, 129, 0.06);
+  background-image: linear-gradient(
+    to right,
+    rgb(16 185 129 / calc(var(--ball-alpha) * 0.06)),
+    rgb(16 185 129 / calc(var(--ball-alpha) * 0.02))
+  );
 }
 .dark .ball.route-service-live {
   border-color: rgb(52 211 153 / var(--ball-alpha)); /* emerald-400 */
-  background: rgba(16, 185, 129, 0.1);
+  background-image: linear-gradient(
+    to right,
+    rgb(52 211 153 / calc(var(--ball-alpha) * 0.07)),
+    rgb(52 211 153 / calc(var(--ball-alpha) * 0.03))
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  .ball.route-service-live {
+    border-color: #10b981;
+  }
+  .dark .ball.route-service-live {
+    border-color: #34d399;
+  }
 }
 /* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中，
    间距由 .ball 的 gap:6px 提供，不再额外 margin） */
