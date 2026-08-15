@@ -34,11 +34,13 @@ const TOOL_SEARCH_PROXY_NAME: &str = "tool_search";
 /// thinking should not be enabled (to avoid accidentally swallowing
 /// temperature/top_p), keeping normal sampling.
 pub(crate) fn effort_to_thinking_budget(effort: &str) -> Option<u64> {
+    // ultra 是 Codex 扩展档位，钳到 max 同档——落进 None 会让"选最深思考"
+    // 反而关掉 extended thinking。
     match effort.trim().to_ascii_lowercase().as_str() {
         "minimal" | "low" => Some(2048),
         "medium" => Some(8192),
         "high" => Some(16384),
-        "xhigh" | "max" => Some(24576),
+        "xhigh" | "max" | "ultra" => Some(24576),
         _ => None,
     }
 }
@@ -48,7 +50,7 @@ fn codex_effort_to_anthropic(effort: &str) -> Option<&'static str> {
         "minimal" | "low" => Some("low"),
         "medium" => Some("medium"),
         "high" => Some("high"),
-        "xhigh" | "max" => Some("max"),
+        "xhigh" | "max" | "ultra" => Some("max"),
         _ => None,
     }
 }

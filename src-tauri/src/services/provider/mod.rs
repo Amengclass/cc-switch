@@ -283,6 +283,8 @@ mod tests {
             secret_access_key: Some("sk-test".to_string()),
             team_organization_id: None,
             team_project_id: None,
+            workspace_id: None,
+            auth_cookie: None,
         }
     }
 

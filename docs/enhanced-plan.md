@@ -343,7 +343,7 @@
 
 | 优先级 | 事项 |
 |---|---|
-| 中 | ~~远程 Sessions per-app~~ ✅ 已完成(2026-08-08 核实):claude/grokbuild/codex/gemini/openclaw + hermes/opencode(SQLite hybrid:远端 sqlite3 探测直查 / 下载 db 回本机读,commands.rs:1369-1538) |
+| 中 | ~~远程 Sessions per-app~~ ✅ 已完成实现(2026-08-08):claude/grokbuild/codex/gemini/openclaw + hermes/opencode(SQLite hybrid:远端 sqlite3 探测直查 / 下载 db 回本机读,commands.rs:1369-1538)。**实测验证状态(2026-08-14):claude ✅ codex ✅ 已实测确认;gemini/grokbuild/openclaw/hermes/opencode 实现已完成但待实测** |
 | 中 | ~~远程 Prompts per-app~~ ✅ 已完成(2026-08-07,按本机 prompt_files 矩阵映射 live 文件,claude 外 per-app SSOT) |
 | 低 | ~~远端 Skills 安装默认启用 app 硬编码 claude~~ ✅ 已完成(2026-08-07,加 app 参数默认启用当前所在 app,对齐本机) |
 | 中 | ~~`get_remote_current_provider` 兜底 per-app~~ ✅ 已完成(2026-08-07,claude/codex/gemini/grokbuild;additive 无当前概念跳过) |
@@ -476,7 +476,7 @@
 |---|---|
 | ~~远程切换扩展到 gemini / grok~~ | ✅ 已完成(2026-08-07) |
 | ~~远程切换扩展到 opencode / openclaw / hermes~~ | ✅ 已完成(2026-08-07) |
-| 远程 Sessions per-app | 当前仅 claude(`~/.claude/projects`);codex 等按各自会话目录扩展 |
+| 远程 Sessions per-app | ✅ 已完成实现(2026-08-08):claude(`~/.claude/projects`)、grokbuild(`~/.grok/sessions`)、codex(`~/.codex`)、gemini(`~/.gemini/tmp`)、openclaw(`~/.openclaw/agents`)按各自会话目录 read_dir;hermes(`~/.hermes/state.db`)/opencode(`~/.local/share/opencode/opencode.db`)走 SQLite hybrid(commands.rs:1857-1863)。**实测:claude/codex ✅;gemini/grokbuild/openclaw/hermes/opencode 待实测(自查命令见本文档 346 行旁注)** |
 | `get_remote_current_provider` 兜底 per-app | 当前仅 claude 有 base_url 兜底;其他 app 只有持久化记录,老数据(本应用切换前已生效的远端)恢复现场缺失 |
 | 安装命令 `APP_INSTALL_CMDS` 包名校对 | grok/openclaw/hermes 等包名按常见 npm 名填写,需按各 CLI 官方文档核对 |
 
