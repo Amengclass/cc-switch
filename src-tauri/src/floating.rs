@@ -624,7 +624,9 @@ pub struct FloatingEntry {
     pub takeover_active: bool,
 }
 
-const UNKNOWN_PROVIDER: &str = "未设置";
+// 无供应商时返回空字符串：是否「未设置」由前端根据 has_provider 走 i18n，
+// 避免后端硬编码中文「未设置」导致多语言下也显示中文。
+const UNKNOWN_PROVIDER: &str = "";
 
 fn app_label(app_type: &AppType) -> &'static str {
     match app_type {
