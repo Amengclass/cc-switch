@@ -936,7 +936,11 @@
     "targetActiveHint": "プロバイダー / MCP / Prompts / Skills / セッションはこのホストに適用されます",
     "refreshStatus": "更新",
     "refreshStatusTitle": "インストール状態を更新",
-    "batchApply": "一括適用"
+    "batchApply": "一括適用",
+    "targetLocal": "ローカル",
+    "targetHost": "ホスト",
+    "probing": "検出中",
+    "container": "コンテナ"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

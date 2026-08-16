@@ -936,7 +936,11 @@
     "targetActiveHint": "供应商 / MCP / Prompts / Skills / 会话 作用于该主机",
     "refreshStatus": "刷新",
     "refreshStatusTitle": "刷新安装状态",
-    "batchApply": "批量应用"
+    "batchApply": "批量应用",
+    "targetLocal": "本机",
+    "targetHost": "宿主机",
+    "probing": "检测中",
+    "container": "容器"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

@@ -936,7 +936,11 @@
     "targetActiveHint": "Providers / MCP / Prompts / Skills / Sessions apply to this host",
     "refreshStatus": "Refresh",
     "refreshStatusTitle": "Refresh install status",
-    "batchApply": "Batch Apply"
+    "batchApply": "Batch Apply",
+    "targetLocal": "Local",
+    "targetHost": "Host",
+    "probing": "Probing",
+    "container": "Container"
   },
   "grokBuild": {
     "apiBackend": "API backend",

@@ -937,7 +937,11 @@
     "targetActiveHint": "供應商 / MCP / Prompts / Skills / 會話 作用於該主機",
     "refreshStatus": "重新整理",
     "refreshStatusTitle": "重新整理安裝狀態",
-    "batchApply": "批次套用"
+    "batchApply": "批次套用",
+    "targetLocal": "本機",
+    "targetHost": "宿主機",
+    "probing": "偵測中",
+    "container": "容器"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

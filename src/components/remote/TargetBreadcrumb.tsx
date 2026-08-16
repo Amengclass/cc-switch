@@ -68,7 +68,7 @@ export function TargetBreadcrumb({
       return (
         <Loader2
           className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
-          aria-label="检测中"
+          aria-label={t("remote.probing")}
         />
       );
     }
@@ -149,9 +149,9 @@ export function TargetBreadcrumb({
               >
                 <DropdownMenuRadioItem value="" className="pr-2">
                   <span className="flex w-full items-center justify-between gap-2">
-                    {t("remote.targetHost", { defaultValue: "宿主机" })}
+                    {t("remote.targetHost")}
                     <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-primary/15 text-primary">
-                      宿主机
+                      {t("remote.targetHost")}
                     </span>
                   </span>
                 </DropdownMenuRadioItem>
@@ -163,7 +163,7 @@ export function TargetBreadcrumb({
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
                           <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted/50 text-muted-foreground">
-                            容器
+                            {t("remote.container")}
                           </span>
                         </span>
                       </DropdownMenuRadioItem>
