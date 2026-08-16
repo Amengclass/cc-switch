@@ -40,7 +40,7 @@ export function RemoteProviderSettings({
       </div>
       <p className="text-xs text-muted-foreground -mt-2">
         {t("settings.section.remoteHint", {
-          defaultValue: "针对远端宿主机/容器的供应商面板行为",
+          defaultValue: "针对 SSH 远端宿主机/容器的供应商面板行为",
         })}
       </p>
 
@@ -53,13 +53,13 @@ export function RemoteProviderSettings({
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">
               {t("settings.remote.featureEnabled.title", {
-                defaultValue: "启用远端功能",
+                defaultValue: "启用 SSH 远端功能",
               })}
             </p>
             <p className="text-xs text-muted-foreground">
               {t("settings.remote.featureEnabled.description", {
                 defaultValue:
-                  "开启使用远端宿主机/容器的接管、批量应用等增强功能；关闭则还原原生 cc-switch，隐藏所有远端入口。",
+                  "开启使用 SSH 远端宿主机/容器的接管、批量应用等增强功能；关闭则还原原生 cc-switch，隐藏所有 SSH 远端入口。",
               })}
             </p>
           </div>
@@ -68,7 +68,7 @@ export function RemoteProviderSettings({
           checked={featureEnabled}
           onCheckedChange={onFeatureEnabledChange}
           aria-label={t("settings.remote.featureEnabled.title", {
-            defaultValue: "启用远端功能",
+            defaultValue: "启用 SSH 远端功能",
           })}
         />
       </div>
@@ -82,13 +82,13 @@ export function RemoteProviderSettings({
           <div className="space-y-1">
             <p className="text-sm font-medium leading-none">
               {t("settings.remote.autoImportDefault.title", {
-                defaultValue: "远端自动读入当前配置",
+                defaultValue: "SSH 远端自动读入当前配置",
               })}
             </p>
             <p className="text-xs text-muted-foreground">
               {t("settings.remote.autoImportDefault.description", {
                 defaultValue:
-                  "开启后将实时展示远端机器的当前应用配置（default 卡）；关闭后不再主动拉取最新配置，界面刷新更快。",
+                  "开启后将实时展示 SSH 远端机器的当前应用配置（default 卡）；关闭后不再主动拉取最新配置，界面刷新更快。",
               })}
             </p>
             <p className="text-[11px] leading-snug text-muted-foreground/70">
