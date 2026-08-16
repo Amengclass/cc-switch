@@ -49,7 +49,10 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { useUsageCacheBridge } from "@/hooks/useUsageCacheBridge";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
-import { useScanUnmanagedSkills } from "@/hooks/useSkills";
+import {
+  useScanUnmanagedSkills,
+  useRemoteUnmanagedSkillsQuery,
+} from "@/hooks/useSkills";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { isTextEditableTarget } from "@/utils/domUtils";
 import { deepClone } from "@/utils/deepClone";
@@ -579,7 +582,16 @@ function App() {
   // 订阅未管理 Skill 的共享缓存（实际扫描由 UnifiedSkillsPanel 进入页面时触发）。
   // 这里 enabled 默认 false，仅用于「导入」按钮的绿点提示，不主动发起扫描。
   const { data: unmanagedSkills } = useScanUnmanagedSkills();
-  const hasUnmanagedSkills = (unmanagedSkills?.length ?? 0) > 0;
+  // 远端目标（宿主机/容器）：圆点指示所选目标可导入技能数，而非本机。
+  // 仅订阅共享缓存（enabled:false，扫描由 UnifiedSkillsPanel 挂载时发起，对齐本机）。
+  const isRemoteSkillsTarget = Boolean(remoteTargetId);
+  const { data: remoteUnmanagedSkills } = useRemoteUnmanagedSkillsQuery(
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
+  );
+  const hasUnmanagedSkills =
+    ((isRemoteSkillsTarget ? remoteUnmanagedSkills : unmanagedSkills)?.length ??
+      0) > 0;
   const addActionButtonClass =
     "bg-orange-500 hover:bg-orange-600 dark:bg-orange-500 dark:hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30 dark:shadow-orange-500/40 rounded-full w-8 h-8";
 

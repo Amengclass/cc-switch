@@ -25,6 +25,7 @@ import {
   useToggleRemoteSkillApp,
   useUninstallSkill,
   useScanUnmanagedSkills,
+  useRemoteUnmanagedSkillsQuery,
   useImportSkillsFromApps,
   useInstallSkillsFromZip,
   useCheckSkillUpdates,
@@ -36,7 +37,7 @@ import type { AppId } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
-import { scanRemoteUnmanagedSkills, importRemoteSkill } from "@/lib/api/remote";
+import { importRemoteSkill } from "@/lib/api/remote";
 import { toast } from "sonner";
 import { SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
@@ -155,6 +156,13 @@ const UnifiedSkillsPanel = React.forwardRef<
     // 远端模式下也扫描本机未管理技能（"导入已有"会部署到远端）
     const { data: unmanagedSkills, refetch: scanUnmanaged } =
       useScanUnmanagedSkills({ enabled: true });
+    // 对齐本机：远端目标下挂载时自动扫一次「当前所选目标」的未管理技能。
+    // query key 精确到 host+container，App「导入」圆点订阅同一 key；切换目标即自动重扫。
+    const { refetch: scanRemoteUnmanaged } = useRemoteUnmanagedSkillsQuery(
+      isRemote && remoteTargetId ? remoteTargetId : undefined,
+      isRemote ? remoteContainerId : undefined,
+      { enabled: isRemote && Boolean(remoteTargetId) },
+    );
     const importMutation = useImportSkillsFromApps(
       remoteTargetId,
       remoteContainerId,
@@ -417,11 +425,9 @@ const UnifiedSkillsPanel = React.forwardRef<
           t("skills.scanning", { defaultValue: "正在扫描..." }),
         );
         if (isRemote && remoteTargetId) {
-          // 远端：扫描远端文件系统
-          const remoteUnmanaged = await scanRemoteUnmanagedSkills(
-            remoteTargetId,
-            remoteContainerId || undefined,
-          );
+          // 远端：扫描远端文件系统（refetch 当前目标的共享 key，对齐本机 scanUnmanaged）
+          const result = await scanRemoteUnmanaged();
+          const remoteUnmanaged = result.data ?? [];
           if (remoteUnmanaged.length === 0) {
             toast.success(t("skills.noUnmanagedFound"), { closeButton: true });
             return;
@@ -511,6 +517,16 @@ const UnifiedSkillsPanel = React.forwardRef<
             );
             // 后台拉取完整元数据
             queryClient.invalidateQueries({ queryKey: installedKey });
+            // 刷新当前目标「可导入技能」圆点（key 与 useRemoteUnmanagedSkillsQuery 一致，
+            // 精确到 host + container，不误伤其他目标）
+            queryClient.invalidateQueries({
+              queryKey: [
+                "skills",
+                "unmanaged-remote",
+                remoteTargetId,
+                remoteContainerId ?? "__host__",
+              ],
+            });
             toast.success(
               t("skills.importSuccessRemote", {
                 defaultValue: "已将 {{count}} 个技能导入远端",

@@ -21,6 +21,7 @@ import {
   installRemoteSkillFromDiscoverable,
   installRemoteSkillsFromZip,
   listRemoteSkills,
+  scanRemoteUnmanagedSkills,
   toggleRemoteSkillApp,
 } from "@/lib/api/remote";
 import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
@@ -428,6 +429,30 @@ export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
     queryKey: ["skills", "unmanaged"],
     queryFn: () => skillsApi.scanUnmanaged(),
     enabled: options?.enabled ?? false,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * 远端未管理技能查询。queryKey 精确到 host + container，切换目标互不干扰，
+ * 只反映「当前选择的那一个目标」上可导入的技能数（对齐本机 useScanUnmanagedSkills）。
+ * 传 { enabled: true } 时在当前目标下主动扫一次，供「导入」按钮绿点使用。
+ */
+export function useRemoteUnmanagedSkillsQuery(
+  hostId?: string,
+  container?: string,
+  options?: { enabled?: boolean },
+) {
+  const containerKey = container ?? "__host__";
+  return useQuery({
+    queryKey: ["skills", "unmanaged-remote", hostId, containerKey],
+    queryFn: () =>
+      scanRemoteUnmanagedSkills(
+        hostId!,
+        containerKey === "__host__" ? undefined : containerKey,
+      ),
+    enabled: Boolean(hostId) && (options?.enabled ?? false),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   });
