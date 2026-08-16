@@ -328,6 +328,21 @@
     "tabAuth": "驗證",
     "tabAdvanced": "進階",
     "tabProxy": "路由",
+    "section": {
+      "remote": "SSH 遠端設定"
+    },
+    "remoteHint": "針對 SSH 遠端宿主機/容器的供應商面板行為",
+    "remote": {
+      "featureEnabled": {
+        "title": "啟用 SSH 遠端功能",
+        "description": "開啟使用 SSH 遠端宿主機/容器的接管、批次套用等增強功能；關閉則還原原生 cc-switch，隱藏所有 SSH 遠端入口。"
+      },
+      "autoImportDefault": {
+        "title": "SSH 遠端自動讀入目前設定",
+        "description": "開啟後將即時展示 SSH 遠端機器的目前應用設定（default 卡）；關閉後不再主動拉取最新設定，介面重新整理更快。",
+        "note": "註：此設定僅對 Claude、Codex、Gemini、Grok Build 生效，OpenCode、OpenClaw、Hermes 始終跟隨目前應用。"
+      }
+    },
     "authCenter": {
       "title": "OAuth 驗證中心",
       "description": "在 Claude Code 中使用您的其他訂閱，請注意合規風險。",

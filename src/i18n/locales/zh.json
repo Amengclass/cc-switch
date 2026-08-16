@@ -328,6 +328,21 @@
     "tabAuth": "认证",
     "tabAdvanced": "高级",
     "tabProxy": "路由",
+    "section": {
+      "remote": "SSH远端设置"
+    },
+    "remoteHint": "针对 SSH 远端宿主机/容器的供应商面板行为",
+    "remote": {
+      "featureEnabled": {
+        "title": "启用 SSH 远端功能",
+        "description": "开启使用 SSH 远端宿主机/容器的接管、批量应用等增强功能；关闭则还原原生 cc-switch，隐藏所有 SSH 远端入口。"
+      },
+      "autoImportDefault": {
+        "title": "SSH 远端自动读入当前配置",
+        "description": "开启后将实时展示 SSH 远端机器的当前应用配置（default 卡）；关闭后不再主动拉取最新配置，界面刷新更快。",
+        "note": "注：该设置仅对 Claude、Codex、Gemini、Grok Build 生效，OpenCode、OpenClaw、Hermes 始终跟随当前应用。"
+      }
+    },
     "authCenter": {
       "title": "OAuth 认证中心",
       "description": "在 Claude Code 中使用您的其他订阅，请注意合规风险。",

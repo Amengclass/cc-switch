@@ -328,6 +328,21 @@
     "tabAuth": "認証",
     "tabAdvanced": "詳細",
     "tabProxy": "ルーティング",
+    "section": {
+      "remote": "SSH リモート設定"
+    },
+    "remoteHint": "SSH リモートホスト/コンテナのプロバイダーパネルの動作",
+    "remote": {
+      "featureEnabled": {
+        "title": "SSH リモート機能を有効化",
+        "description": "SSH リモートホスト/コンテナのテイクオーバー、一括適用などの拡張機能を有効にします。オフにするとネイティブ cc-switch に戻り、すべての SSH リモートエントリを非表示にします。"
+      },
+      "autoImportDefault": {
+        "title": "SSH リモートの現在の設定を自動読み込み",
+        "description": "有効にすると、リモートマシンの現在のアプリ設定（default カード）をリアルタイム表示します。オフにすると最新設定を更新せず、UI を高速に更新します。",
+        "note": "注：この設定は Claude、Codex、Gemini、Grok Build にのみ適用されます。OpenCode、OpenClaw、Hermes は常に現在のアプリに追従します。"
+      }
+    },
     "authCenter": {
       "title": "OAuth 認証センター",
       "description": "Claude Code で他のサブスクリプションをご利用いただけます。コンプライアンスリスクにご注意ください。",

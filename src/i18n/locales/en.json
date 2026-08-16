@@ -328,6 +328,21 @@
     "tabAuth": "Auth",
     "tabAdvanced": "Advanced",
     "tabProxy": "Routing",
+    "section": {
+      "remote": "SSH Remote Settings"
+    },
+    "remoteHint": "Behavior of the provider panel for SSH remote hosts/containers",
+    "remote": {
+      "featureEnabled": {
+        "title": "Enable SSH Remote Features",
+        "description": "Enable takeover, batch apply and other enhanced features for SSH remote hosts/containers; turn off to restore native cc-switch and hide all SSH remote entries."
+      },
+      "autoImportDefault": {
+        "title": "Auto-read current config from SSH remote",
+        "description": "When enabled, the default card shows the remote machine's current app config in real time; when off, it no longer actively pulls the latest config so the UI refreshes faster.",
+        "note": "Note: this setting only applies to Claude, Codex, Gemini, Grok Build; OpenCode, OpenClaw, Hermes always follow the current app."
+      }
+    },
     "authCenter": {
       "title": "OAuth Authentication Center",
       "description": "Use your other subscriptions in Claude Code — please be mindful of compliance risks.",
