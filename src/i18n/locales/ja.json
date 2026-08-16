@@ -1054,7 +1054,17 @@
     "selectTargetsHint": "ターゲットを選択・ホストをチェックするとそのコンテナも含まれます",
     "selected": "選択済み",
     "selectedCount": "{{count}} 個のターゲットを選択",
-    "noContainer": "コンテナなし（または利用不可）"
+    "noContainer": "コンテナなし（または利用不可）",
+    "forApp": "アプリ",
+    "containerCount": "コンテナ {{count}}",
+    "probing": "検出中",
+    "cannotConnect": "接続できません",
+    "containerUnavailable": "コンテナを利用できません",
+    "cannotConnectHost": "このホストに接続できません（SSH 接続失敗）、適用不可",
+    "clear": "クリア",
+    "resultTitle": "実行結果",
+    "succeeded": "成功 {{count}}",
+    "failedCount": "失敗 {{count}}"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

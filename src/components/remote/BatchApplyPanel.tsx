@@ -317,7 +317,7 @@ export function BatchApplyPanel({
               <span className="whitespace-nowrap">{appDisplayName}</span>
             </span>
             <span className="whitespace-nowrap text-sm text-muted-foreground">
-              应用
+              {t("batchApply.forApp")}
             </span>
             <select
               value={providerId}
@@ -397,7 +397,7 @@ export function BatchApplyPanel({
                     onClick={clearSelected}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
-                    清空
+                    {t("batchApply.clear")}
                   </button>
                 </div>
                 <div className="max-h-[40vh] overflow-y-auto p-2">
@@ -514,23 +514,23 @@ export function BatchApplyPanel({
                   </button>
                   {cs != null && cs.length > 0 && (
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      {cs.length} 容器
+                      {t("batchApply.containerCount", { count: cs.length })}
                     </span>
                   )}
                   {cs == null && (
                     <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground/70">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      检测中
+                      {t("batchApply.probing")}
                     </span>
                   )}
                   {sshDown && (
                     <span className="ml-auto shrink-0 text-xs text-red-500">
-                      无法连接
+                      {t("batchApply.cannotConnect")}
                     </span>
                   )}
                   {!sshDown && hostErrors[host.id] === "docker" && (
                     <span className="ml-auto shrink-0 text-xs text-amber-500">
-                      容器不可用
+                      {t("batchApply.containerUnavailable")}
                     </span>
                   )}
                 </div>
@@ -540,12 +540,12 @@ export function BatchApplyPanel({
                       /* 检测中：明确告知正在尝试连接/拉容器，配合主行转圈 */
                       <div className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
                         <Loader2 className="h-3 w-3 animate-spin" />
-                        检测中
+                        {t("batchApply.probing")}
                       </div>
                     ) : sshDown ? (
                       /* SSH 层失败：宿主机本体与容器都不可用，不可选 */
                       <div className="px-2 py-1 text-xs text-red-500">
-                        无法连接该主机（SSH 连接失败），不可应用
+                        {t("batchApply.cannotConnectHost")}
                       </div>
                     ) : (
                       <>
@@ -592,12 +592,12 @@ export function BatchApplyPanel({
       {results.length > 0 && (
         <div className="glass rounded-xl p-4 border border-white/10 space-y-1 flex-shrink-0">
           <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground/60">
-            执行结果
+            {t("batchApply.resultTitle")}
             <span className="font-medium normal-case text-emerald-500">
-              成功 {results.filter((r) => r.status === "ok").length}
+              {t("batchApply.succeeded", { count: results.filter((r) => r.status === "ok").length })}
             </span>
             <span className="font-medium normal-case text-red-500">
-              失败 {results.filter((r) => r.status === "fail").length}
+              {t("batchApply.failedCount", { count: results.filter((r) => r.status === "fail").length })}
             </span>
           </div>
           <div className="max-h-[26vh] space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">

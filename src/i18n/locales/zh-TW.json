@@ -1055,7 +1055,17 @@
     "selectTargetsHint": "選落點 · 勾整台 = 含其容器",
     "selected": "已選",
     "selectedCount": "已選 {{count}} 個落點",
-    "noContainer": "無容器（或不可用）"
+    "noContainer": "無容器（或不可用）",
+    "forApp": "應用",
+    "containerCount": "{{count}} 容器",
+    "probing": "偵測中",
+    "cannotConnect": "無法連接",
+    "containerUnavailable": "容器不可用",
+    "cannotConnectHost": "無法連接該主機（SSH 連接失敗），不可應用",
+    "clear": "清空",
+    "resultTitle": "執行結果",
+    "succeeded": "成功 {{count}}",
+    "failedCount": "失敗 {{count}}"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

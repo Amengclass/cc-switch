@@ -1054,7 +1054,17 @@
     "selectTargetsHint": "Select targets · checking a host includes its containers",
     "selected": "Selected",
     "selectedCount": "{{count}} targets selected",
-    "noContainer": "No container (or unavailable)"
+    "noContainer": "No container (or unavailable)",
+    "forApp": "App",
+    "containerCount": "{{count}} containers",
+    "probing": "Probing",
+    "cannotConnect": "Cannot connect",
+    "containerUnavailable": "Containers unavailable",
+    "cannotConnectHost": "Cannot connect to this host (SSH connection failed), not applicable",
+    "clear": "Clear",
+    "resultTitle": "Results",
+    "succeeded": "Success {{count}}",
+    "failedCount": "Failed {{count}}"
   },
   "grokBuild": {
     "apiBackend": "API backend",
