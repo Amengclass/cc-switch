@@ -6,6 +6,8 @@ import { FloatingBall } from "./floating/FloatingBall";
 import { FloatingPanel } from "./floating/FloatingPanel";
 import { FloatingContextMenu } from "./floating/FloatingContextMenu";
 import "./floating/floating.css";
+// 悬浮窗是独立入口（floating.html），需自行初始化 i18n，否则 useTranslation() 读不到 key 会显示 key 名。
+import "./i18n";
 
 const THEME_STORAGE_KEY = "cc-switch-theme";
 
