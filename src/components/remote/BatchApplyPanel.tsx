@@ -260,7 +260,7 @@ export function BatchApplyPanel({
       label: res.label,
       container: res.container,
       status: res.ok ? "ok" : "fail",
-      message: res.ok ? res.providerName : (res.error ?? "切换失败"),
+      message: res.ok ? res.providerName : (res.error ?? t("batchApply.failed")),
     });
 
     // 监听后端逐台进度事件：每切完一台立即更新对应落点，实时反馈
@@ -298,7 +298,7 @@ export function BatchApplyPanel({
   return (
     <FullScreenPanel
       isOpen={open}
-      title="批量应用"
+      title={t("batchApply.title")}
       onClose={() => onOpenChange(false)}
       contentClassName="px-6 py-6 w-full flex flex-col gap-4"
       footer={
@@ -325,7 +325,7 @@ export function BatchApplyPanel({
               className="h-9 max-w-[200px] rounded-lg border border-border bg-background px-2.5 text-sm font-medium text-foreground outline-none focus:ring-1 focus:ring-primary/40"
             >
               {providerList.length === 0 && (
-                <option value="">（无可用 Provider）</option>
+                <option value="">{t("batchApply.noProvider")}</option>
               )}
               {providerList.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -402,14 +402,14 @@ export function BatchApplyPanel({
                 </div>
                 <div className="max-h-[40vh] overflow-y-auto p-2">
                   <div className="space-y-0.5">
-                    {selectedTargets.map((t) => {
-                      const isContainer = !!t.container;
+                    {selectedTargets.map((target) => {
+                      const isContainer = !!target.container;
                       return (
                         <div
                           key={
-                            t.container
-                              ? contKey(t.hostId, t.container)
-                              : t.hostId
+                            target.container
+                              ? contKey(target.hostId, target.container)
+                              : target.hostId
                           }
                           className="flex items-center gap-2 rounded-md border border-border/40 px-2 py-1.5 text-sm"
                         >
@@ -419,7 +419,7 @@ export function BatchApplyPanel({
                             <Server className="h-4 w-4 shrink-0 text-primary" />
                           )}
                           <span className="min-w-0 flex-1 truncate">
-                            {t.container ? t.container : t.hostName}
+                            {target.container ? target.container : target.hostName}
                           </span>
                           <span
                             className={cn(
@@ -429,7 +429,7 @@ export function BatchApplyPanel({
                                 : "bg-primary/15 text-primary",
                             )}
                           >
-                            {isContainer ? "容器" : "宿主机"}
+                            {isContainer ? t("batchApply.container") : t("batchApply.host")}
                           </span>
                         </div>
                       );
@@ -447,7 +447,7 @@ export function BatchApplyPanel({
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="搜索主机名 / 地址…"
+              placeholder={t("batchApply.searchPlaceholder")}
               className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
           </div>
@@ -457,8 +457,8 @@ export function BatchApplyPanel({
           {filteredHosts.length === 0 && (
             <div className="py-8 text-center text-sm text-muted-foreground">
               {hosts.length === 0
-                ? "暂无远程主机，请在「远程主机管理」中添加"
-                : "无匹配主机"}
+                ? t("batchApply.emptyHosts")
+                : t("batchApply.noMatch")}
             </div>
           )}
           {filteredHosts.map((host) => {
@@ -556,7 +556,7 @@ export function BatchApplyPanel({
                             onCheckedChange={() => toggleHostOnly(host.id)}
                           />
                           <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-                          <span className="truncate font-medium text-primary">宿主机</span>
+                          <span className="truncate font-medium text-primary">{t("batchApply.host")}</span>
                         </label>
                         <div className="border-t border-border/50" />
                         {cs != null && cs.length === 0 && (
@@ -627,10 +627,10 @@ export function BatchApplyPanel({
                       : "bg-primary/15 text-primary",
                   )}
                 >
-                  {r.container ? "容器" : "宿主机"}
+                  {r.container ? t("batchApply.container") : t("batchApply.host")}
                 </span>
                 {r.status === "ok" && (
-                  <span className="text-xs text-muted-foreground">已切换</span>
+                  <span className="text-xs text-muted-foreground">{t("batchApply.switched")}</span>
                 )}
                 {r.status === "fail" && (
                   <span className="max-w-[40%] truncate text-xs text-red-500">

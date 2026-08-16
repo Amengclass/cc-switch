@@ -1040,6 +1040,17 @@
       }
     }
   },
+  "batchApply": {
+    "title": "一括適用",
+    "noProvider": "（利用可能なプロバイダーなし）",
+    "host": "ホスト",
+    "container": "コンテナ",
+    "searchPlaceholder": "ホスト名 / アドレスを検索…",
+    "emptyHosts": "リモートホストがありません。「リモートホスト管理」で追加してください",
+    "noMatch": "一致するホストがありません",
+    "switched": "切り替え済み",
+    "failed": "切り替えに失敗"
+  },
   "grokBuild": {
     "apiBackend": "API Backend",
     "contextWindow": "コンテキストウィンドウ",

@@ -1040,6 +1040,17 @@
       }
     }
   },
+  "batchApply": {
+    "title": "Batch Apply",
+    "noProvider": "(No available Provider)",
+    "host": "Host",
+    "container": "Container",
+    "searchPlaceholder": "Search host name / address…",
+    "emptyHosts": "No remote hosts yet. Add them under \"Remote Host Management\"",
+    "noMatch": "No matching hosts",
+    "switched": "Switched",
+    "failed": "Switch failed"
+  },
   "grokBuild": {
     "apiBackend": "API backend",
     "contextWindow": "Context window",
