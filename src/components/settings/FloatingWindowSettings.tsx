@@ -115,7 +115,7 @@ export function FloatingWindowSettings({
                     <div className="space-y-0.5">
                       <div className="text-sm font-medium leading-none">悬浮窗内容显示</div>
                       <div className="text-xs text-muted-foreground">
-                        选择后悬浮窗一直显示该 app；选「跟随最近使用」则切换 app 时自动更新
+                        选择后悬浮窗一直显示该 app；选「跟随当前应用」则切换 app 时自动更新
                       </div>
                     </div>
                   </div>
@@ -124,7 +124,7 @@ export function FloatingWindowSettings({
                     onChange={(e) => changePin(e.target.value)}
                     className="h-8 rounded-md border border-border/40 bg-background px-2 text-sm text-foreground outline-none"
                   >
-                    <option value="">跟随最近使用</option>
+                    <option value="">跟随当前应用</option>
                     {FLOATING_PIN_APPS.map((a) => (
                       <option key={a.key} value={a.key}>
                         {a.label}
