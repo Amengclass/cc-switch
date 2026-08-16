@@ -97,9 +97,11 @@ export function FloatingWindowSettings({
                   <div className="flex items-center gap-2">
                     <Lock className="h-3.5 w-3.5 shrink-0 text-rose-500" />
                     <div className="space-y-0.5">
-                      <div className="text-sm font-medium leading-none">固定当前位置</div>
+                      <div className="text-sm font-medium leading-none">
+                        {t("settings.floatingLockedTitle")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        固定后悬浮窗不可拖动、不自动吸附（单击仍可打开主窗口）
+                        {t("settings.floatingLockedDesc")}
                       </div>
                     </div>
                   </div>
@@ -113,9 +115,11 @@ export function FloatingWindowSettings({
                   <div className="flex items-center gap-2">
                     <Pin className="h-3.5 w-3.5 shrink-0 text-rose-500" />
                     <div className="space-y-0.5">
-                      <div className="text-sm font-medium leading-none">悬浮窗内容显示</div>
+                      <div className="text-sm font-medium leading-none">
+                        {t("settings.floatingPinTitle")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        选择后悬浮窗一直显示该 app；选「跟随当前应用」则切换 app 时自动更新
+                        {t("settings.floatingPinDesc")}
                       </div>
                     </div>
                   </div>
@@ -124,7 +128,7 @@ export function FloatingWindowSettings({
                     onChange={(e) => changePin(e.target.value)}
                     className="h-8 rounded-md border border-border/40 bg-background px-2 text-sm text-foreground outline-none"
                   >
-                    <option value="">跟随当前应用</option>
+                    <option value="">{t("settings.floatingPinFollow")}</option>
                     {FLOATING_PIN_APPS.map((a) => (
                       <option key={a.key} value={a.key}>
                         {a.label}
@@ -171,9 +175,11 @@ export function FloatingWindowSettings({
                   <div className="flex items-center gap-2">
                     <Eye className="h-3.5 w-3.5 shrink-0 text-rose-500" />
                     <div className="space-y-0.5">
-                      <div className="text-sm font-medium leading-none">悬浮窗透明度</div>
+                      <div className="text-sm font-medium leading-none">
+                        {t("settings.floatingOpacityTitle")}
+                      </div>
                       <div className="text-xs text-muted-foreground">
-                        调节悬浮窗背景与边框的不透明度（20% ~ 100%）
+                        {t("settings.floatingOpacityDesc")}
                       </div>
                     </div>
                   </div>
