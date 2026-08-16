@@ -264,13 +264,13 @@ export function FloatingPanel() {
                   }
                   title={
                     pinnedApp === e.appType
-                      ? `取消置顶「${e.appLabel}」到悬浮窗`
-                      : `置顶「${e.appLabel}」到悬浮窗`
+                      ? `取消固定显示「${e.appLabel}」到悬浮窗`
+                      : `固定显示「${e.appLabel}」到悬浮窗`
                   }
                   aria-label={
                     pinnedApp === e.appType
-                      ? "取消置顶到悬浮窗"
-                      : "置顶到悬浮窗"
+                      ? "取消固定显示到悬浮窗"
+                      : "固定显示到悬浮窗"
                   }
                   onClick={() =>
                     togglePin(e.appType, pinnedApp === e.appType)
