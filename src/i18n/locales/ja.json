@@ -1066,6 +1066,27 @@
     "succeeded": "成功 {{count}}",
     "failedCount": "失敗 {{count}}"
   },
+  "floating": {
+    "neverUpdated": "未更新",
+    "justNow": "たった今",
+    "minutesAgo": "{{count}} 分前",
+    "hoursAgo": "{{count}} 時間前",
+    "daysAgo": "{{count}} 日前",
+    "used": "使用：",
+    "remaining": "残り：",
+    "currentProviderUsage": "現在のプロバイダー · 使用量",
+    "takeoverActive": "このアプリはルートテイクオーバー有効（リクエストはローカルプロキシ経由で転送）",
+    "pinTitle": "「{{app}}」をフローティングウィンドウに固定表示",
+    "unpinTitle": "「{{app}}」のフローティングウィンドウ固定表示を解除",
+    "pin": "フローティングウィンドウに固定表示",
+    "unpin": "フローティングウィンドウの固定表示を解除",
+    "noData": "データなし",
+    "notSet": "未設定",
+    "pinnedTitle": "このアプリを固定しました",
+    "pinnedAria": "固定済み",
+    "menuSettings": "設定",
+    "menuHide": "非表示"
+  },
   "grokBuild": {
     "apiBackend": "API Backend",
     "contextWindow": "コンテキストウィンドウ",

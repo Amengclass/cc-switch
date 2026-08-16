@@ -1067,6 +1067,27 @@
     "succeeded": "成功 {{count}}",
     "failedCount": "失敗 {{count}}"
   },
+  "floating": {
+    "neverUpdated": "從未更新",
+    "justNow": "剛剛",
+    "minutesAgo": "{{count}} 分鐘前",
+    "hoursAgo": "{{count}} 小時前",
+    "daysAgo": "{{count}} 天前",
+    "used": "已用：",
+    "remaining": "剩餘：",
+    "currentProviderUsage": "目前供應商 · 用量",
+    "takeoverActive": "此 app 已開啟路由納管（請求經本機代理轉發）",
+    "pinTitle": "固定顯示「{{app}}」到懸浮窗",
+    "unpinTitle": "取消固定顯示「{{app}}」到懸浮窗",
+    "pin": "固定顯示到懸浮窗",
+    "unpin": "取消固定顯示到懸浮窗",
+    "noData": "暫無資料",
+    "notSet": "未設定",
+    "pinnedTitle": "已置頂此 app",
+    "pinnedAria": "已置頂",
+    "menuSettings": "設定",
+    "menuHide": "隱藏"
+  },
   "grokBuild": {
     "apiBackend": "API Backend",
     "contextWindow": "上下文視窗",

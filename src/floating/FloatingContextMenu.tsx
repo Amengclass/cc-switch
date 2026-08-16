@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useTranslation } from "react-i18next";
 import { EyeOff, Settings } from "lucide-react";
 
 /**
@@ -8,6 +9,7 @@ import { EyeOff, Settings } from "lucide-react";
  * - 点击任意项即收起；不悬停自动关闭（由 Rust 端失焦“点击别处”收起）
  */
 export function FloatingContextMenu() {
+  const { t } = useTranslation();
   const close = () => void invoke("hide_floating_menu");
 
   const onSettings = () => {
@@ -30,12 +32,12 @@ export function FloatingContextMenu() {
     >
       <button className="menu-item" onClick={onSettings}>
         <Settings size={12} className="menu-icon" />
-        <span className="menu-label">设置</span>
+        <span className="menu-label">{t("floating.menuSettings")}</span>
       </button>
       <div className="menu-sep" />
       <button className="menu-item" onClick={onHide}>
         <EyeOff size={12} className="menu-icon" />
-        <span className="menu-label">隐藏</span>
+        <span className="menu-label">{t("floating.menuHide")}</span>
       </button>
     </div>
   );

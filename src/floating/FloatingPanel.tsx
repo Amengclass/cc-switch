@@ -1,5 +1,6 @@
 import { cloneElement, useCallback, useEffect, useState, type ReactNode } from "react";
 import type { ReactElement } from "react";
+import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Clock, Pin } from "lucide-react";
@@ -28,14 +29,18 @@ function planAbbr(name?: string | null): string {
   return "";
 }
 
-/** 相对时间：与主窗口 UsageFooter formatRelativeTime 同语义（悬浮窗硬编码中文） */
-function formatRelativeTime(ts: number | null, now: number): string {
-  if (ts == null) return "从未更新";
+/** 相对时间：与主窗口 UsageFooter formatRelativeTime 同语义（传 t，语言切换即时生效） */
+function formatRelativeTime(
+  ts: number | null,
+  now: number,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  if (ts == null) return t("floating.neverUpdated");
   const diff = Math.floor((now - ts) / 1000);
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  return `${Math.floor(diff / 86400)} 天前`;
+  if (diff < 60) return t("floating.justNow");
+  if (diff < 3600) return t("floating.minutesAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400) return t("floating.hoursAgo", { count: Math.floor(diff / 3600) });
+  return t("floating.daysAgo", { count: Math.floor(diff / 86400) });
 }
 
 /**
@@ -46,11 +51,13 @@ function UsageDetail({
   d,
   showPlan = false,
   dimPrefix,
+  t,
 }: {
   d: FloatingUsageData;
   showPlan?: boolean;
   /** 主用量的维度前缀（如 "h"），渲染成「剩余：h 100%」 */
   dimPrefix?: string;
+  t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
   const hasRemaining = d.remaining != null && isFinite(d.remaining);
   const hasUsed = d.used != null && isFinite(d.used);
@@ -66,7 +73,7 @@ function UsageDetail({
   if (hasUsed) {
     nodes.push(
       <span key="used" className="usage-item">
-        <span className="usage-label">已用：</span>
+        <span className="usage-label">{t("floating.used")}</span>
         <span className="usage-value">{d.used!.toFixed(2)}</span>
       </span>,
     );
@@ -74,7 +81,7 @@ function UsageDetail({
   if (hasRemaining) {
     nodes.push(
       <span key="rem" className="usage-item">
-        <span className="usage-label">剩余：</span>
+        <span className="usage-label">{t("floating.remaining")}</span>
         <span className={`usage-value ${usageValueClass(d)}`}>
           {dimPrefix ? `${dimPrefix} ` : ""}
           {d.remaining!.toFixed(2)}
@@ -100,6 +107,7 @@ function UsageDetail({
  * - 悬停面板时通知后端保持显示（跨窗宽限）
  */
 export function FloatingPanel() {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<FloatingEntry[]>([]);
   const [loading, setLoading] = useState(true);
   /** 当前置顶到悬浮窗的 app（未置顶 = null；每行据此高亮图钉） */
@@ -171,7 +179,7 @@ export function FloatingPanel() {
     >
       <div className="panel-header">
         <span className="panel-title">CC Switch</span>
-        <span className="panel-sub">当前供应商 · 用量</span>
+        <span className="panel-sub">{t("floating.currentProviderUsage")}</span>
       </div>
 
       <div className="panel-list">
@@ -183,7 +191,7 @@ export function FloatingPanel() {
             <div key={e.appType}>
               <div
                 className={`row${e.takeoverActive ? " row-takeover" : ""}`}
-                title={e.takeoverActive ? "此 app 已开启路由纳管（请求经本机代理转发）" : undefined}
+                title={e.takeoverActive ? t("floating.takeoverActive") : undefined}
               >
                 <div className="row-left">
                   <span className="row-app">
@@ -218,13 +226,14 @@ export function FloatingPanel() {
                     <>
                       <span className="usage-time">
                         <Clock size={10} />
-                        {formatRelativeTime(e.queriedAt, now)}
+                        {formatRelativeTime(e.queriedAt, now, t)}
                       </span>
                       <UsageDetail
                         d={e.usage![0]}
                         dimPrefix={
                           planAbbr(e.usage![0].planName) || undefined
                         }
+                        t={t}
                       />
                       {extraItems.length > 0 && (
                         <span className="usage-chips">
@@ -264,13 +273,13 @@ export function FloatingPanel() {
                   }
                   title={
                     pinnedApp === e.appType
-                      ? `取消固定显示「${e.appLabel}」到悬浮窗`
-                      : `固定显示「${e.appLabel}」到悬浮窗`
+                      ? t("floating.unpinTitle", { app: e.appLabel })
+                      : t("floating.pinTitle", { app: e.appLabel })
                   }
                   aria-label={
                     pinnedApp === e.appType
-                      ? "取消固定显示到悬浮窗"
-                      : "固定显示到悬浮窗"
+                      ? t("floating.unpin")
+                      : t("floating.pin")
                   }
                   onClick={() =>
                     togglePin(e.appType, pinnedApp === e.appType)
@@ -286,7 +295,7 @@ export function FloatingPanel() {
           );
         })}
         {entries.length === 0 && !loading && (
-          <div className="empty">暂无数据</div>
+          <div className="empty">{t("floating.noData")}</div>
         )}
       </div>
     </div>

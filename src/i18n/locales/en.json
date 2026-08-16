@@ -1066,6 +1066,27 @@
     "succeeded": "Success {{count}}",
     "failedCount": "Failed {{count}}"
   },
+  "floating": {
+    "neverUpdated": "Never updated",
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} minutes ago",
+    "hoursAgo": "{{count}} hours ago",
+    "daysAgo": "{{count}} days ago",
+    "used": "Used:",
+    "remaining": "Remaining:",
+    "currentProviderUsage": "Current provider · Usage",
+    "takeoverActive": "This app has local-route takeover enabled (requests forwarded via local proxy)",
+    "pinTitle": "Pin \"{{app}}\" to the floating window",
+    "unpinTitle": "Unpin \"{{app}}\" from the floating window",
+    "pin": "Pin to floating window",
+    "unpin": "Unpin from floating window",
+    "noData": "No data",
+    "notSet": "Not set",
+    "pinnedTitle": "Pinned this app",
+    "pinnedAria": "Pinned",
+    "menuSettings": "Settings",
+    "menuHide": "Hide"
+  },
   "grokBuild": {
     "apiBackend": "API backend",
     "contextWindow": "Context window",

@@ -2,6 +2,7 @@ import { cloneElement, useCallback, useEffect, useState } from "react";
 import type { CSSProperties, PointerEvent, ReactElement } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { Pin } from "lucide-react";
 import { APP_ICON_MAP } from "@/config/appConfig";
 import { type FloatingEntry, type FloatingUsageData } from "./types";
@@ -112,7 +113,9 @@ export interface FloatingBallTarget {
 /** 读取悬浮窗目标 app 的供应商 / 模型 / 余量。
  *  只用两个轻量命令（get_floating_ball_detail 只查目标一个 app、get_floating_ball_target
  *  只回 app/isPinned），避免面板全量扫描拖慢球的响应。 */
-async function loadSummary(): Promise<Summary> {
+async function loadSummary(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): Promise<Summary> {
   const [entry, target] = (await Promise.all([
     invoke("get_floating_ball_detail") as Promise<FloatingEntry | null>,
     invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>,
@@ -154,7 +157,7 @@ async function loadSummary(): Promise<Summary> {
       usageValue = d.remaining.toFixed(2);
       usageUnit = d.unit ?? "";
     } else {
-      usageValue = entry.usageSummary ?? "未设置";
+      usageValue = entry.usageSummary ?? t("floating.notSet");
     }
   }
 
@@ -182,6 +185,7 @@ async function loadSummary(): Promise<Summary> {
  * - 悬停展开面板，离开时通知后端宽限隐藏
  */
 export function FloatingBall() {
+  const { t } = useTranslation();
   const [summary, setSummary] = useState<Summary>({
     level: "none",
     color: "#94a3b8",
@@ -198,10 +202,10 @@ export function FloatingBall() {
   });
 
   const refresh = useCallback(() => {
-    loadSummary()
+    loadSummary(t)
       .then(setSummary)
       .catch((e) => console.error("[Floating] 刷新数据失败", e));
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     refresh();
@@ -247,7 +251,7 @@ export function FloatingBall() {
   return (
     <div
       className={`ball${summary.takeoverActive ? " route-service-live" : ""}`}
-      title={summary.takeoverActive ? "此 app 已开启路由纳管（请求经本机代理转发）" : undefined}
+      title={summary.takeoverActive ? t("floating.takeoverActive") : undefined}
       style={{ "--ball-alpha": summary.opacity } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
@@ -271,7 +275,7 @@ export function FloatingBall() {
           <AppIcon size={10} appType={summary.appType} />
           <span className="ball-app-text">{summary.app}</span>
           {summary.isPinned && (
-            <span className="ball-pin" title="已置顶此 app" aria-label="已置顶">
+            <span className="ball-pin" title={t("floating.pinnedTitle")} aria-label={t("floating.pinnedAria")}>
               <Pin size={9} />
             </span>
           )}
