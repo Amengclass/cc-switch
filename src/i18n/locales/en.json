@@ -929,7 +929,14 @@
   },
   "remote": {
     "readingConfigPrefix": "Reading ",
-    "readingConfigSuffix": " config…"
+    "readingConfigSuffix": " config…",
+    "cliInstalledBadge": "Installed",
+    "cliDetectFailed": "Detecting/unknown",
+    "cliNotInstalledBadge": "Not installed",
+    "targetActiveHint": "Providers / MCP / Prompts / Skills / Sessions apply to this host",
+    "refreshStatus": "Refresh",
+    "refreshStatusTitle": "Refresh install status",
+    "batchApply": "Batch Apply"
   },
   "grokBuild": {
     "apiBackend": "API backend",

@@ -930,7 +930,14 @@
   },
   "remote": {
     "readingConfigPrefix": "正在讀取 ",
-    "readingConfigSuffix": " 設定…"
+    "readingConfigSuffix": " 設定…",
+    "cliInstalledBadge": "已安裝",
+    "cliDetectFailed": "安裝狀態偵測中/未知",
+    "cliNotInstalledBadge": "未安裝",
+    "targetActiveHint": "供應商 / MCP / Prompts / Skills / 會話 作用於該主機",
+    "refreshStatus": "重新整理",
+    "refreshStatusTitle": "重新整理安裝狀態",
+    "batchApply": "批次套用"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

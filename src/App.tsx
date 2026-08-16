@@ -2498,7 +2498,7 @@ function App() {
               onClick={() => setBatchApplyOpen(true)}
               className="hover:bg-black/5 dark:hover:bg-white/5"
             >
-              批量应用
+              {t("remote.batchApply", { defaultValue: "批量应用" })}
             </Button>
           {currentInstalled === true || currentInstalled === null ? (
             <span
@@ -2548,13 +2548,11 @@ function App() {
           )}
           <button
             onClick={refreshInstallStatus}
-            title={t("remote.refreshStatus", {
-              defaultValue: "刷新安装状态",
-            })}
+            title={t("remote.refreshStatusTitle")}
             className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            {t("remote.refreshStatus", { defaultValue: "刷新" })}
+            {t("remote.refreshStatus")}
           </button>
           </div>
         )}

@@ -929,7 +929,14 @@
   },
   "remote": {
     "readingConfigPrefix": "読み込み中 ",
-    "readingConfigSuffix": " 設定…"
+    "readingConfigSuffix": " 設定…",
+    "cliInstalledBadge": "インストール済み",
+    "cliDetectFailed": "検出中/不明",
+    "cliNotInstalledBadge": "未インストール",
+    "targetActiveHint": "プロバイダー / MCP / Prompts / Skills / セッションはこのホストに適用されます",
+    "refreshStatus": "更新",
+    "refreshStatusTitle": "インストール状態を更新",
+    "batchApply": "一括適用"
   },
   "grokBuild": {
     "apiBackend": "API Backend",
