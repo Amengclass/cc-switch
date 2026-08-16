@@ -1055,7 +1055,7 @@
     "selected": "Selected",
     "selectedCount": "{{count}} targets selected",
     "noContainer": "No container (or unavailable)",
-    "forApp": "App",
+    "forApp": "Apply",
     "containerCount": "{{count}} containers",
     "probing": "Probing",
     "cannotConnect": "Cannot connect",

@@ -1055,7 +1055,7 @@
     "selected": "選択済み",
     "selectedCount": "{{count}} 個のターゲットを選択",
     "noContainer": "コンテナなし（または利用不可）",
-    "forApp": "アプリ",
+    "forApp": "適用",
     "containerCount": "コンテナ {{count}}",
     "probing": "検出中",
     "cannotConnect": "接続できません",
