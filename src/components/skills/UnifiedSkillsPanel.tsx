@@ -34,6 +34,7 @@ import {
   type InstalledSkill,
   type SkillUpdateInfo,
 } from "@/hooks/useSkills";
+import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
 import type { AppId } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -522,9 +523,9 @@ const UnifiedSkillsPanel = React.forwardRef<
               remoteTargetId,
               remoteContainerId ?? "__host__",
             ];
-            // 即时更新 UI（本机策略）
+            // 即时更新 UI（对齐本机 mergeImportedSkills：按 id 去重，新记录覆盖旧）
             queryClient.setQueryData<InstalledSkill[]>(installedKey, (old) =>
-              old ? [...old, ...installed] : installed,
+              mergeImportedSkills(old, installed),
             );
             // 后台拉取完整元数据
             queryClient.invalidateQueries({ queryKey: installedKey });
