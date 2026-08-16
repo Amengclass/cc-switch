@@ -1655,6 +1655,8 @@ pub fn run() {
             remote::commands::install_remote_skills_from_zip,
             remote::commands::install_remote_skill_from_dir,
             remote::commands::install_remote_skill_from_discoverable,
+            remote::commands::update_remote_skill,
+            remote::commands::check_remote_skill_updates,
             remote::commands::scan_remote_unmanaged_skills,
             remote::commands::import_remote_skill,
             remote::commands::toggle_remote_skill_app,

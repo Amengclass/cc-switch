@@ -878,6 +878,197 @@ async fn exec_cmd(
     crate::remote::connection::exec_command(channel, &full).await
 }
 
+// ========================================================================
+// 更新远端 Skill（本机下载仓库 → 替换远端 SSOT）
+// ========================================================================
+
+/// 更新一台远端目标上的某个 Skill：从它的 GitHub 仓库重新下载最新版，
+/// 替换远端 SSOT 目录，并同步各已启用 app 的链接。
+///
+/// 对齐本机 `SkillService::update_skill` 语义。方案：**本机下载 + 本机算 hash**，
+/// 传远端替换（不需要远端访问 GitHub）。删除旧 SSOT 目录用 FileOps 的
+/// `remove_dir_all`（SFTP/docker exec 均已实现）。
+pub async fn update_remote_skill_impl<F: FileOps>(
+    fs: &F,
+    channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
+    container: Option<&str>,
+    root: &str,
+    skill_id: &str,
+) -> Result<RemoteSkillRecord, String> {
+    use crate::services::skill::{DiscoverableSkill, SkillService};
+
+    // 1. 取该 Skill 的记录（含 repo 来源）。
+    let records = read_remote_skills_json(fs, root).await?;
+    let record = records
+        .iter()
+        .find(|r| r.id == skill_id || r.directory.eq_ignore_ascii_case(skill_id))
+        .cloned()
+        .ok_or_else(|| format!("远端找不到该 Skill: {skill_id}"))?;
+
+    // 2. 必须有仓库来源才能从仓库更新（对齐本机 update_skill 的判定）。
+    let (owner, name, branch) = match (&record.repo_owner, &record.repo_name) {
+        (Some(o), Some(n)) => (
+            o.clone(),
+            n.clone(),
+            record
+                .repo_branch
+                .clone()
+                .unwrap_or_else(|| "main".to_string()),
+        ),
+        _ => {
+            return Err(format!(
+                "无法更新「{}」：没有仓库来源（不是从仓库安装的）",
+                record.name
+            ))
+        }
+    };
+
+    // 3. 从 record 构造 DiscoverableSkill，触发本机下载 + 解析源目录
+    //    （复用 install_from_discoverable 同款入口，含 60s 超时 / 路径安全校验）。
+    let discoverable = DiscoverableSkill {
+        key: format!("{owner}/{name}:{}", record.directory),
+        name: record.name.clone(),
+        description: record.description.clone().unwrap_or_default(),
+        directory: record.directory.clone(),
+        readme_url: record.readme_url.clone(),
+        repo_owner: owner.clone(),
+        repo_name: name.clone(),
+        repo_branch: branch.clone(),
+    };
+    let service = SkillService::new();
+    // 保持 temp_guard 存活直到上传完成，防止下载目录被提前回收。
+    let (_temp_guard, _canonical_temp, source_dir, used_branch) = service
+        .download_and_resolve_skill_source(&discoverable)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 4. 本机算新内容 hash（更新后远端应有的指纹，供 check_updates 对比）。
+    let new_hash = SkillService::compute_dir_hash(&source_dir).ok();
+
+    // 5. 先读更新后 SKILL.md 的元数据（覆盖 name/description）。
+    let (md_name, md_description) =
+        read_skill_md_meta_static(fs, &source_dir.to_string_lossy()).await;
+    let new_name = md_name.unwrap_or(record.name.clone());
+    let new_description = md_description.or(record.description.clone());
+
+    // 6. 替换远端 SSOT 目录：删旧 + 上传新。
+    let ssot_dir = remote_ssot_path(root);
+    let remote_dir = format!("{ssot_dir}/{}", record.directory);
+    if let Err(e) = fs.remove_dir_all(&remote_dir).await {
+        // 目录不存在也算成功（上传会重建）。
+        log::warn!("[remote] 更新 Skill 删除旧目录失败（可能不存在）: {e}");
+    }
+    upload_dir_via_tar(channel, container, &source_dir, &remote_dir).await?;
+
+    // 7. 写回更新后的记录。
+    let mut updated = record.clone();
+    updated.name = new_name;
+    updated.description = new_description;
+    updated.repo_branch = Some(used_branch);
+    updated.content_hash = new_hash;
+    updated.updated_at = chrono::Utc::now().timestamp_millis();
+
+    let mut new_records = read_remote_skills_json(fs, root).await?;
+    if let Some(position) = new_records.iter().position(|r| r.id == updated.id) {
+        new_records[position] = updated.clone();
+    } else {
+        new_records.push(updated.clone());
+    }
+    write_remote_skills_json(fs, root, &new_records).await?;
+
+    // 8. 同步各已启用 app 的链接（symlink 或 copy，取决于设置）。
+    let use_copy = crate::settings::get_skill_sync_method()
+        == crate::services::skill::SyncMethod::Copy;
+    sync_remote_skill_links(
+        channel,
+        container,
+        root,
+        &updated.directory,
+        &updated.apps,
+        use_copy,
+    )
+    .await?;
+
+    Ok(updated)
+}
+
+/// 检查远端某个目标上各 Skill 是否有更新（对齐本机 `SkillService::check_updates`）。
+///
+/// 读远端 skills.json 记录 → 对每个有仓库来源的 Skill，本机下载其仓库并解析源目录 →
+/// 对比「仓库最新 hash」与「远端记录存的 content_hash」→ 不同记为可更新。
+/// 返回与本机一致的 `SkillUpdateInfo` 列表。方案：本机下载 + 本机算 hash。
+pub async fn check_remote_skill_updates_impl<F: FileOps>(
+    fs: &F,
+    root: &str,
+) -> Result<Vec<crate::services::skill::SkillUpdateInfo>, String> {
+    use crate::services::skill::{DiscoverableSkill, SkillService};
+
+    let records = read_remote_skills_json(fs, root).await?;
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let service = SkillService::new();
+    let mut updates: Vec<crate::services::skill::SkillUpdateInfo> = Vec::new();
+
+    for record in &records {
+        // 必须有仓库来源；没有来源的 Skill 无法从仓库检查更新（对齐本机）。
+        let (owner, name, branch) = match (&record.repo_owner, &record.repo_name) {
+            (Some(o), Some(n)) => (
+                o.clone(),
+                n.clone(),
+                record
+                    .repo_branch
+                    .clone()
+                    .unwrap_or_else(|| "main".to_string()),
+            ),
+            _ => continue,
+        };
+        let discoverable = DiscoverableSkill {
+            key: format!("{owner}/{name}:{}", record.directory),
+            name: record.name.clone(),
+            description: record.description.clone().unwrap_or_default(),
+            directory: record.directory.clone(),
+            readme_url: record.readme_url.clone(),
+            repo_owner: owner,
+            repo_name: name,
+            repo_branch: branch,
+        };
+        let (_temp_guard, _canonical, source_dir, _used_branch) =
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(60),
+                service.download_and_resolve_skill_source(&discoverable),
+            )
+            .await
+            {
+                Ok(Ok(result)) => result,
+                Ok(Err(e)) => {
+                    log::warn!("检查远端更新时下载 {}/{} 失败: {e}", record.name, record.directory);
+                    continue;
+                }
+                Err(_) => {
+                    log::warn!("检查远端更新时下载 {} 超时", record.name);
+                    continue;
+                }
+            };
+        let remote_hash = match SkillService::compute_dir_hash(&source_dir) {
+            Ok(h) => h,
+            Err(_) => continue,
+        };
+        // 远端记录存的 hash 与仓库最新不同 → 有更新。
+        if record.content_hash.as_deref() != Some(&remote_hash) {
+            updates.push(crate::services::skill::SkillUpdateInfo {
+                id: record.id.clone(),
+                name: record.name.clone(),
+                current_hash: record.content_hash.clone(),
+                remote_hash,
+            });
+        }
+    }
+
+    Ok(updates)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

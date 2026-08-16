@@ -30,6 +30,7 @@ import {
   useInstallSkillsFromZip,
   useCheckSkillUpdates,
   useUpdateSkill,
+  useUpdateRemoteSkill,
   type InstalledSkill,
   type SkillUpdateInfo,
 } from "@/hooks/useSkills";
@@ -175,8 +176,18 @@ const UnifiedSkillsPanel = React.forwardRef<
       data: skillUpdates,
       refetch: checkUpdates,
       isFetching: isCheckingUpdates,
-    } = useCheckSkillUpdates();
+    } = useCheckSkillUpdates(
+      isRemote ? remoteTargetId : undefined,
+      isRemote ? remoteContainerId : undefined,
+    );
     const updateSkillMutation = useUpdateSkill();
+    const updateRemoteSkillMutation = useUpdateRemoteSkill(
+      isRemote ? remoteTargetId : undefined,
+      isRemote ? remoteContainerId : undefined,
+    );
+    const activeUpdateMutation = isRemote
+      ? updateRemoteSkillMutation
+      : updateSkillMutation;
     const [isUpdatingAll, setIsUpdatingAll] = useState(false);
 
     const mutationPending =
@@ -187,7 +198,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       restoreBackupMutation.isPending ||
       importMutation.isPending ||
       installFromZipMutation.isPending ||
-      updateSkillMutation.isPending ||
+      activeUpdateMutation.isPending ||
       isUpdatingAll;
     const dialogOpen =
       importDialogOpen || restoreDialogOpen || confirmDialog !== null;
@@ -625,7 +636,7 @@ const UnifiedSkillsPanel = React.forwardRef<
     const handleUpdateSkill = async (skill: InstalledSkill) => {
       if (!beginWrite()) return;
       try {
-        const updated = await updateSkillMutation.mutateAsync(skill.id);
+        const updated = await activeUpdateMutation.mutateAsync(skill.id);
         toast.success(t("skills.updateSuccess", { name: updated.name }), {
           closeButton: true,
         });
@@ -645,7 +656,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       try {
         for (const update of applicableSkillUpdates) {
           try {
-            await updateSkillMutation.mutateAsync(update.id);
+            await activeUpdateMutation.mutateAsync(update.id);
             successCount++;
           } catch (error) {
             toast.error(t("skills.updateFailed"), {
@@ -786,7 +797,7 @@ const UnifiedSkillsPanel = React.forwardRef<
       openRestoreFromBackup: isRemote
         ? () => undefined
         : handleOpenRestoreFromBackup,
-      checkUpdates: isRemote ? () => undefined : handleCheckUpdates,
+      checkUpdates: handleCheckUpdates,
     }));
 
     return (
@@ -890,8 +901,8 @@ const UnifiedSkillsPanel = React.forwardRef<
                       skill={skill}
                       hasUpdate={!!updatesMap[skill.id]}
                       isUpdating={
-                        updateSkillMutation.isPending &&
-                        updateSkillMutation.variables === skill.id
+                        activeUpdateMutation.isPending &&
+                        activeUpdateMutation.variables === skill.id
                       }
                       isRemote={isRemote}
                       actionsDisabled={interactionBlocked}
@@ -1040,7 +1051,9 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
         className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
         style={hasUpdate ? { opacity: 1 } : undefined}
       >
-        {!isRemote && hasUpdate && onUpdate && (
+        {hasUpdate &&
+          onUpdate &&
+          (!isRemote || Boolean(skill.repoOwner)) && (
           <Button
             type="button"
             variant="ghost"

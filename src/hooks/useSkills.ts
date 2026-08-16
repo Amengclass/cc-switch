@@ -23,6 +23,8 @@ import {
   listRemoteSkills,
   scanRemoteUnmanagedSkills,
   toggleRemoteSkillApp,
+  updateRemoteSkill,
+  checkRemoteSkillUpdates,
 } from "@/lib/api/remote";
 import { mergeImportedSkills } from "@/hooks/useSkills.helpers";
 import { runSequentialBulkAction } from "@/lib/utils/sequentialBulkAction";
@@ -630,10 +632,22 @@ export function useInstallSkillsFromZip(
 /**
  * 检查 Skills 更新（手动触发）
  */
-export function useCheckSkillUpdates() {
+/**
+ * 检查 Skill 更新。传 hostId 时为「远端目标」：queryFn 走 checkRemoteSkillUpdates，
+ * 否则为本机 skillsApi.checkUpdates。queryKey 含 host + container 维度，互不干扰；
+ * enabled:false，由手动 refetch（checkUpdates()）触发。
+ */
+export function useCheckSkillUpdates(
+  hostId?: string,
+  container?: string,
+) {
   return useQuery({
-    queryKey: ["skills", "updates"],
-    queryFn: () => skillsApi.checkUpdates(),
+    queryKey: hostId
+      ? ["skills", "updates", "remote", hostId, container ?? "__host__"]
+      : ["skills", "updates"],
+    queryFn: hostId
+      ? () => checkRemoteSkillUpdates(hostId, container || undefined)
+      : () => skillsApi.checkUpdates(),
     enabled: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -668,6 +682,56 @@ export function useUpdateSkill() {
     // refresh even when replacement or persistence fails later.
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+  });
+}
+
+/**
+ * 更新远端某个 Skill（对齐本机 useUpdateSkill）：从该 Skill 的仓库重新下载替换远端 SSOT。
+ * 成功后更新远端「已安装」缓存 + 从远端「更新列表」移除该 Skill，并刷新未管理技能圆点缓存。
+ */
+export function useUpdateRemoteSkill(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
+  const queryClient = useQueryClient();
+  const containerKey = remoteContainerId ?? "__host__";
+  const installedKey = [
+    "skills",
+    "installed",
+    "remote",
+    remoteTargetId,
+    containerKey,
+  ];
+  const updatesKey = [
+    "skills",
+    "updates",
+    "remote",
+    remoteTargetId,
+    containerKey,
+  ];
+  const unmanagedRemoteKey = [
+    "skills",
+    "unmanaged-remote",
+    remoteTargetId,
+    containerKey,
+  ];
+  return useMutation({
+    mutationFn: (skillId: string) =>
+      updateRemoteSkill(remoteTargetId!, skillId, remoteContainerId || undefined),
+    onSuccess: (updatedSkill) => {
+      queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) => {
+        if (!oldData) return [updatedSkill];
+        return oldData.map((s) =>
+          s.id === updatedSkill.id ? { ...s, ...updatedSkill } : s,
+        );
+      });
+      queryClient.setQueryData<unknown[]>(updatesKey, (oldData) => {
+        if (!oldData) return oldData;
+        return oldData.filter((u) => (u as { id?: string }).id !== updatedSkill.id);
+      });
+      // 更新后当前目标的「可导入」圆点应归零（该 Skill 已是最新，受管理）。
+      queryClient.invalidateQueries({ queryKey: unmanagedRemoteKey });
+    },
   });
 }
 

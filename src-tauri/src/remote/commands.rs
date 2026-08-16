@@ -2840,6 +2840,46 @@ pub async fn install_remote_skill_from_dir(
     Ok(install_name)
 }
 
+/// 更新远端某个 Skill：从该 Skill 的 GitHub 仓库重新下载最新版，
+/// 替换远端 SSOT 目录并同步链接（本机下载 + 本机算 hash 的方案）。
+#[tauri::command]
+pub async fn update_remote_skill(
+    state: State<'_, AppState>,
+    host_id: String,
+    skill_id: String,
+    container: Option<String>,
+) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target =
+        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container.as_deref())?;
+    crate::remote::skill::update_remote_skill_impl(
+        &target,
+        &session.channel,
+        container.as_deref(),
+        &host.default_home(),
+        &skill_id,
+    )
+    .await
+}
+
+/// 检查远端某个目标上各 Skill 是否有更新（对齐本机 `check_updates`）。
+/// 返回与本机一致的 `SkillUpdateInfo` 列表，供前端显示「可更新」标记。
+#[tauri::command]
+pub async fn check_remote_skill_updates(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Vec<crate::services::skill::SkillUpdateInfo>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target =
+        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container.as_deref())?;
+    crate::remote::skill::check_remote_skill_updates_impl(&target, &host.default_home()).await
+}
+
 /// 在远端文件系统上扫描未管理的技能目录（远端「导入已有」的扫描阶段）。
 ///
 /// 容器模式：用合并 shell 脚本一次 exec 收集所有源目录的技能，避免逐文件 exec 调用过多导致延迟。

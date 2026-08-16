@@ -721,6 +721,30 @@ export async function installRemoteSkillFromDiscoverable(
   });
 }
 
+/** 更新远端某个 Skill：从该 Skill 的仓库重新下载替换远端 SSOT */
+export async function updateRemoteSkill(
+  hostId: string,
+  skillId: string,
+  container?: string,
+): Promise<RemoteSkillRecord> {
+  return invoke<RemoteSkillRecord>("update_remote_skill", {
+    hostId,
+    skillId,
+    container: container ?? null,
+  });
+}
+
+/** 检查远端某个目标上各 Skill 是否有更新（对齐本机 check_updates） */
+export async function checkRemoteSkillUpdates(
+  hostId: string,
+  container?: string,
+): Promise<import("@/lib/api/skills").SkillUpdateInfo[]> {
+  return invoke<import("@/lib/api/skills").SkillUpdateInfo[]>(
+    "check_remote_skill_updates",
+    { hostId, container: container ?? null },
+  );
+}
+
 /** 远端未管理技能条目（扫描远端文件系统） */
 export interface RemoteUnmanagedSkill {
   directory: string;
