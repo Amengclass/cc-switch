@@ -1049,7 +1049,12 @@
     "emptyHosts": "暂无远程主机，请在「远程主机管理」中添加",
     "noMatch": "无匹配主机",
     "switched": "已切换",
-    "failed": "切换失败"
+    "failed": "切换失败",
+    "cancel": "取消",
+    "selectTargetsHint": "选落点 · 勾整台 = 含其容器",
+    "selected": "已选",
+    "selectedCount": "已选 {{count}} 个落点",
+    "noContainer": "无容器（或不可用）"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

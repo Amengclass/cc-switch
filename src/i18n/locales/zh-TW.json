@@ -1050,7 +1050,12 @@
     "emptyHosts": "暫無遠端主機，請在「遠端主機管理」中新增",
     "noMatch": "無符合主機",
     "switched": "已切換",
-    "failed": "切換失敗"
+    "failed": "切換失敗",
+    "cancel": "取消",
+    "selectTargetsHint": "選落點 · 勾整台 = 含其容器",
+    "selected": "已選",
+    "selectedCount": "已選 {{count}} 個落點",
+    "noContainer": "無容器（或不可用）"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

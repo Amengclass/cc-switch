@@ -1049,7 +1049,12 @@
     "emptyHosts": "リモートホストがありません。「リモートホスト管理」で追加してください",
     "noMatch": "一致するホストがありません",
     "switched": "切り替え済み",
-    "failed": "切り替えに失敗"
+    "failed": "切り替えに失敗",
+    "cancel": "キャンセル",
+    "selectTargetsHint": "ターゲットを選択・ホストをチェックするとそのコンテナも含まれます",
+    "selected": "選択済み",
+    "selectedCount": "{{count}} 個のターゲットを選択",
+    "noContainer": "コンテナなし（または利用不可）"
   },
   "grokBuild": {
     "apiBackend": "API Backend",

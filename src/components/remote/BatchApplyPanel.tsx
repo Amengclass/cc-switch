@@ -341,7 +341,7 @@ export function BatchApplyPanel({
               onClick={() => onOpenChange(false)}
               disabled={running}
             >
-              取消
+              {t("batchApply.cancel")}
             </Button>
             <Button
               disabled={
@@ -357,7 +357,7 @@ export function BatchApplyPanel({
               ) : (
                 <Send className="mr-2 h-4 w-4" />
               )}
-              批量应用 ({selectedTargets.length})
+              {t("batchApply.title")} ({selectedTargets.length})
             </Button>
           </div>
         </div>
@@ -367,7 +367,7 @@ export function BatchApplyPanel({
       <div className="glass flex min-h-0 flex-1 flex-col rounded-xl p-6 border border-white/10 space-y-6">
         <div className="flex items-center justify-between gap-2">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
-            选落点 · 勾整台 = 含其容器
+            {t("batchApply.selectTargetsHint")}
           </h4>
           {/* 已选浮层：点开悬浮列表查看所选落点，不占布局空间 */}
           {selectedTargets.length > 0 && (
@@ -377,7 +377,7 @@ export function BatchApplyPanel({
                   type="button"
                   className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-foreground/70 hover:text-foreground"
                 >
-                  已选{" "}
+                  {t("batchApply.selected")}{" "}
                   <span className="font-semibold text-primary">
                     {selectedTargets.length}
                   </span>
@@ -390,7 +390,7 @@ export function BatchApplyPanel({
               >
                 <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
                   <span className="text-xs font-semibold text-foreground/80">
-                    已选 {selectedTargets.length} 个落点
+                    {t("batchApply.selectedCount", { count: selectedTargets.length })}
                   </span>
                   <button
                     type="button"
@@ -561,7 +561,7 @@ export function BatchApplyPanel({
                         <div className="border-t border-border/50" />
                         {cs != null && cs.length === 0 && (
                           <div className="px-2 py-1 text-xs text-muted-foreground">
-                            无容器（或不可用）
+                            {t("batchApply.noContainer")}
                           </div>
                         )}
                         {(cs ?? []).map((c) => (

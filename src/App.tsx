@@ -2120,7 +2120,7 @@ function App() {
                       className="hover:bg-black/5 dark:hover:bg-white/5"
                     >
                       <Send className="w-4 h-4 mr-2" />
-                      批量应用
+                      {t("batchApply.title")}
                     </Button>
                   </>
                 )}

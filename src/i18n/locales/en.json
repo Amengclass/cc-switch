@@ -1049,7 +1049,12 @@
     "emptyHosts": "No remote hosts yet. Add them under \"Remote Host Management\"",
     "noMatch": "No matching hosts",
     "switched": "Switched",
-    "failed": "Switch failed"
+    "failed": "Switch failed",
+    "cancel": "Cancel",
+    "selectTargetsHint": "Select targets · checking a host includes its containers",
+    "selected": "Selected",
+    "selectedCount": "{{count}} targets selected",
+    "noContainer": "No container (or unavailable)"
   },
   "grokBuild": {
     "apiBackend": "API backend",
