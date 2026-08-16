@@ -298,12 +298,6 @@ export function SettingsPage({
                       settings={settings}
                       onChange={handleAutoSave}
                     />
-                    <TerminalSettings
-                      value={settings.preferredTerminal}
-                      onChange={(terminal) =>
-                        handleAutoSave({ preferredTerminal: terminal })
-                      }
-                    />
                     <RemoteProviderSettings
                       featureEnabled={remoteFeatureEnabled}
                       onFeatureEnabledChange={(next) =>
@@ -311,6 +305,12 @@ export function SettingsPage({
                       }
                       value={autoImportDefault}
                       onChange={(next) => onAutoImportDefaultChange?.(next)}
+                    />
+                    <TerminalSettings
+                      value={settings.preferredTerminal}
+                      onChange={(terminal) =>
+                        handleAutoSave({ preferredTerminal: terminal })
+                      }
                     />
                   </motion.div>
                 ) : null}
