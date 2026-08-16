@@ -169,7 +169,7 @@ async function loadSummary(
     app: entry.appLabel,
     isPinned,
     takeoverActive,
-    provider: entry.providerName ?? "",
+    provider: entry.hasProvider ? (entry.providerName ?? "") : "",
     model: entry.model ?? "",
     usageValue,
     usageUnit,

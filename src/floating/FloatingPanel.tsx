@@ -207,7 +207,7 @@ export function FloatingPanel() {
                         {e.providerName}
                       </span>
                     ) : (
-                      <span className="row-provider">{e.providerName}</span>
+                      <span className="row-provider">{t("floating.notSet")}</span>
                     )}
                     {e.model ? (
                       <span className="row-model">{e.model}</span>
