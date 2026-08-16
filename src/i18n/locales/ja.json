@@ -689,7 +689,7 @@
     "enableFloatingWindow": "フローティングウィンドウを有効化",
     "enableFloatingWindowDescription": "各アプリのプロバイダー・モデル・使用量をデスクトップのフローティングウィンドウで表示",
     "floatingSnapSpeed": "スナップアニメーション速度",
-    "floatingSnapSpeedDescription": "ウィンドウが画面端にスナップする際のアニメーション時間。オフの場合は自動スナップしません",
+    "floatingSnapSpeedDescription": "スナップ/オープン時のアニメーション速度（速さ）を制御します。「オフ」を選ぶとスナップアニメーションを再生しません",
     "floatingSnapSpeedOff": "オフ",
     "floatingSnapSpeedFast": "速い",
     "floatingSnapSpeedMedium": "普通",

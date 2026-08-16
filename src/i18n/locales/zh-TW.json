@@ -689,7 +689,7 @@
     "enableFloatingWindow": "啟用懸浮窗",
     "enableFloatingWindowDescription": "桌面懸浮窗即時顯示各應用的供應商、模型與用量",
     "floatingSnapSpeed": "吸附動畫速度",
-    "floatingSnapSpeedDescription": "懸浮窗靠到螢幕邊緣時的動畫時長，關閉時不自動吸附",
+    "floatingSnapSpeedDescription": "控制懸浮窗吸附/開啟的動畫速度（快慢）；選「關閉」則不播放吸附動畫",
     "floatingSnapSpeedOff": "關閉",
     "floatingSnapSpeedFast": "快",
     "floatingSnapSpeedMedium": "中",
