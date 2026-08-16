@@ -340,6 +340,7 @@
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
 | 远端 Skills「导入已有」绿点对齐目标(2026-08-16) | 「导入」按钮绿点远端下改为**反映当前所选目标(宿主机/容器)可导入技能数**,而非本机。新增 `useRemoteUnmanagedSkillsQuery(host,container)`,query key 精确到目标互不干扰;UnifiedSkillsPanel 挂载(enabled:true)自动扫当前目标,重进 Skill 页即重扫(对齐本机 `useScanUnmanagedSkills`);点开导入 refetch 取最新;导入成功 invalidate 当前目标 key → 圆点立即消失。提交 c5fcb48a |
 | 远端 Skill「更新」+「检查更新」(2026-08-16) | 对齐本机:远端下「检查更新」不再禁用(原 `远端→()=>undefined`),`check_remote_skill_updates` 读远端 skills.json→逐 skill 本机下载 repo→比对 hash→返回可更新列表;更新按钮放开(有 repoOwner 且 hasUpdate 才显示),`update_remote_skill` 从该 repo 重新下载最新版→替换远端 SSOT→写回 skills.json(hash/元数据)→同步各 app 链接。方案:**本机下载 + 本机算 hash**(远端无需访问 GitHub)。后端 impl 在 remote/skill.rs + commands.rs;前端 useCheckSkillUpdates 支持远端分流 + useUpdateRemoteSkill。提交 3f93934a |
+| 远端导入合并对齐本机(2026-08-16) | UnifiedSkillsPanel 远端「导入已有」成功后更新 installed 缓存，从 `[...old, ...installed]` 简单拼接改为 `mergeImportedSkills(old, installed)`（按 id 去重、新记录覆盖旧），与本机 `useImportSkillsFromApps.onSuccess` 完全一致。提交 23b49ff5 |
 
 ### ⏳ 远程·待完成(优先级从高到低)
 
