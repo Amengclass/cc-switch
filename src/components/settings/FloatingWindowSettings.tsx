@@ -108,12 +108,12 @@ export function FloatingWindowSettings({
                     onCheckedChange={(value) => onChange({ floatingLocked: value })}
                   />
                 </div>
-                {/* 置顶到悬浮窗 */}
+                {/* 悬浮窗内容显示 */}
                 <div className="flex items-center justify-between gap-3 py-1.5">
                   <div className="flex items-center gap-2">
                     <Pin className="h-3.5 w-3.5 shrink-0 text-rose-500" />
                     <div className="space-y-0.5">
-                      <div className="text-sm font-medium leading-none">置顶到悬浮窗</div>
+                      <div className="text-sm font-medium leading-none">悬浮窗内容显示</div>
                       <div className="text-xs text-muted-foreground">
                         选择后悬浮窗一直显示该 app；选「跟随最近使用」则切换 app 时自动更新
                       </div>
