@@ -338,6 +338,7 @@
 | 远端路由/接管(08-11) | 反向隧道按意图对账(不重建连接)+ 端口动态化;per-container DNAT(按容器 IP);容器×app 独立接管开关(`route_proxy_container_apps`);隧道失败降级直连 + warnings 提示 + 开关回退(reapply/switch 双路径);远端隐藏 claude-desktop;宿主机仅需 22 端口 |
 | 隧道回连地址动态化(08-11) | `TUNNEL_HOST` 全局同步本机代理监听地址(0.0.0.0→127.0.0.1、::→::1);`server_channel_open_forwarded_tcpip` 回连改 `tunnel_host():tunnel_port()`——本机监听地址改任意 IP 远端仍可用 |
 | 远程面板 | Sessions / MCP / Prompts / Skills(全 app 读写)+ Docker 容器目标 |
+| 远端 Skills「导入已有」绿点对齐目标(2026-08-16) | 「导入」按钮绿点远端下改为**反映当前所选目标(宿主机/容器)可导入技能数**,而非本机。新增 `useRemoteUnmanagedSkillsQuery(host,container)`,query key 精确到目标互不干扰;UnifiedSkillsPanel 挂载(enabled:true)自动扫当前目标,重进 Skill 页即重扫(对齐本机 `useScanUnmanagedSkills`);点开导入 refetch 取最新;导入成功 invalidate 当前目标 key → 圆点立即消失。提交 c5fcb48a |
 
 ### ⏳ 远程·待完成(优先级从高到低)
 
