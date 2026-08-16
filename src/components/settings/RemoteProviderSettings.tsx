@@ -35,7 +35,7 @@ export function RemoteProviderSettings({
       <div className="flex items-center gap-2 pb-2 border-b border-border/40">
         <Server className="h-4 w-4 text-primary" />
         <h3 className="text-sm font-medium">
-          {t("settings.section.remote", { defaultValue: "远端设置" })}
+          {t("settings.section.remote", { defaultValue: "SSH远端设置" })}
         </h3>
       </div>
       <p className="text-xs text-muted-foreground -mt-2">
@@ -94,7 +94,7 @@ export function RemoteProviderSettings({
             <p className="text-[11px] leading-snug text-muted-foreground/70">
               {t("settings.remote.autoImportDefault.note", {
                 defaultValue:
-                  "注：仅影响 Claude、Codex、Gemini、Grok Build；OpenCode、OpenClaw、Hermes 始终实时同步，不受影响。",
+                  "注：该设置仅对 Claude、Codex、Gemini、Grok Build 生效，OpenCode、OpenClaw、Hermes 始终跟随当前应用。",
               })}
             </p>
           </div>
