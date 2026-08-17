@@ -378,7 +378,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
       >
         {extra && (
           <span
-            className={`text-xs text-gray-400 dark:text-gray-500 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+            className={`text-xs text-gray-500 dark:text-gray-400 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={extra}
           >
             {t("usage.resetsAt", { defaultValue: "重置" })}：{formatDate(extra)}
