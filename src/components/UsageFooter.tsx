@@ -406,12 +406,12 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
 
       {/* 用量信息：45% */}
       <div
-        className="flex items-center justify-end gap-2 text-xs flex-shrink-0"
+        className="flex items-center justify-end gap-2 text-xs flex-shrink-0 whitespace-nowrap"
         style={{ width: "45%" }}
       >
         {/* 总额度 */}
         {total !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.total")}
             </span>
@@ -420,12 +420,12 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             </span>
             <span className="text-gray-400 dark:text-gray-600">%</span>
             <span className="text-gray-400 dark:text-gray-600">|</span>
-          </>
+          </span>
         )}
 
         {/* 已用额度 - 突出显示 */}
         {used !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.used")}
             </span>
@@ -445,12 +445,12 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             </span>
             <span className="text-gray-400 dark:text-gray-600">%</span>
             <span className="text-gray-400 dark:text-gray-600">|</span>
-          </>
+          </span>
         )}
 
         {/* 剩余额度 - 普通灰色 */}
         {remaining !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
@@ -458,7 +458,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
               {remaining.toFixed(2)}
             </span>
             <span className="text-gray-400 dark:text-gray-600">%</span>
-          </>
+          </span>
         )}
 
         {unit && (
