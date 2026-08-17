@@ -56,6 +56,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS.filter((app) => app !== "pi");
+
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
   currentApp: AppId;
@@ -282,6 +284,7 @@ const UnifiedSkillsPanel = React.forwardRef<
         opencode: 0,
         openclaw: 0,
         hermes: 0,
+        pi: 0,
       };
       if (!skills) return counts;
       skills.forEach((skill) => {
@@ -829,6 +832,7 @@ const UnifiedSkillsPanel = React.forwardRef<
               opacity: applicableSkillUpdates.length > 0 ? 1 : 0,
             }}
           >
+          >
             <Button
               type="button"
               variant="outline"
@@ -907,6 +911,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                       }
                       isRemote={isRemote}
                       actionsDisabled={interactionBlocked}
+                      appIds={SKILLS_APP_IDS}
                       onToggleApp={handleToggleApp}
                       onUninstall={() => handleUninstall(skill)}
                       onUpdate={() => handleUpdateSkill(skill)}
@@ -964,6 +969,7 @@ UnifiedSkillsPanel.displayName = "UnifiedSkillsPanel";
 
 interface InstalledSkillListItemProps {
   skill: InstalledSkill;
+  appIds: AppId[];
   hasUpdate?: boolean;
   isUpdating?: boolean;
   isRemote?: boolean;
@@ -976,6 +982,7 @@ interface InstalledSkillListItemProps {
 
 const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
   skill,
+  appIds,
   hasUpdate,
   isUpdating,
   isRemote,
@@ -1044,7 +1051,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
       <AppToggleGroup
         apps={skill.apps}
         onToggle={(app, enabled) => onToggleApp(skill.id, app, enabled)}
-        appIds={SKILLS_APP_IDS}
+        appIds={appIds}
         disabled={actionsDisabled}
       />
 
@@ -1254,6 +1261,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
           opencode: skill.foundIn.includes("opencode"),
           openclaw: false,
           hermes: skill.foundIn.includes("hermes"),
+          pi: false,
         },
       ]),
     ),
@@ -1283,6 +1291,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
             opencode: false,
             openclaw: false,
             hermes: false,
+            pi: false,
           },
           path: skill?.path,
         };
@@ -1348,7 +1357,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
                           },
                         }));
                       }}
-                      appIds={SKILLS_APP_IDS}
+                      appIds={IMPORT_SKILLS_APP_IDS}
                     />
                   </div>
                   <div

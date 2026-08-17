@@ -5,10 +5,9 @@ import { toast } from "sonner";
 import { type AppId } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
-import { ManagementListSearch } from "@/components/common/ManagementListSearch";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import PromptListItem from "./PromptListItem";
+import PiPromptPanel, { type PromptPrimaryAction } from "./PiPromptPanel";
 import PromptFormPanel from "./PromptFormPanel";
+import { PromptLibrary } from "./PromptLibrary";
 import { ConfirmDialog } from "../ConfirmDialog";
 import {
   listRemotePrompts,
@@ -26,13 +25,19 @@ interface PromptPanelProps {
   remoteContainerId?: string;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
+  onPrimaryActionChange?: (action: PromptPrimaryAction) => void;
 }
 
 export interface PromptPanelHandle {
   openAdd: () => void;
 }
 
-const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
+export type { PromptPrimaryAction } from "./PiPromptPanel";
+
+const StandardPromptPanel = React.forwardRef<
+  PromptPanelHandle,
+  PromptPanelProps
+>(
   (
     {
       open,
@@ -41,6 +46,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       remoteContainerId,
       onInteractionBlockedChange,
       onNavigationBlockedChange,
+      onPrimaryActionChange,
     },
     ref,
   ) => {
@@ -118,6 +124,10 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       onNavigationBlockedChange?.(navigationBlocked);
     }, [navigationBlocked, onNavigationBlockedChange]);
 
+    useEffect(() => {
+      onPrimaryActionChange?.("prompt");
+    }, [onPrimaryActionChange]);
+
     useEffect(
       () => () => {
         onInteractionBlockedChange?.(false);
@@ -177,7 +187,6 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       }
     }, [appId, runExternalReload]);
 
-    // Listen for prompt import events from deep link
     useEffect(() => {
       const handlePromptImported = (event: Event) => {
         const customEvent = event as CustomEvent;
@@ -191,7 +200,6 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
       };
     }, [appId, runExternalReload]);
 
-    // 应用项目 Profile 会切换激活的 prompt（prompts 非 react-query，需主动 reload）
     useTauriEvent("profile-applied", runExternalReload);
 
     const handleAdd = () => {
@@ -321,7 +329,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         if (refreshed === false) {
           externalReloadQueuedRef.current = true;
         }
-      } catch (error) {
+      } catch {
         // Error handled by hook
       } finally {
         endWrite();
@@ -374,7 +382,7 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
           externalReloadQueuedRef.current = true;
         }
         return true;
-      } catch (error) {
+      } catch {
         // Error handled by hook
         return false;
       } finally {
@@ -413,63 +421,21 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
 
     return (
       <div className="flex flex-col flex-1 min-h-0 px-6">
-        <div className="flex-shrink-0 py-4 glass rounded-xl border border-white/10 mb-4 px-6">
-          <div className="text-sm text-muted-foreground">
-            {t("prompts.count", { count: promptEntries.length })} ·{" "}
-            {enabledPrompt
+        <PromptLibrary
+          prompts={prompts}
+          loading={loading}
+          searchQuery={searchQuery}
+          statusText={
+            enabledPrompt
               ? t("prompts.enabledName", { name: enabledPrompt[1].name })
-              : t("prompts.noneEnabled")}
-          </div>
-        </div>
-
-        <ManagementListSearch
-          value={searchQuery}
-          onValueChange={setSearchQuery}
-          placeholder={t("prompts.searchPlaceholder")}
-          ariaLabel={t("prompts.searchAriaLabel")}
-          clearLabel={t("common.clear")}
+              : t("prompts.noneEnabled")
+          }
+          disabled={interactionBlocked}
+          onSearchQueryChange={setSearchQuery}
+          onToggle={handleToggle}
+          onEdit={handleEdit}
+          onDelete={handleDelete}
         />
-
-        <ScrollArea className="-mr-3 flex-1 min-h-0" type="auto">
-          <div className="pb-16 pr-3">
-            {loading ? (
-              <div className="text-center py-12 text-muted-foreground">
-                {t("prompts.loading")}
-              </div>
-            ) : promptEntries.length === 0 ? (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 mx-auto mb-4 bg-muted rounded-full flex items-center justify-center">
-                  <FileText size={24} className="text-muted-foreground" />
-                </div>
-                <h3 className="text-lg font-medium text-foreground mb-2">
-                  {t("prompts.empty")}
-                </h3>
-                <p className="text-muted-foreground text-sm">
-                  {t("prompts.emptyDescription")}
-                </p>
-              </div>
-            ) : filteredPromptEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-                <Search className="mb-4 h-10 w-10 opacity-40" />
-                <p className="text-sm">{t("prompts.noSearchResults")}</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {filteredPromptEntries.map(([id, prompt]) => (
-                  <PromptListItem
-                    key={id}
-                    id={id}
-                    prompt={prompt}
-                    onToggle={handleToggle}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
-                    disabled={interactionBlocked}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </ScrollArea>
 
         {isFormOpen && (
           <PromptFormPanel
@@ -501,6 +467,26 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         )}
       </div>
     );
+  },
+);
+
+StandardPromptPanel.displayName = "StandardPromptPanel";
+
+const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
+  (props, ref) => {
+    if (props.appId === "pi") {
+      return (
+        <PiPromptPanel
+          ref={ref}
+          open={props.open}
+          onInteractionBlockedChange={props.onInteractionBlockedChange}
+          onNavigationBlockedChange={props.onNavigationBlockedChange}
+          onPrimaryActionChange={props.onPrimaryActionChange}
+        />
+      );
+    }
+
+    return <StandardPromptPanel ref={ref} {...props} />;
   },
 );
 

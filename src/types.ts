@@ -144,7 +144,10 @@ export type CodexChatEffortValueMode =
   | "low_high"
   | "deepseek"
   // OpenRouter effort 枚举 xhigh|high|medium|low|minimal（无 max，max 钳到 xhigh）
-  | "openrouter";
+  | "openrouter"
+  // OpenCode Zen 网关：合法档位逐模型，见 modelCatalog 各条目 reasoningLevels
+  // （镜像 models.dev）；代理转换层按请求模型查表钳制，无表不发 effort 字段
+  | "zen";
 
 export type CodexChatReasoningOutputFormat =
   | "auto"
@@ -229,6 +232,8 @@ export interface ProviderMeta {
   customUserAgent?: string;
   // Local proxy request overrides. Only applied by the local proxy after route transforms.
   localProxyRequestOverrides?: LocalProxyRequestOverrides;
+  // Whether this provider is currently projected into an additive app's live config.
+  liveConfigManaged?: boolean;
   // 供应商类型（用于识别 Copilot 等特殊供应商）
   providerType?: string;
   // GitHub Copilot 关联账号 ID（旧字段，保留兼容读取）
@@ -294,6 +299,7 @@ export interface VisibleApps {
   opencode: boolean;
   openclaw: boolean;
   hermes: boolean;
+  pi: boolean;
 }
 
 // WebDAV 同步状态
@@ -427,6 +433,8 @@ export interface Settings {
   openclawConfigDir?: string;
   // 覆盖 Hermes 配置目录（可选）
   hermesConfigDir?: string;
+  // 覆盖 Pi agent 配置目录（可选）
+  piConfigDir?: string;
 
   // ===== 当前供应商 ID（设备级）=====
   // 当前 Claude 供应商 ID（优先于数据库 is_current）

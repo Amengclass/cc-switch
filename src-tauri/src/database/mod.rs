@@ -53,7 +53,7 @@ use std::sync::Mutex;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 16;
+pub(crate) const SCHEMA_VERSION: i32 = 17;
 
 /// 增强版历史写入过的最大 schema 版本。
 ///
