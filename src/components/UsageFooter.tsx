@@ -331,10 +331,9 @@ function formatResetInfo(isoStr: string): { countdown: string; date: string } {
     const hours = Math.floor((diffSec % 86400) / 3600);
     const minutes = Math.floor((diffSec % 3600) / 60);
     let countdown = "";
-    if (days > 0) countdown += `${days} 天 `;
-    if (hours > 0) countdown += `${hours} 小时 `;
-    if (minutes > 0 || countdown === "") countdown += `${minutes} 分钟`;
-    countdown = countdown.trim();
+    if (days > 0) countdown += `${days}d`;
+    if (hours > 0) countdown += `${hours}h`;
+    if (minutes > 0 || countdown === "") countdown += `${minutes}m`;
     const month = date.getMonth() + 1;
     const day = date.getDate();
     const h = date.getHours().toString().padStart(2, "0");
@@ -390,10 +389,11 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
           const { countdown, date } = formatResetInfo(extra);
           return (
             <span
-              className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+              className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums flex items-center gap-1 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
               title={extra}
             >
-              {t("usage.resetsIn", { defaultValue: "重置于" })} {countdown} {date}
+              <Clock size={10} className="flex-shrink-0" />
+              {countdown} {date}
             </span>
           );
         })()}
