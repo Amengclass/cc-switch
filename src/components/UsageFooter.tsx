@@ -141,8 +141,13 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   // 无数据时不显示
   if (usageDataList.length === 0) return null;
 
-  // ── Token Plan：订阅风格内联渲染（百分比徽章 + 倒计时） ──
-  if (isTokenPlan && inline) {
+  // 检查是否有 tier 信息（planName 或 extra JSON）
+  const hasTierInfo = usageDataList.some(
+    (d) => d.planName || (d.extra && d.extra.startsWith("{")),
+  );
+
+  // ── Token Plan 或有 tier 信息：订阅风格内联渲染（百分比徽章 + 倒计时） ──
+  if ((isTokenPlan || hasTierInfo) && inline) {
     return (
       <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap flex-shrink-0">
         {/* 第一行：查询时间 + 刷新 */}
