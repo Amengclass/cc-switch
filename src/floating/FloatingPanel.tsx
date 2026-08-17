@@ -91,11 +91,26 @@ function UsageDetail({
     );
   }
   if (d.extra) {
-    nodes.push(
-      <span key="extra" className="usage-extra">
-        {d.extra}
-      </span>,
-    );
+    // extra 可能是 ISO 时间字符串，尝试格式化为相对时间
+    const resetTime = d.extra;
+    const resetDate = new Date(resetTime);
+    if (!isNaN(resetDate.getTime())) {
+      const diffMs = resetDate.getTime() - Date.now();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      if (diffDays > 0) {
+        nodes.push(
+          <span key="extra" className="usage-extra">
+            {t("floating.resetsIn", { count: diffDays, defaultValue: `${diffDays}天后重置` })}
+          </span>,
+        );
+      }
+    } else {
+      nodes.push(
+        <span key="extra" className="usage-extra">
+          {resetTime}
+        </span>,
+      );
+    }
   }
   return <span className="usage-line">{nodes}</span>;
 }
