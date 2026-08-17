@@ -1949,7 +1949,7 @@
     "minutesAgo": "{{count}} 分钟前",
     "hoursAgo": "{{count}} 小时前",
     "daysAgo": "{{count}} 天前",
-    "multiplePlans": "{{count}} 个套餐",
+    "multiplePlans": "{{count}} 个plan套餐",
     "expand": "展开",
     "collapse": "收起",
     "modelIdPlaceholder": "例如: claude-3-5-sonnet-20241022",

@@ -669,10 +669,10 @@ export function ProviderCard({
                     {hasMultiplePlans
                       ? t("usage.multiplePlans", {
                           count: usage?.data?.length || 0,
-                          defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                          defaultValue: `${usage?.data?.length || 0} 个plan套餐`,
                         })
                       : t("usage.subscriptionQuota", {
-                          defaultValue: "套餐用量",
+                          defaultValue: "plan套餐",
                         })}
                   </span>
                 </div>
