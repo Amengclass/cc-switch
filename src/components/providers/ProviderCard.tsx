@@ -663,29 +663,16 @@ export function ProviderCard({
                   />
                 ) : null
               ) : !quotaInline ? (
-                // 展开模式：始终显示套餐摘要 + 展开按钮
+                // 展开模式：统一显示"plan套餐"
                 <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                   <span className="font-medium">
-                    {hasMultiplePlans
-                      ? t("usage.multiplePlans", {
-                          count: usage?.data?.length || 0,
-                          defaultValue: `${usage?.data?.length || 0} 个plan套餐`,
-                        })
-                      : t("usage.subscriptionQuota", {
-                          defaultValue: "plan套餐",
-                        })}
-                  </span>
-                </div>
-              ) : hasMultiplePlans ? (
-                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                  <span className="font-medium">
-                    {t("usage.multiplePlans", {
-                      count: usage?.data?.length || 0,
-                      defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                    {t("usage.subscriptionQuota", {
+                      defaultValue: "plan套餐",
                     })}
                   </span>
                 </div>
               ) : (
+                // 紧凑模式：直接显示 inline 格式
                 <UsageFooter
                   provider={provider}
                   providerId={provider.id}
@@ -696,7 +683,8 @@ export function ProviderCard({
                   inline={quotaInline}
                 />
               )}
-              {(!quotaInline || hasMultiplePlans) && (
+              {/* 展开按钮：仅展开模式显示，紧凑模式完全隐藏 */}
+              {!quotaInline && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -779,7 +767,8 @@ export function ProviderCard({
         </div>
       </div>
 
-      {isExpanded && (!quotaInline || hasMultiplePlans) && (
+      {/* 展开区域：仅展开模式显示 */}
+      {isExpanded && !quotaInline && (
         <div className="mt-4 pt-4 border-t border-border-default">
           <UsageFooter
             provider={provider}
