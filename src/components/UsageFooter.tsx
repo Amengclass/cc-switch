@@ -332,13 +332,13 @@ function formatResetInfo(isoStr: string, showMinutes = true): { countdown: strin
     const minutes = Math.floor((diffSec % 3600) / 60);
     let countdown = "";
     if (days > 0) countdown += `${days}d`;
-    if (hours > 0) countdown += `${hours}h`;
-    if (showMinutes && (minutes > 0 || countdown === "")) countdown += `${minutes}m`;
+    if (hours > 0) countdown += `${hours.toString().padStart(2, "0")}h`;
+    if (showMinutes) countdown += `${minutes.toString().padStart(2, "0")}m`;
     const month = date.getMonth() + 1;
     const day = date.getDate();
     const h = date.getHours().toString().padStart(2, "0");
     const m = date.getMinutes().toString().padStart(2, "0");
-    return { countdown, date: `${month}/${day} ${h}:${m}` };
+    return { countdown, date: `${month.toString().padStart(2, "0")}/${day.toString().padStart(2, "0")} ${h}:${m}` };
   } catch {
     return { countdown: "", date: isoStr };
   }
@@ -415,9 +415,10 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.total")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
+            <span className="tabular-nums text-gray-600 dark:text-gray-400" style={{ minWidth: "4ch", textAlign: "right" }}>
               {total === -1 ? "∞" : total.toFixed(2)}
             </span>
+            <span className="text-gray-400 dark:text-gray-600">%</span>
             <span className="text-gray-400 dark:text-gray-600">|</span>
           </>
         )}
@@ -438,9 +439,11 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
                       ? "text-orange-500 dark:text-orange-400"
                       : "text-green-600 dark:text-green-400"
               }`}
+              style={{ minWidth: "4ch", textAlign: "right" }}
             >
               {used.toFixed(2)}
             </span>
+            <span className="text-gray-400 dark:text-gray-600">%</span>
             <span className="text-gray-400 dark:text-gray-600">|</span>
           </>
         )}
@@ -451,9 +454,10 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
+            <span className="tabular-nums text-gray-600 dark:text-gray-400" style={{ minWidth: "4ch", textAlign: "right" }}>
               {remaining.toFixed(2)}
             </span>
+            <span className="text-gray-400 dark:text-gray-600">%</span>
           </>
         )}
 
