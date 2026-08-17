@@ -338,10 +338,13 @@ export function ProviderCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
-    if (hasMultiplePlans) {
+    // 紧凑模式下强制收起，展开模式下多套餐自动展开
+    if (!quotaInline && hasMultiplePlans) {
       setIsExpanded(true);
+    } else if (quotaInline) {
+      setIsExpanded(false);
     }
-  }, [hasMultiplePlans]);
+  }, [hasMultiplePlans, quotaInline]);
 
   const handleOpenWebsite = () => {
     if (!isClickableUrl) {
@@ -659,6 +662,20 @@ export function ProviderCard({
                     }
                   />
                 ) : null
+              ) : !quotaInline ? (
+                // 展开模式：始终显示套餐摘要 + 展开按钮
+                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
+                  <span className="font-medium">
+                    {hasMultiplePlans
+                      ? t("usage.multiplePlans", {
+                          count: usage?.data?.length || 0,
+                          defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                        })
+                      : t("usage.subscriptionQuota", {
+                          defaultValue: "套餐用量",
+                        })}
+                  </span>
+                </div>
               ) : hasMultiplePlans ? (
                 <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                   <span className="font-medium">
@@ -679,7 +696,7 @@ export function ProviderCard({
                   inline={quotaInline}
                 />
               )}
-              {hasMultiplePlans && (
+              {(!quotaInline || hasMultiplePlans) && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -762,7 +779,7 @@ export function ProviderCard({
         </div>
       </div>
 
-      {isExpanded && hasMultiplePlans && (
+      {isExpanded && (!quotaInline || hasMultiplePlans) && (
         <div className="mt-4 pt-4 border-t border-border-default">
           <UsageFooter
             provider={provider}
@@ -771,7 +788,7 @@ export function ProviderCard({
             usageEnabled={usageEnabled}
             isCurrent={isCurrent}
             isInConfig={isInConfig}
-            inline={false}
+            inline={quotaInline}
           />
         </div>
       )}
