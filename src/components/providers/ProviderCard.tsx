@@ -769,7 +769,7 @@ export function ProviderCard({
 
       {/* 展开区域：仅展开模式显示 */}
       {isExpanded && !quotaInline && (
-        <div className="mt-2 pt-2 border-t border-border-default">
+        <div className="mt-1 pt-1 border-t border-border-default">
           <UsageFooter
             provider={provider}
             providerId={provider.id}
