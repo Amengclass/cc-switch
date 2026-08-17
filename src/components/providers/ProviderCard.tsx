@@ -22,6 +22,7 @@ import SubscriptionQuotaFooter from "@/components/SubscriptionQuotaFooter";
 import CopilotQuotaFooter from "@/components/CopilotQuotaFooter";
 import CodexOauthQuotaFooter from "@/components/CodexOauthQuotaFooter";
 import XaiOauthQuotaFooter from "@/components/XaiOauthQuotaFooter";
+import { useSettings } from "@/hooks/useSettings";
 import { PROVIDER_TYPES, TEMPLATE_TYPES } from "@/config/constants";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
@@ -270,6 +271,8 @@ export function ProviderCard({
   }, [provider.notes, displayUrl, fallbackUrlText]);
 
   const usageEnabled = provider.meta?.usage_script?.enabled ?? false;
+  const { settings } = useSettings();
+  const quotaInline = (settings?.quotaDisplayMode ?? "compact") === "compact";
   const isOfficial = isOfficialProvider(provider, appId);
   const supportsOfficialSubscription =
     isOfficial && ["claude", "codex", "gemini", "grokbuild"].includes(appId);
@@ -630,26 +633,26 @@ export function ProviderCard({
               {isCopilot ? (
                 <CopilotQuotaFooter
                   meta={provider.meta}
-                  inline={true}
+                  inline={quotaInline}
                   isCurrent={isCurrent}
                 />
               ) : isCodexOauth ? (
                 <CodexOauthQuotaFooter
                   meta={provider.meta}
-                  inline={true}
+                  inline={quotaInline}
                   isCurrent={isCurrent}
                 />
               ) : isXaiOauth ? (
                 <XaiOauthQuotaFooter
                   meta={provider.meta}
-                  inline={true}
+                  inline={quotaInline}
                   isCurrent={isCurrent}
                 />
               ) : isOfficial ? (
                 officialSubscriptionEnabled ? (
                   <SubscriptionQuotaFooter
                     appId={appId}
-                    inline={true}
+                    inline={quotaInline}
                     isCurrent={isCurrent}
                     autoQueryInterval={
                       provider.meta?.usage_script?.autoQueryInterval ?? 0
@@ -673,7 +676,7 @@ export function ProviderCard({
                   usageEnabled={usageEnabled}
                   isCurrent={isCurrent}
                   isInConfig={isInConfig}
-                  inline={true}
+                  inline={quotaInline}
                 />
               )}
               {hasMultiplePlans && (

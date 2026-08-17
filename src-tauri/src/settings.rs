@@ -526,6 +526,11 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_terminal: Option<String>,
 
+    // ===== 套餐用量显示模式 =====
+    /// 套餐用量显示模式：compact（紧凑，默认）或 expanded（展开详情）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quota_display_mode: Option<String>,
+
     // ===== 本机自动迁移状态 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_migrations: Option<LocalMigrations>,
@@ -599,6 +604,7 @@ impl Default for AppSettings {
             backup_interval_hours: None,
             backup_retain_count: None,
             preferred_terminal: None,
+            quota_display_mode: None,
             local_migrations: None,
         }
     }

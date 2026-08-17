@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Server, Activity, Zap, Globe, ShieldAlert } from "lucide-react";
+import { Server, Activity, Zap, Globe, ShieldAlert, BarChart3 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import {
@@ -269,6 +269,53 @@ export function ProxyTabContent({
           </AccordionTrigger>
           <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
             <GlobalProxySettings />
+          </AccordionContent>
+        </AccordionItem>
+
+        {/* Quota Display Mode */}
+        <AccordionItem
+          value="quotaDisplay"
+          className="rounded-xl glass-card overflow-hidden"
+        >
+          <AccordionTrigger className="px-6 py-4 hover:no-underline hover:bg-muted/50 data-[state=open]:bg-muted/50">
+            <div className="flex items-center gap-3">
+              <BarChart3 className="h-5 w-5 text-emerald-500" />
+              <div className="text-left">
+                <h3 className="text-base font-semibold">
+                  {t("settings.advanced.quotaDisplay.title", {
+                    defaultValue: "套餐用量显示",
+                  })}
+                </h3>
+                <p className="text-sm text-muted-foreground font-normal">
+                  {t("settings.advanced.quotaDisplay.description", {
+                    defaultValue: "控制套餐用量的显示格式",
+                  })}
+                </p>
+              </div>
+            </div>
+          </AccordionTrigger>
+          <AccordionContent className="px-6 pb-6 pt-4 border-t border-border/50">
+            <div className="space-y-4">
+              <ToggleRow
+                icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
+                title={t("settings.advanced.quotaDisplay.compact", {
+                  defaultValue: "紧凑模式",
+                })}
+                description={t(
+                  "settings.advanced.quotaDisplay.compactDescription",
+                  {
+                    defaultValue:
+                      "以简洁格式显示套餐用量（如「5小时: 5% 2h57m」），关闭则展开显示详细数据",
+                  },
+                )}
+                checked={(settings?.quotaDisplayMode ?? "compact") === "compact"}
+                onCheckedChange={(checked) =>
+                  onAutoSave({
+                    quotaDisplayMode: checked ? "compact" : "expanded",
+                  })
+                }
+              />
+            </div>
           </AccordionContent>
         </AccordionItem>
       </Accordion>

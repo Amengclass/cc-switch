@@ -471,6 +471,10 @@ export interface Settings {
   // Linux: "gnome-terminal" | "konsole" | "xfce4-terminal" | "alacritty" | "kitty" | "ghostty"
   preferredTerminal?: string;
 
+  // ===== 套餐用量显示模式 =====
+  // compact（紧凑，默认）或 expanded（展开详情）
+  quotaDisplayMode?: string;
+
   // ===== 本机自动迁移状态 =====
   localMigrations?: {
     codexThirdPartyHistoryProviderBucketV1?: {
