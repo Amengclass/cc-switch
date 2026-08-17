@@ -320,18 +320,27 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 
 // ── 通用用量组件 ────────────────────────────────────────────
 
-/** 格式化 ISO 日期字符串为可读格式 */
-function formatDate(isoStr: string): string {
+/** 格式化 ISO 日期字符串为倒计时 + 可读时间 */
+function formatResetInfo(isoStr: string): { countdown: string; date: string } {
   try {
     const date = new Date(isoStr);
-    if (isNaN(date.getTime())) return isoStr;
+    if (isNaN(date.getTime())) return { countdown: "", date: isoStr };
+    const diffMs = date.getTime() - Date.now();
+    const diffSec = Math.max(0, Math.floor(diffMs / 1000));
+    const days = Math.floor(diffSec / 86400);
+    const hours = Math.floor((diffSec % 86400) / 3600);
+    const minutes = Math.floor((diffSec % 3600) / 60);
+    let countdown = "";
+    if (days > 0) countdown += `${days}天`;
+    if (hours > 0) countdown += `${hours}小时`;
+    if (minutes > 0 || countdown === "") countdown += `${minutes}分钟`;
     const month = date.getMonth() + 1;
     const day = date.getDate();
-    const hours = date.getHours();
-    const minutes = date.getMinutes().toString().padStart(2, "0");
-    return `${month}/${day} ${hours}:${minutes}`;
+    const h = date.getHours().toString().padStart(2, "0");
+    const m = date.getMinutes().toString().padStart(2, "0");
+    return { countdown, date: `${month}/${day} ${h}:${m}` };
   } catch {
-    return isoStr;
+    return { countdown: "", date: isoStr };
   }
 }
 
@@ -376,14 +385,17 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
         className="text-xs text-gray-500 dark:text-gray-400 min-w-0 flex items-center gap-2"
         style={{ width: "30%" }}
       >
-        {extra && (
-          <span
-            className={`text-xs text-gray-500 dark:text-gray-400 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
-            title={extra}
-          >
-            {t("usage.resetsAt", { defaultValue: "重置" })}：{formatDate(extra)}
-          </span>
-        )}
+        {extra && (() => {
+          const { countdown, date } = formatResetInfo(extra);
+          return (
+            <span
+              className={`text-xs text-gray-500 dark:text-gray-400 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+              title={extra}
+            >
+              {t("usage.resetsIn", { defaultValue: "重置于" })} {countdown}（{date}）
+            </span>
+          );
+        })()}
         {isExpired && (
           <span className="text-red-500 dark:text-red-400 font-medium text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
             {invalidMessage || t("usage.invalid")}
