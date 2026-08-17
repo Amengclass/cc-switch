@@ -454,14 +454,14 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400" style={{ minWidth: "4ch", textAlign: "right" }}>
+            <span className="tabular-nums text-gray-600 dark:text-gray-400">
               {remaining.toFixed(2)}
             </span>
             <span className="text-gray-400 dark:text-gray-600">%</span>
           </span>
         )}
 
-        {unit && (
+        {unit && unit !== "%" && (
           <span className="text-gray-500 dark:text-gray-400">{unit}</span>
         )}
       </div>
