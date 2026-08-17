@@ -37,7 +37,7 @@ export function QuotaDisplaySettings({
         })}
         description={t("settings.quotaDisplay.compactDescription", {
           defaultValue:
-            "以简洁格式显示套餐用量（如「5小时: 5%」），关闭则展开显示详细数据（总额/已用/剩余/重置时间）",
+            "紧凑模式：套餐用量直接嵌入供应商卡片（如「5小时: 5%」）；关闭后：套餐用量在卡片下方独立面板展开显示（含总额/已用/剩余/重置时间）",
         })}
         checked={value === "compact"}
         onCheckedChange={(checked) =>
