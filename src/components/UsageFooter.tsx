@@ -392,7 +392,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
               className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
               title={extra}
             >
-              {countdown} {date}
+              {t("usage.resetsIn", { defaultValue: "重置于" })} {countdown} {date}
             </span>
           );
         })()}
