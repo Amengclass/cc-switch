@@ -31,6 +31,7 @@ export function QuotaDisplaySettings({
         </div>
       </header>
       <ToggleRow
+        icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
         title={t("settings.quotaDisplay.compact", {
           defaultValue: "紧凑模式",
         })}
