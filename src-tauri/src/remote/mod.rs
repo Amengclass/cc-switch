@@ -19,6 +19,7 @@ pub mod hermes;
 pub mod mcp;
 pub mod openclaw;
 pub mod opencode;
+pub mod pi;
 pub mod prompt;
 pub mod providers;
 pub mod sessions;

@@ -20,7 +20,7 @@ use crate::provider::{Provider, ProviderMeta};
 
 /// 是否 additive 模式 app（live 即完整供应商集合）。
 pub fn is_additive_app(app: &str) -> bool {
-    matches!(app, "opencode" | "openclaw" | "hermes")
+    matches!(app, "opencode" | "openclaw" | "hermes" | "pi")
 }
 
 /// SSOT 文件路径。
@@ -298,6 +298,47 @@ async fn parse_remote_live_providers<F: FileOps>(
                     });
                     out.push(p);
                 }
+            }
+        }
+        "pi" => {
+            let path = format!("{root}/.pi/agent/models.json");
+            let Some(text) = fs.read_text_optional(&path).await? else {
+                return Ok(out);
+            };
+            let value = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}));
+            let Some(providers_obj) = value
+                .get("providers")
+                .and_then(Value::as_object)
+            else {
+                return Ok(out);
+            };
+            for (id, config_value) in providers_obj {
+                if id.trim().is_empty() {
+                    continue;
+                }
+                // Pi providers are plain JSON objects with fields like name, baseUrl, etc.
+                // Validate they are objects (consistent with pi_config::validate_provider_node).
+                if !config_value.is_object() {
+                    log::warn!("远端 Pi provider '{id}' 不是对象，跳过");
+                    continue;
+                }
+                let display_name = config_value
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|n| !n.trim().is_empty())
+                    .unwrap_or(id)
+                    .to_string();
+                let mut p = Provider::with_id(
+                    id.clone(),
+                    display_name,
+                    config_value.clone(),
+                    None,
+                );
+                p.meta = Some(ProviderMeta {
+                    live_config_managed: Some(true),
+                    ..Default::default()
+                });
+                out.push(p);
             }
         }
         _ => {}
@@ -778,6 +819,18 @@ pub async fn apply_remote_provider_to_live(
             )
             .await
         }
+        "pi" => {
+            crate::remote::pi::apply_pi_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
+        }
         other => Err(format!("远程切换暂不支持应用: {other}")),
     }?;
     // 隧道未建立而降级直连时，把原因追加进 warnings 让前端以醒目样式提示用户
@@ -835,6 +888,18 @@ pub async fn read_remote_live_provider_ids<F: FileOps>(
                             .map(|n| n.to_string())
                             .collect()
                     })
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
+        }
+        "pi" => {
+            let path = format!("{root}/.pi/agent/models.json");
+            match fs.read_text_optional(&path).await? {
+                Some(text) => serde_json::from_str::<Value>(&text)
+                    .unwrap_or_else(|_| json!({}))
+                    .get("providers")
+                    .and_then(Value::as_object)
+                    .map(|p| p.keys().cloned().collect())
                     .unwrap_or_default(),
                 None => Vec::new(),
             }

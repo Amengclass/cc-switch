@@ -527,6 +527,7 @@ fn remote_app_config_path(app: &str, home: &str) -> Option<String> {
         "opencode" => format!("{home}/.config/opencode/opencode.json"),
         "openclaw" => format!("{home}/.openclaw/openclaw.json"),
         "hermes" => format!("{home}/.hermes/config.yaml"),
+        "pi" => format!("{home}/.pi/agent/models.json"),
         _ => return None,
     };
     Some(path)
@@ -665,6 +666,28 @@ pub async fn remove_remote_provider_from_live(
             session
                 .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
                 .await?;
+            Ok(())
+        }
+        "pi" => {
+            let config_path = format!("{root}/.pi/agent/models.json");
+            let mut merged: Value = session
+                .read_remote_text(&config_path, container.as_deref())
+                .await?
+                .map(|t| serde_json::from_str(&t).unwrap_or_else(|_| json!({})))
+                .unwrap_or_else(|| json!({}));
+            let removed = merged
+                .get_mut("providers")
+                .and_then(|v| v.as_object_mut())
+                .is_some_and(|p| p.remove(&provider_id).is_some());
+            if !removed {
+                log::debug!("远端 models.json 中没有供应商 {provider_id}，跳过 live 移除");
+            } else {
+                let text = serde_json::to_string_pretty(&merged)
+                    .map_err(|e| format!("序列化 models.json 失败: {e}"))?;
+                session
+                    .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
+                    .await?;
+            }
             Ok(())
         }
         other => {
@@ -3088,6 +3111,7 @@ fn cli_binary_for_app(app: &str) -> Option<&'static str> {
         "opencode" => Some("opencode"),
         "openclaw" => Some("openclaw"),
         "hermes" => Some("hermes"),
+        "pi" => Some("pi"),
         _ => None,
     }
 }
