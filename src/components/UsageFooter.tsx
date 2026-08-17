@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { type AppId } from "@/lib/api";
 import { useUsageQuery } from "@/lib/query/queries";
 import { UsageData, Provider } from "@/types";
-import { TierBadge } from "@/components/SubscriptionQuotaFooter";
+import { TierBadge, TIER_I18N_KEYS } from "@/components/SubscriptionQuotaFooter";
 import type { QuotaTier } from "@/types/subscription";
 import { isAdditiveAppId } from "@/config/appConfig";
 
@@ -373,7 +373,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             className={`font-medium truncate block ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={planName}
           >
-            💰 {planName}
+            💰 {TIER_I18N_KEYS[planName] ? t(TIER_I18N_KEYS[planName]) : planName}
           </span>
         ) : (
           <span className="opacity-50">—</span>
