@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, ToggleLeft } from "lucide-react";
 import { ToggleRow } from "@/components/ui/toggle-row";
 
 interface QuotaDisplaySettingsProps {
@@ -31,7 +31,7 @@ export function QuotaDisplaySettings({
         </div>
       </header>
       <ToggleRow
-        icon={<BarChart3 className="h-4 w-4 text-emerald-500" />}
+        icon={<ToggleLeft className="h-4 w-4 text-emerald-500" />}
         title={t("settings.quotaDisplay.compact", {
           defaultValue: "紧凑模式",
         })}
