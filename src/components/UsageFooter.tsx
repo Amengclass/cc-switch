@@ -331,9 +331,10 @@ function formatResetInfo(isoStr: string): { countdown: string; date: string } {
     const hours = Math.floor((diffSec % 86400) / 3600);
     const minutes = Math.floor((diffSec % 3600) / 60);
     let countdown = "";
-    if (days > 0) countdown += `${days}d`;
-    if (hours > 0) countdown += `${hours}h`;
-    if (minutes > 0 || countdown === "") countdown += `${minutes}m`;
+    if (days > 0) countdown += `${days} 天 `;
+    if (hours > 0) countdown += `${hours} 小时 `;
+    if (minutes > 0 || countdown === "") countdown += `${minutes} 分钟`;
+    countdown = countdown.trim();
     const month = date.getMonth() + 1;
     const day = date.getDate();
     const h = date.getHours().toString().padStart(2, "0");
