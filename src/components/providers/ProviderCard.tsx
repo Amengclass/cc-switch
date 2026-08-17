@@ -662,17 +662,8 @@ export function ProviderCard({
                     }
                   />
                 ) : null
-              ) : !quotaInline ? (
-                // 展开模式：统一显示"plan套餐"
-                <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                  <span className="font-medium">
-                    {t("usage.subscriptionQuota", {
-                      defaultValue: "plan套餐",
-                    })}
-                  </span>
-                </div>
               ) : (
-                // 紧凑模式：直接显示 inline 格式
+                // 其他供应商：统一由 UsageFooter 处理（紧凑/展开由 inline prop 控制）
                 <UsageFooter
                   provider={provider}
                   providerId={provider.id}
