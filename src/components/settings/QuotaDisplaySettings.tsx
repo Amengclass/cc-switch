@@ -15,7 +15,7 @@ export function QuotaDisplaySettings({
 
   return (
     <section className="space-y-2">
-      <header className="flex items-center gap-2">
+      <header className="flex items-center gap-2 space-y-1">
         <BarChart3 className="h-4 w-4 text-emerald-500" />
         <div className="space-y-1">
           <h3 className="text-sm font-medium">
