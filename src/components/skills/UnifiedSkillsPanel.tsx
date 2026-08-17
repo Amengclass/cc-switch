@@ -832,7 +832,6 @@ const UnifiedSkillsPanel = React.forwardRef<
               opacity: applicableSkillUpdates.length > 0 ? 1 : 0,
             }}
           >
-          >
             <Button
               type="button"
               variant="outline"
