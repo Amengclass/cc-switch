@@ -320,6 +320,21 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 
 // ── 通用用量组件 ────────────────────────────────────────────
 
+/** 格式化 ISO 日期字符串为可读格式 */
+function formatDate(isoStr: string): string {
+  try {
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return isoStr;
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const hours = date.getHours();
+    const minutes = date.getMinutes().toString().padStart(2, "0");
+    return `${month}/${day} ${hours}:${minutes}`;
+  } catch {
+    return isoStr;
+  }
+}
+
 // 单个套餐数据展示组件
 const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
   const { t } = useTranslation();
@@ -363,10 +378,10 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
       >
         {extra && (
           <span
-            className={`hidden ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+            className={`text-[10px] text-gray-400 dark:text-gray-500 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={extra}
           >
-            {extra}
+            {t("usage.resetsAt", { defaultValue: "重置" })}：{formatDate(extra)}
           </span>
         )}
         {isExpired && (
