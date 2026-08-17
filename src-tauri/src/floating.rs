@@ -638,6 +638,7 @@ fn app_label(app_type: &AppType) -> &'static str {
         AppType::OpenCode => "OpenCode",
         AppType::OpenClaw => "OpenClaw",
         AppType::Hermes => "Hermes",
+        AppType::Pi => "Pi",
     }
 }
 
