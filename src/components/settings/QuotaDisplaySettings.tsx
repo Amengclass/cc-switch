@@ -32,16 +32,16 @@ export function QuotaDisplaySettings({
       </header>
       <ToggleRow
         icon={<ToggleLeft className="h-4 w-4 text-emerald-500" />}
-        title={t("settings.quotaDisplay.compact", {
-          defaultValue: "紧凑模式",
+        title={t("settings.quotaDisplay.expanded", {
+          defaultValue: "展开模式",
         })}
-        description={t("settings.quotaDisplay.compactDescription", {
+        description={t("settings.quotaDisplay.expandedDescription", {
           defaultValue:
-            "紧凑模式：套餐用量直接嵌入供应商卡片（如「5小时: 5%」）；关闭后：套餐用量在卡片下方独立面板展开显示（含总额/已用/剩余/重置时间）",
+            "开启后：套餐用量在卡片下方独立面板展开显示（含总额/已用/剩余/重置时间）；关闭时：套餐用量直接嵌入供应商卡片（如「5小时: 5%」）",
         })}
-        checked={value === "compact"}
+        checked={value === "expanded"}
         onCheckedChange={(checked) =>
-          onChange(checked ? "compact" : "expanded")
+          onChange(checked ? "expanded" : "compact")
         }
       />
     </section>
