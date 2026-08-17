@@ -441,9 +441,8 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
               }`}
               style={{ minWidth: "4ch", textAlign: "right" }}
             >
-              {used.toFixed(2)}
+              {used.toFixed(2)}%
             </span>
-            <span className="text-gray-500 dark:text-gray-400">%</span>
             <span className="text-gray-500 dark:text-gray-400">|</span>
           </span>
         )}
