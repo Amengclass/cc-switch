@@ -307,16 +307,16 @@ export function SettingsPage({
                       value={autoImportDefault}
                       onChange={(next) => onAutoImportDefaultChange?.(next)}
                     />
-                    <TerminalSettings
-                      value={settings.preferredTerminal}
-                      onChange={(terminal) =>
-                        handleAutoSave({ preferredTerminal: terminal })
-                      }
-                    />
                     <QuotaDisplaySettings
                       value={settings.quotaDisplayMode ?? "compact"}
                       onChange={(mode) =>
                         handleAutoSave({ quotaDisplayMode: mode })
+                      }
+                    />
+                    <TerminalSettings
+                      value={settings.preferredTerminal}
+                      onChange={(terminal) =>
+                        handleAutoSave({ preferredTerminal: terminal })
                       }
                     />
                   </motion.div>
