@@ -53,8 +53,10 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   inline = false,
 }) => {
   const { t } = useTranslation();
-  const isTokenPlan =
-    provider.meta?.usage_script?.templateType === "token_plan";
+  // 检查是否为 plan 类型（token_plan 或 OpenCode Go）
+  const isPlan =
+    provider.meta?.usage_script?.templateType === "token_plan" ||
+    provider.meta?.usage_script?.codingPlanProvider === "opencode_go";
 
   // 统一的用量查询（自动查询仅对当前激活的供应商启用）
   // 累加模式：使用 isInConfig 代替 isCurrent
@@ -147,7 +149,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   );
 
   // ── Token Plan 或有 tier 信息：订阅风格内联渲染（百分比徽章 + 倒计时） ──
-  if ((isTokenPlan || hasTierInfo) && inline) {
+  if ((isPlan || hasTierInfo) && inline) {
     return (
       <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap flex-shrink-0">
         {/* 第一行：查询时间 + 刷新 */}
