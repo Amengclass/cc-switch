@@ -363,7 +363,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
       >
         {extra && (
           <span
-            className={`truncate ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+            className={`hidden ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={extra}
           >
             {extra}
@@ -394,34 +394,36 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
           </>
         )}
 
-        {/* 已用额度 */}
+        {/* 已用额度 - 突出显示 */}
         {used !== undefined && (
           <>
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.used")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
+            <span
+              className={`font-semibold tabular-nums ${
+                isExpired
+                  ? "text-red-500 dark:text-red-400"
+                  : used > (total || used) * 0.9
+                    ? "text-red-500 dark:text-red-400"
+                    : used > (total || used) * 0.7
+                      ? "text-orange-500 dark:text-orange-400"
+                      : "text-green-600 dark:text-green-400"
+              }`}
+            >
               {used.toFixed(2)}
             </span>
             <span className="text-gray-400 dark:text-gray-600">|</span>
           </>
         )}
 
-        {/* 剩余额度 - 突出显示 */}
+        {/* 剩余额度 - 普通灰色 */}
         {remaining !== undefined && (
           <>
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
-            <span
-              className={`font-semibold tabular-nums ${
-                isExpired
-                  ? "text-red-500 dark:text-red-400"
-                  : remaining < (total || remaining) * 0.1
-                    ? "text-orange-500 dark:text-orange-400"
-                    : "text-green-600 dark:text-green-400"
-              }`}
-            >
+            <span className="tabular-nums text-gray-600 dark:text-gray-400">
               {remaining.toFixed(2)}
             </span>
           </>
