@@ -321,7 +321,7 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 // ── 通用用量组件 ────────────────────────────────────────────
 
 /** 格式化 ISO 日期字符串为倒计时 + 可读时间 */
-function formatResetInfo(isoStr: string): { countdown: string; date: string } {
+function formatResetInfo(isoStr: string, showMinutes = true): { countdown: string; date: string } {
   try {
     const date = new Date(isoStr);
     if (isNaN(date.getTime())) return { countdown: "", date: isoStr };
@@ -333,7 +333,7 @@ function formatResetInfo(isoStr: string): { countdown: string; date: string } {
     let countdown = "";
     if (days > 0) countdown += `${days}d`;
     if (hours > 0) countdown += `${hours}h`;
-    if (minutes > 0 || countdown === "") countdown += `${minutes}m`;
+    if (showMinutes && (minutes > 0 || countdown === "")) countdown += `${minutes}m`;
     const month = date.getMonth() + 1;
     const day = date.getDate();
     const h = date.getHours().toString().padStart(2, "0");
@@ -386,7 +386,7 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
         style={{ width: "30%" }}
       >
         {extra && (() => {
-          const { countdown, date } = formatResetInfo(extra);
+          const { countdown, date } = formatResetInfo(extra, planName === "five_hour");
           return (
             <span
               className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums flex items-center gap-1 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
