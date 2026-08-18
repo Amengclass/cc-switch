@@ -234,6 +234,7 @@ const APP_SKILLS_DIRS: &[&str] = &[
     ".config/opencode/skills",
     ".openclaw/workspace/skills",
     ".hermes/skills",
+    ".pi/agent/skills",
 ];
 
 /// 按 apps 开关过滤出要同步的应用目录。
@@ -329,6 +330,7 @@ pub(crate) fn app_skills_rel(app: &str) -> Option<&'static str> {
         "opencode" => Some(".config/opencode/skills"),
         "openclaw" => Some(".openclaw/workspace/skills"),
         "hermes" => Some(".hermes/skills"),
+        "pi" => Some(".pi/agent/skills"),
         _ => None,
     }
 }
@@ -1145,6 +1147,7 @@ mod tests {
             Some(".openclaw/workspace/skills")
         );
         assert_eq!(app_skills_rel("hermes"), Some(".hermes/skills"));
+        assert_eq!(app_skills_rel("pi"), Some(".pi/agent/skills"));
         assert_eq!(app_skills_rel("nope"), None);
     }
 

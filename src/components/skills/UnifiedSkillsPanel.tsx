@@ -56,7 +56,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+// 本机导入不支持持久化 Pi 启用标志（本地 skills 表无 enabled_pi 列，DAO 硬编码 pi:false），
+// 因此本机导入对话框不显示 Pi 徽章；远端导入走 remote/skill.rs（写 ~/.pi/agent/skills），
+// 已完整支持 Pi，故远端导入保留 Pi。
 const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS.filter((app) => app !== "pi");
+const IMPORT_SKILLS_APP_IDS_REMOTE = SKILLS_APP_IDS;
 
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
@@ -945,6 +949,7 @@ const UnifiedSkillsPanel = React.forwardRef<
               isImporting={importMutation.isPending}
               onImport={handleImport}
               onClose={() => setImportDialogOpen(false)}
+              appIds={isRemote ? IMPORT_SKILLS_APP_IDS_REMOTE : IMPORT_SKILLS_APP_IDS}
             />
           )}
 
@@ -1106,6 +1111,8 @@ interface ImportSkillsDialogProps {
   isImporting: boolean;
   onImport: (imports: ImportSkillSelection[]) => void;
   onClose: () => void;
+  /** 导入时可选的目标应用徽章：本机排除 pi（本地不持久化），远端保留 pi */
+  appIds?: AppId[];
 }
 
 interface RestoreSkillsDialogProps {
@@ -1240,6 +1247,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
   isImporting,
   onImport,
   onClose,
+  appIds = IMPORT_SKILLS_APP_IDS,
 }) => {
   const { t } = useTranslation();
   const [selected, setSelected] = useState<Set<string>>(
@@ -1355,7 +1363,7 @@ const ImportSkillsDialog: React.FC<ImportSkillsDialogProps> = ({
                           },
                         }));
                       }}
-                      appIds={IMPORT_SKILLS_APP_IDS}
+                      appIds={appIds}
                     />
                   </div>
                   <div
