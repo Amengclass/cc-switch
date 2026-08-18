@@ -1,0 +1,8 @@
+﻿2026-08-18T01:22:55.6868225Z ##[group]Run pnpm typecheck
+2026-08-18T01:22:55.6868735Z [36;1mpnpm typecheck[0m
+2026-08-18T01:22:55.6919615Z shell: /usr/bin/bash -e {0}
+2026-08-18T01:22:55.6920037Z ##[endgroup]
+2026-08-18T01:22:56.0200187Z 
+2026-08-18T01:22:56.0201020Z > cc-switch@3.19.2 typecheck /home/runner/work/cc-switch/cc-switch
+2026-08-18T01:22:56.0201730Z > tsc --noEmit
+2026-08-18T01:22:56.0201950Z 

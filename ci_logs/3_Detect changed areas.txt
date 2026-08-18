@@ -1,0 +1,109 @@
+﻿2026-08-18T01:22:33.5723968Z Current runner version: '2.336.0'
+2026-08-18T01:22:33.5742264Z ##[group]Runner Image Provisioner
+2026-08-18T01:22:33.5742981Z Hosted Compute Agent
+2026-08-18T01:22:33.5743401Z Version: 20260729.566
+2026-08-18T01:22:33.5743817Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+2026-08-18T01:22:33.5744337Z Build Date: 2026-07-29T19:17:02Z
+2026-08-18T01:22:33.5744796Z Worker ID: {505e94a2-88d9-4a12-b5ff-a671874de3e2}
+2026-08-18T01:22:33.5745280Z Azure Region: centralus
+2026-08-18T01:22:33.5745702Z ##[endgroup]
+2026-08-18T01:22:33.5746806Z ##[group]Operating System
+2026-08-18T01:22:33.5747244Z Ubuntu
+2026-08-18T01:22:33.5747604Z 24.04.4
+2026-08-18T01:22:33.5748190Z LTS
+2026-08-18T01:22:33.5748599Z ##[endgroup]
+2026-08-18T01:22:33.5748975Z ##[group]Runner Image
+2026-08-18T01:22:33.5749401Z Image: ubuntu-24.04
+2026-08-18T01:22:33.5749798Z Version: 20260810.271.1
+2026-08-18T01:22:33.5750725Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260810.271/images/ubuntu/Ubuntu2404-Readme.md
+2026-08-18T01:22:33.5751801Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260810.271
+2026-08-18T01:22:33.5752443Z ##[endgroup]
+2026-08-18T01:22:33.5753288Z ##[group]GITHUB_TOKEN Permissions
+2026-08-18T01:22:33.5755110Z Contents: read
+2026-08-18T01:22:33.5755543Z Metadata: read
+2026-08-18T01:22:33.5755917Z PullRequests: read
+2026-08-18T01:22:33.5756313Z ##[endgroup]
+2026-08-18T01:22:33.5758059Z Secret source: Actions
+2026-08-18T01:22:33.5758794Z Prepare workflow directory
+2026-08-18T01:22:33.6020775Z Prepare all required actions
+2026-08-18T01:22:33.6056079Z Getting action download info
+2026-08-18T01:22:33.8086180Z Download action repository 'actions/checkout@v6' (SHA:d23441a48e516b6c34aea4fa41551a30e30af803)
+2026-08-18T01:22:34.1104526Z Download action repository 'dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d' (SHA:ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d)
+2026-08-18T01:22:34.5030104Z Complete job name: Detect changed areas
+2026-08-18T01:22:34.5541922Z ##[group]Run dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
+2026-08-18T01:22:34.5543280Z with:
+2026-08-18T01:22:34.5545718Z   filters: frontend:
+  - "src/**"
+  - "tests/**"
+  - "index.html"
+  - "package.json"
+  - "pnpm-lock.yaml"
+  - "pnpm-workspace.yaml"
+  - "tsconfig.json"
+  - "tsconfig.node.json"
+  - "vite.config.ts"
+  - "vitest.config.ts"
+  - "tailwind.config.cjs"
+  - "postcss.config.cjs"
+  - "components.json"
+  - ".github/workflows/**"
+backend:
+  - "src-tauri/**"
+  - "rust-toolchain.toml"
+  - ".github/workflows/**"
+
+2026-08-18T01:22:34.5551588Z   token: ***
+2026-08-18T01:22:34.5551982Z   list-files: none
+2026-08-18T01:22:34.5552426Z   initial-fetch-depth: 100
+2026-08-18T01:22:34.5552885Z   predicate-quantifier: some
+2026-08-18T01:22:34.5553512Z ##[endgroup]
+2026-08-18T01:22:34.6280494Z ##[group]Fetching list of changed files for PR#2 from GitHub API
+2026-08-18T01:22:34.6281826Z Invoking listFiles(pull_number: 2, per_page: 100)
+2026-08-18T01:22:35.0056977Z Received 17 items
+2026-08-18T01:22:35.0058490Z [modified] docs/enhanced-plan.md
+2026-08-18T01:22:35.0059827Z [modified] src/App.tsx
+2026-08-18T01:22:35.0060662Z [modified] src/components/UsageFooter.tsx
+2026-08-18T01:22:35.0061846Z [modified] src/components/UsageScriptModal.tsx
+2026-08-18T01:22:35.0062882Z [modified] src/components/prompts/PromptPanel.tsx
+2026-08-18T01:22:35.0063865Z [modified] src/components/providers/ProviderList.tsx
+2026-08-18T01:22:35.0064895Z [modified] src/components/proxy/RemoteRouteToggle.tsx
+2026-08-18T01:22:35.0065996Z [modified] src/components/remote/BatchApplyPanel.tsx
+2026-08-18T01:22:35.0066924Z [modified] src/components/remote/RemoteHostsPanel.tsx
+2026-08-18T01:22:35.0068135Z [modified] src/components/settings/FloatingWindowSettings.tsx
+2026-08-18T01:22:35.0069323Z [modified] src/components/skills/UnifiedSkillsPanel.tsx
+2026-08-18T01:22:35.0070252Z [modified] src/floating/FloatingBall.tsx
+2026-08-18T01:22:35.0071121Z [modified] src/floating/FloatingPanel.tsx
+2026-08-18T01:22:35.0072010Z [modified] src/floating/floating.css
+2026-08-18T01:22:35.0073086Z [modified] src/hooks/useSkills.ts
+2026-08-18T01:22:35.0073824Z [modified] src/lib/api/remote.ts
+2026-08-18T01:22:35.0074585Z [modified] src/lib/query/remoteMutations.ts
+2026-08-18T01:22:35.0077283Z ##[endgroup]
+2026-08-18T01:22:35.0078338Z Detected 17 changed files
+2026-08-18T01:22:35.0079313Z Results:
+2026-08-18T01:22:35.0080809Z ##[group]Filter frontend = true
+2026-08-18T01:22:35.0081737Z Matching files:
+2026-08-18T01:22:35.0082651Z src/App.tsx [modified]
+2026-08-18T01:22:35.0083784Z src/components/UsageFooter.tsx [modified]
+2026-08-18T01:22:35.0085103Z src/components/UsageScriptModal.tsx [modified]
+2026-08-18T01:22:35.0086705Z src/components/prompts/PromptPanel.tsx [modified]
+2026-08-18T01:22:35.0088460Z src/components/providers/ProviderList.tsx [modified]
+2026-08-18T01:22:35.0089880Z src/components/proxy/RemoteRouteToggle.tsx [modified]
+2026-08-18T01:22:35.0091230Z src/components/remote/BatchApplyPanel.tsx [modified]
+2026-08-18T01:22:35.0092477Z src/components/remote/RemoteHostsPanel.tsx [modified]
+2026-08-18T01:22:35.0093744Z src/components/settings/FloatingWindowSettings.tsx [modified]
+2026-08-18T01:22:35.0095004Z src/components/skills/UnifiedSkillsPanel.tsx [modified]
+2026-08-18T01:22:35.0096316Z src/floating/FloatingBall.tsx [modified]
+2026-08-18T01:22:35.0097269Z src/floating/FloatingPanel.tsx [modified]
+2026-08-18T01:22:35.0098262Z src/floating/floating.css [modified]
+2026-08-18T01:22:35.0098925Z src/hooks/useSkills.ts [modified]
+2026-08-18T01:22:35.0099493Z src/lib/api/remote.ts [modified]
+2026-08-18T01:22:35.0099992Z src/lib/query/remoteMutations.ts [modified]
+2026-08-18T01:22:35.0100933Z ##[endgroup]
+2026-08-18T01:22:35.0101557Z ##[group]Filter backend = false
+2026-08-18T01:22:35.0102025Z Matching files: none
+2026-08-18T01:22:35.0102667Z ##[endgroup]
+2026-08-18T01:22:35.0103155Z Changes output set to ["frontend"]
+2026-08-18T01:22:35.0265206Z Evaluate and set job outputs
+2026-08-18T01:22:35.0273049Z Set output 'frontend'
+2026-08-18T01:22:35.0274578Z Set output 'backend'
+2026-08-18T01:22:35.0275443Z Cleaning up orphan processes

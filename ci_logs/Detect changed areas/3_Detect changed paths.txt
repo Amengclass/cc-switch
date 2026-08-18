@@ -1,0 +1,73 @@
+﻿2026-08-18T01:22:34.5541882Z ##[group]Run dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d
+2026-08-18T01:22:34.5543276Z with:
+2026-08-18T01:22:34.5545627Z   filters: frontend:
+  - "src/**"
+  - "tests/**"
+  - "index.html"
+  - "package.json"
+  - "pnpm-lock.yaml"
+  - "pnpm-workspace.yaml"
+  - "tsconfig.json"
+  - "tsconfig.node.json"
+  - "vite.config.ts"
+  - "vitest.config.ts"
+  - "tailwind.config.cjs"
+  - "postcss.config.cjs"
+  - "components.json"
+  - ".github/workflows/**"
+backend:
+  - "src-tauri/**"
+  - "rust-toolchain.toml"
+  - ".github/workflows/**"
+
+2026-08-18T01:22:34.5551579Z   token: ***
+2026-08-18T01:22:34.5551979Z   list-files: none
+2026-08-18T01:22:34.5552423Z   initial-fetch-depth: 100
+2026-08-18T01:22:34.5552882Z   predicate-quantifier: some
+2026-08-18T01:22:34.5553508Z ##[endgroup]
+2026-08-18T01:22:34.6280407Z ##[group]Fetching list of changed files for PR#2 from GitHub API
+2026-08-18T01:22:34.6281818Z Invoking listFiles(pull_number: 2, per_page: 100)
+2026-08-18T01:22:35.0056580Z Received 17 items
+2026-08-18T01:22:35.0058474Z [modified] docs/enhanced-plan.md
+2026-08-18T01:22:35.0059812Z [modified] src/App.tsx
+2026-08-18T01:22:35.0060657Z [modified] src/components/UsageFooter.tsx
+2026-08-18T01:22:35.0061840Z [modified] src/components/UsageScriptModal.tsx
+2026-08-18T01:22:35.0062876Z [modified] src/components/prompts/PromptPanel.tsx
+2026-08-18T01:22:35.0063858Z [modified] src/components/providers/ProviderList.tsx
+2026-08-18T01:22:35.0064889Z [modified] src/components/proxy/RemoteRouteToggle.tsx
+2026-08-18T01:22:35.0065988Z [modified] src/components/remote/BatchApplyPanel.tsx
+2026-08-18T01:22:35.0066919Z [modified] src/components/remote/RemoteHostsPanel.tsx
+2026-08-18T01:22:35.0068122Z [modified] src/components/settings/FloatingWindowSettings.tsx
+2026-08-18T01:22:35.0069316Z [modified] src/components/skills/UnifiedSkillsPanel.tsx
+2026-08-18T01:22:35.0070246Z [modified] src/floating/FloatingBall.tsx
+2026-08-18T01:22:35.0071115Z [modified] src/floating/FloatingPanel.tsx
+2026-08-18T01:22:35.0071968Z [modified] src/floating/floating.css
+2026-08-18T01:22:35.0073078Z [modified] src/hooks/useSkills.ts
+2026-08-18T01:22:35.0073820Z [modified] src/lib/api/remote.ts
+2026-08-18T01:22:35.0074578Z [modified] src/lib/query/remoteMutations.ts
+2026-08-18T01:22:35.0077262Z ##[endgroup]
+2026-08-18T01:22:35.0078316Z Detected 17 changed files
+2026-08-18T01:22:35.0079301Z Results:
+2026-08-18T01:22:35.0080794Z ##[group]Filter frontend = true
+2026-08-18T01:22:35.0081708Z Matching files:
+2026-08-18T01:22:35.0082638Z src/App.tsx [modified]
+2026-08-18T01:22:35.0083770Z src/components/UsageFooter.tsx [modified]
+2026-08-18T01:22:35.0085071Z src/components/UsageScriptModal.tsx [modified]
+2026-08-18T01:22:35.0086674Z src/components/prompts/PromptPanel.tsx [modified]
+2026-08-18T01:22:35.0088431Z src/components/providers/ProviderList.tsx [modified]
+2026-08-18T01:22:35.0089867Z src/components/proxy/RemoteRouteToggle.tsx [modified]
+2026-08-18T01:22:35.0091216Z src/components/remote/BatchApplyPanel.tsx [modified]
+2026-08-18T01:22:35.0092429Z src/components/remote/RemoteHostsPanel.tsx [modified]
+2026-08-18T01:22:35.0093732Z src/components/settings/FloatingWindowSettings.tsx [modified]
+2026-08-18T01:22:35.0094989Z src/components/skills/UnifiedSkillsPanel.tsx [modified]
+2026-08-18T01:22:35.0096301Z src/floating/FloatingBall.tsx [modified]
+2026-08-18T01:22:35.0097256Z src/floating/FloatingPanel.tsx [modified]
+2026-08-18T01:22:35.0098247Z src/floating/floating.css [modified]
+2026-08-18T01:22:35.0098922Z src/hooks/useSkills.ts [modified]
+2026-08-18T01:22:35.0099490Z src/lib/api/remote.ts [modified]
+2026-08-18T01:22:35.0099990Z src/lib/query/remoteMutations.ts [modified]
+2026-08-18T01:22:35.0100930Z ##[endgroup]
+2026-08-18T01:22:35.0101555Z ##[group]Filter backend = false
+2026-08-18T01:22:35.0102023Z Matching files: none
+2026-08-18T01:22:35.0102664Z ##[endgroup]
+2026-08-18T01:22:35.0103146Z Changes output set to ["frontend"]

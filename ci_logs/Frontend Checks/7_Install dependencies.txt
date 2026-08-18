@@ -1,0 +1,89 @@
+﻿2026-08-18T01:22:51.5924030Z ##[group]Run pnpm install --frozen-lockfile
+2026-08-18T01:22:51.5924471Z [36;1mpnpm install --frozen-lockfile[0m
+2026-08-18T01:22:51.5962280Z shell: /usr/bin/bash -e {0}
+2026-08-18T01:22:51.5962553Z ##[endgroup]
+2026-08-18T01:22:52.0080272Z Lockfile is up to date, resolution step is skipped
+2026-08-18T01:22:52.0820338Z Progress: resolved 1, reused 0, downloaded 0, added 0
+2026-08-18T01:22:52.1719971Z Packages: +479
+2026-08-18T01:22:52.1721093Z ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2026-08-18T01:22:53.0848731Z Progress: resolved 479, reused 0, downloaded 115, added 101
+2026-08-18T01:22:54.0878839Z Progress: resolved 479, reused 0, downloaded 234, added 156
+2026-08-18T01:22:55.0853428Z Progress: resolved 479, reused 0, downloaded 479, added 461
+2026-08-18T01:22:55.0951186Z Progress: resolved 479, reused 0, downloaded 479, added 479, done
+2026-08-18T01:22:55.2928493Z .../esbuild@0.21.5/node_modules/esbuild postinstall$ node install.js
+2026-08-18T01:22:55.2946210Z .../esbuild@0.27.2/node_modules/esbuild postinstall$ node install.js
+2026-08-18T01:22:55.3555958Z .../esbuild@0.27.2/node_modules/esbuild postinstall: Done
+2026-08-18T01:22:55.3579294Z .../esbuild@0.21.5/node_modules/esbuild postinstall: Done
+2026-08-18T01:22:55.6129037Z 
+2026-08-18T01:22:55.6129812Z dependencies:
+2026-08-18T01:22:55.6130395Z + @codemirror/lang-javascript 6.2.4
+2026-08-18T01:22:55.6131231Z + @codemirror/lang-json 6.0.2
+2026-08-18T01:22:55.6131819Z + @codemirror/lang-markdown 6.5.0
+2026-08-18T01:22:55.6132391Z + @codemirror/lint 6.8.5
+2026-08-18T01:22:55.6132865Z + @codemirror/state 6.5.2
+2026-08-18T01:22:55.6133423Z + @codemirror/theme-one-dark 6.1.3
+2026-08-18T01:22:55.6133963Z + @codemirror/view 6.38.2
+2026-08-18T01:22:55.6134441Z + @dnd-kit/core 6.3.1
+2026-08-18T01:22:55.6134899Z + @dnd-kit/sortable 10.0.0
+2026-08-18T01:22:55.6135394Z + @dnd-kit/utilities 3.2.2
+2026-08-18T01:22:55.6135919Z + @hookform/resolvers 5.2.2
+2026-08-18T01:22:55.6136706Z + @radix-ui/react-accordion 1.2.12
+2026-08-18T01:22:55.6137332Z + @radix-ui/react-checkbox 1.3.3
+2026-08-18T01:22:55.6137938Z + @radix-ui/react-collapsible 1.1.12
+2026-08-18T01:22:55.6138632Z + @radix-ui/react-dialog 1.1.15
+2026-08-18T01:22:55.6142116Z + @radix-ui/react-dropdown-menu 2.1.16
+2026-08-18T01:22:55.6167969Z + @radix-ui/react-label 2.1.7
+2026-08-18T01:22:55.6177547Z + @radix-ui/react-popover 1.1.15
+2026-08-18T01:22:55.6186826Z + @radix-ui/react-scroll-area 1.2.10
+2026-08-18T01:22:55.6187541Z + @radix-ui/react-select 2.2.6
+2026-08-18T01:22:55.6188106Z + @radix-ui/react-slot 1.2.4
+2026-08-18T01:22:55.6188674Z + @radix-ui/react-switch 1.2.6
+2026-08-18T01:22:55.6189247Z + @radix-ui/react-tabs 1.1.13
+2026-08-18T01:22:55.6231534Z + @radix-ui/react-tooltip 1.2.8
+2026-08-18T01:22:55.6236608Z + @tanstack/react-query 5.90.3
+2026-08-18T01:22:55.6237408Z + @tanstack/react-virtual 3.13.23
+2026-08-18T01:22:55.6237985Z + @tauri-apps/api 2.8.0
+2026-08-18T01:22:55.6238492Z + @tauri-apps/plugin-dialog 2.4.0
+2026-08-18T01:22:55.6239041Z + @tauri-apps/plugin-log 2.8.0
+2026-08-18T01:22:55.6239634Z + @tauri-apps/plugin-process 2.3.0
+2026-08-18T01:22:55.6240198Z + @tauri-apps/plugin-updater 2.9.0
+2026-08-18T01:22:55.6240777Z + class-variance-authority 0.7.1
+2026-08-18T01:22:55.6241223Z + clsx 2.1.1
+2026-08-18T01:22:55.6241555Z + cmdk 1.1.1
+2026-08-18T01:22:55.6241914Z + codemirror 6.0.2
+2026-08-18T01:22:55.6242299Z + flexsearch 0.8.212
+2026-08-18T01:22:55.6243090Z + framer-motion 12.23.25
+2026-08-18T01:22:55.6243480Z + i18next 25.5.2
+2026-08-18T01:22:55.6243858Z + lucide-react 0.542.0
+2026-08-18T01:22:55.6244239Z + react 18.3.1
+2026-08-18T01:22:55.6244602Z + react-dom 18.3.1
+2026-08-18T01:22:55.6244995Z + react-hook-form 7.65.0
+2026-08-18T01:22:55.6245416Z + react-i18next 16.0.0
+2026-08-18T01:22:55.6245787Z + recharts 3.5.1
+2026-08-18T01:22:55.6246153Z + smol-toml 1.4.2
+2026-08-18T01:22:55.6246766Z + sonner 2.0.7
+2026-08-18T01:22:55.6247156Z + tailwind-merge 3.3.1
+2026-08-18T01:22:55.6247577Z + zod 4.1.12
+2026-08-18T01:22:55.6247774Z 
+2026-08-18T01:22:55.6247938Z devDependencies:
+2026-08-18T01:22:55.6248552Z + @tauri-apps/cli 2.8.1
+2026-08-18T01:22:55.6248852Z + @testing-library/jest-dom 6.9.1
+2026-08-18T01:22:55.6249173Z + @testing-library/react 16.3.0
+2026-08-18T01:22:55.6249490Z + @testing-library/user-event 14.6.1
+2026-08-18T01:22:55.6249773Z + @types/node 20.19.9
+2026-08-18T01:22:55.6250008Z + @types/react 18.3.23
+2026-08-18T01:22:55.6250256Z + @types/react-dom 18.3.7
+2026-08-18T01:22:55.6250514Z + @vitejs/plugin-react 4.7.0
+2026-08-18T01:22:55.6250767Z + autoprefixer 10.4.22
+2026-08-18T01:22:55.6251016Z + code-inspector-plugin 1.3.3
+2026-08-18T01:22:55.6251272Z + cross-fetch 4.1.0
+2026-08-18T01:22:55.6251480Z + jsdom 25.0.1
+2026-08-18T01:22:55.6251675Z + msw 2.11.6
+2026-08-18T01:22:55.6251873Z + postcss 8.5.6
+2026-08-18T01:22:55.6252073Z + prettier 3.6.2
+2026-08-18T01:22:55.6252320Z + tailwindcss 3.4.18
+2026-08-18T01:22:55.6252617Z + typescript 5.9.2
+2026-08-18T01:22:55.6252821Z + vite 7.3.0
+2026-08-18T01:22:55.6253012Z + vitest 2.1.9
+2026-08-18T01:22:55.6253129Z 
+2026-08-18T01:22:55.6535914Z Done in 3.9s using pnpm v10.12.3
