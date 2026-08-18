@@ -34,3 +34,5 @@ mainWindow.js
 .reasonix/
 
 reasonix.toml
+ci_logs/
+ci_logs.zip

@@ -1,8 +1,0 @@
-2026-08-18T01:22:30.4770000Z Requested labels: ubuntu-latest
-2026-08-18T01:22:30.4770000Z Job defined at: Amengclass/cc-switch/.github/workflows/ci.yml@refs/pull/2/merge
-2026-08-18T01:22:30.4770000Z Waiting for a runner to pick up this job...
-2026-08-18T01:22:30.4760000Z Evaluating changes.if
-2026-08-18T01:22:30.4760000Z Evaluating: success()
-2026-08-18T01:22:30.4760000Z Result: true
-2026-08-18T01:22:30.9780000Z Job is waiting for a hosted runner to come online.
-2026-08-18T01:22:30.9780000Z Job is about to start running on the hosted runner: GitHub Actions 1000000103

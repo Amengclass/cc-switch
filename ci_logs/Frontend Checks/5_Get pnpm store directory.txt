@@ -1,4 +1,0 @@
-﻿2026-08-18T01:22:50.6581038Z ##[group]Run echo "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT
-2026-08-18T01:22:50.6581656Z [36;1mecho "path=$(pnpm store path --silent)" >> $GITHUB_OUTPUT[0m
-2026-08-18T01:22:50.6623656Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
-2026-08-18T01:22:50.6624048Z ##[endgroup]
