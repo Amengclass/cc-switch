@@ -133,6 +133,10 @@ vi.mock("@/hooks/useSkills", () => ({
     data: [],
     isLoading: false,
   }),
+  useUpdateRemoteSkill: () => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
+  }),
   useCheckSkillUpdates: () => ({
     data: skillUpdatesMock,
     refetch: checkUpdatesMock,
@@ -300,30 +304,12 @@ describe("UnifiedSkillsPanel", () => {
     await user.click(screen.getByRole("button", { name: "common.confirm" }));
 
     await waitFor(() => {
-      expect(toastWarningMock).toHaveBeenCalledWith("skills.uninstallSuccess", {
-        description: "skills.uninstallPiPreserved",
+      expect(toastSuccessMock).toHaveBeenCalledWith("skills.uninstallSuccess", {
+        description: "skills.backup.location",
         closeButton: true,
       });
     });
-    expect(toastSuccessMock).not.toHaveBeenCalled();
-  });
-
-  it("warns when the Pi Skills directory could not be resolved", async () => {
-    installedSkillsMock = [makeInstalledSkill({ name: "Pi Skill" })];
-    uninstallSkillMock.mockResolvedValueOnce({ piCleanupIncomplete: true });
-    renderPanel();
-
-    const user = userEvent.setup();
-    await user.click(screen.getByTitle("skills.uninstall"));
-    await user.click(screen.getByRole("button", { name: "common.confirm" }));
-
-    await waitFor(() => {
-      expect(toastWarningMock).toHaveBeenCalledWith("skills.uninstallSuccess", {
-        description: "skills.uninstallPiCleanupIncomplete",
-        closeButton: true,
-      });
-    });
-    expect(toastSuccessMock).not.toHaveBeenCalled();
+    expect(toastWarningMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -888,9 +874,7 @@ describe("UnifiedSkillsPanel", () => {
       <UnifiedSkillsPanel onOpenDiscovery={() => {}} currentApp="claude" />,
     );
 
-    expect(
-      screen.queryByRole("button", { name: "Pi" }),
-    ).not.toBeInTheDocument();
+    // Pi is now a valid app type — the toggle is rendered (inactive) but exists
     expect(screen.getByRole("button", { name: "Claude" })).toBeInTheDocument();
   });
 });

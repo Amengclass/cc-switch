@@ -1,0 +1,10 @@
+﻿2026-08-18T01:23:15.8071532Z ##[group]Run pnpm format:check
+2026-08-18T01:23:15.8071851Z [36;1mpnpm format:check[0m
+2026-08-18T01:23:15.8109578Z shell: /usr/bin/bash -e {0}
+2026-08-18T01:23:15.8109845Z ##[endgroup]
+2026-08-18T01:23:16.1245987Z 
+2026-08-18T01:23:16.1247387Z > cc-switch@3.19.2 format:check /home/runner/work/cc-switch/cc-switch
+2026-08-18T01:23:16.1248437Z > prettier --check "src/**/*.{js,jsx,ts,tsx,css,json}"
+2026-08-18T01:23:16.1248904Z 
+2026-08-18T01:23:16.2159434Z Checking formatting...
+2026-08-18T01:23:23.4583964Z All matched files use Prettier code style!
