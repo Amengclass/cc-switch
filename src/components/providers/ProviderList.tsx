@@ -297,11 +297,19 @@ export function ProviderList({
     refetchInterval: appId === "claude-desktop" ? 5000 : false,
   });
   const {
+    data: piCurrentState,
     isSuccess: isPiCurrentStateSuccess,
     isError: isPiCurrentStateError,
     error: piCurrentStateError,
   } = usePiCurrentState(appId === "pi");
   const isPiAuthoritativeStateReady = appId !== "pi" || isPiCurrentStateSuccess;
+  const isPiProviderInConfig = useCallback(
+    (provider: Provider): boolean => {
+      if (!isPiAuthoritativeStateReady) return false;
+      return piCurrentState?.enabledProviderIds.includes(provider.id) ?? false;
+    },
+    [isPiAuthoritativeStateReady, piCurrentState],
+  );
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
   // 远程目标下改为经 SSH 在远端 curl base_url（真实反映远端到 API 的网络）。
@@ -612,7 +620,11 @@ export function ProviderList({
                 provider={provider}
                 isCurrent={isCurrent}
                 appId={appId}
-                isInConfig={isProviderInConfig(provider.id)}
+                isInConfig={
+                  appId === "pi" && !remoteTargetId
+                    ? isPiProviderInConfig(provider)
+                    : isProviderInConfig(provider.id)
+                }
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
                 onSwitch={onSwitch}

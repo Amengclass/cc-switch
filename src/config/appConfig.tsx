@@ -137,6 +137,10 @@ export const APP_INSTALL_CMDS: Record<
     local: "npm i -g hermes-cli",
     remote: "npm i -g hermes-cli",
   },
+  pi: {
+    local: "npm i -g @earendil-works/pi-coding-agent@latest",
+    remote: "npm i -g @earendil-works/pi-coding-agent@latest",
+  },
 };
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {
