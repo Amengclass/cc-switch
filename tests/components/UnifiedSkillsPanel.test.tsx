@@ -129,6 +129,10 @@ vi.mock("@/hooks/useSkills", () => ({
   useInstallSkillsFromZip: () => ({
     mutateAsync: installFromZipMock,
   }),
+  useRemoteUnmanagedSkillsQuery: () => ({
+    data: [],
+    isLoading: false,
+  }),
   useCheckSkillUpdates: () => ({
     data: skillUpdatesMock,
     refetch: checkUpdatesMock,
