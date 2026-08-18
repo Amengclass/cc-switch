@@ -4996,6 +4996,7 @@ mod tests {
             vec![ImportSkillSelection {
                 directory: "native-skill".to_string(),
                 apps: SkillApps::default(),
+                path: None,
             }],
         )
         .expect("import native Pi skill");

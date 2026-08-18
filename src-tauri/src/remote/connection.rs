@@ -710,7 +710,7 @@ pub async fn exec_command_with_stdin(
         .map_err(|e| format!("执行命令失败: {e}"))?;
 
     // 分块写入 stdin，每块 64KB
-    use tokio::io::AsyncWriteExt;
+
     const CHUNK: usize = 64 * 1024;
     let mut written = 0usize;
     while written < stdin_data.len() {

@@ -984,7 +984,7 @@ pub async fn update_remote_provider(
     // 非空库不读 live（方案 A：容器场景省一次 docker exec）
     let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
     let original_id = original_id.unwrap_or_else(|| provider.id.clone());
-    let existing = ssot.providers.iter().find(|p| p.id == original_id).cloned();
+    let _existing = ssot.providers.iter().find(|p| p.id == original_id).cloned();
     let mut provider = provider;
     let additive = crate::remote::providers::is_additive_app(&app);
 

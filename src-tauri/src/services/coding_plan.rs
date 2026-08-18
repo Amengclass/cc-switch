@@ -1722,8 +1722,8 @@ fn epoch_to_ymd(epoch: i64) -> (i64, i64, i64) {
 #[allow(dead_code)]
 fn subscription_month_bounds(
     now: i64,
-    anchor_y: i64,
-    anchor_m: i64,
+    _anchor_y: i64,
+    _anchor_m: i64,
     anchor_d: i64,
     anchor_h: i32,
     anchor_min: i32,

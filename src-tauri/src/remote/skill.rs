@@ -157,7 +157,7 @@ pub struct RemoteUnmanagedSkill {
 /// 确保远端 SSOT 目录和 skills.json 存在。
 /// 首次进入远端 Skills 面板时调用，幂等。
 pub async fn init_remote_skills_ssot<F: FileOps>(fs: &F, root: &str) -> Result<(), String> {
-    let ssot_dir = remote_ssot_path(root);
+    let _ssot_dir = remote_ssot_path(root);
     // 通过 SFTP ensure_remote_dir 需要 SftpSession，这里用 FileOps 的 write_text_atomic
     // 触发父目录创建。先确保 SSOT 目录存在：创建 .cc-switch/ + skills/ 目录结构。
     init_ssot_dirs(fs, root).await?;
