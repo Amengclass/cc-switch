@@ -409,7 +409,6 @@ fn build_floating_window(
     let window =
         WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("floating.html".into()))
             .decorations(false)
-            .transparent(true)
             .always_on_top(true)
             .skip_taskbar(true)
             .shadow(false)
