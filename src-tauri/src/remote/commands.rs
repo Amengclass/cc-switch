@@ -7,11 +7,11 @@ use std::str::FromStr;
 use tauri::{Emitter, State};
 
 use crate::fsops::FileOps as _;
+#[cfg(target_os = "windows")]
+use crate::remote::credentials;
 use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, AuthMethod, RemoteHost};
-#[cfg(target_os = "windows")]
-use crate::remote::credentials;
 use base64::Engine as _;
 
 /// 取该主机「per-app 走本机路由」意图（宿主机目标）：
