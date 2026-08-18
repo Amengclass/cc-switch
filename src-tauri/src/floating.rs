@@ -410,6 +410,7 @@ fn build_floating_window(
             .always_on_top(true)
             .skip_taskbar(true)
             .shadow(false)
+            .transparent(true)
             // 固定尺寸：禁止用户拖边缘调整大小（避免出现边缘调整光标/误操作）
             .resizable(false)
             .inner_size(width, height)

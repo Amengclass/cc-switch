@@ -146,9 +146,12 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   // 无数据时不显示
   if (usageDataList.length === 0) return null;
 
-  // 检查是否有 tier 信息（planName 或 extra JSON）
+  // 检查是否有 tier 信息（planName + total/used 才算真正的 tier；纯余额查询如
+  // DeepSeek 只有 planName="CNY" + remaining，不应走进 tier 分支）
   const hasTierInfo = usageDataList.some(
-    (d) => d.planName || (d.extra && d.extra.startsWith("{")),
+    (d) =>
+      (d.planName && (d.total != null || d.used != null)) ||
+      (d.extra && d.extra.startsWith("{")),
   );
 
   // ── Token Plan 或有 tier 信息：订阅风格内联渲染（百分比徽章 + 倒计时） ──
@@ -464,16 +467,23 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
           </span>
         )}
 
-        {/* 剩余额度 - 普通灰色 */}
+        {/* 剩余额度 - 状态色 */}
         {remaining !== undefined && (
           <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
-              {remaining.toFixed(2)}
+            <span
+              className={`font-semibold tabular-nums ${
+                isExpired
+                  ? "text-red-500 dark:text-red-400"
+                  : remaining < (total || remaining) * 0.1
+                    ? "text-orange-500 dark:text-orange-400"
+                    : "text-green-600 dark:text-green-400"
+              }`}
+            >
+              {remaining.toFixed(2)}%
             </span>
-            <span className="text-gray-500 dark:text-gray-400">%</span>
           </span>
         )}
 
