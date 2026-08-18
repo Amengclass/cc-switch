@@ -8,6 +8,7 @@
 pub mod codex;
 pub mod commands;
 pub mod connection;
+#[cfg(target_os = "windows")]
 pub mod credentials;
 pub mod current;
 pub mod docker;

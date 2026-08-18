@@ -325,14 +325,15 @@ pub async fn save_remote_host(
     // save_password 仅作为「记住密码」的偏好标记；若用户刻意留空密码则不覆盖旧密码。
     if let Some(pw) = password.as_deref().filter(|p| !p.is_empty()) {
         log::info!("[remote] 保存密码到钥匙串 id={}", host.id);
+        #[cfg(target_os = "windows")]
         if let Err(e) = credentials::save_password(&host.id, pw) {
             log::error!("[remote] 钥匙串保存失败: {e}");
             return Err(e);
         }
         log::info!("[remote] 钥匙串保存成功 id={}", host.id);
     } else if !host.save_password {
-        // 用户关闭了「保存密码」且未提供新密码 → 删除钥匙串里的已存密码。
         log::info!("[remote] 删除钥匙串密码 id={}", host.id);
+        #[cfg(target_os = "windows")]
         let _ = credentials::delete_password(&host.id);
     }
     Ok(host)
@@ -430,6 +431,7 @@ pub async fn delete_remote_host(
         .delete_remote_host(&host_id)
         .map_err(|e| e.to_string())?;
     if deleted {
+        #[cfg(target_os = "windows")]
         let _ = credentials::delete_password(&host_id);
         let _ = crate::remote::current::delete_current_provider(state.db.as_ref(), &host_id);
     }
@@ -3302,10 +3304,13 @@ fn resolve_password(host: &RemoteHost) -> Result<String, String> {
     // debug：38 处远端命令都会调它，每次远程操作都打 info 会让日志暴涨
     //（实测 17MB 日志里 resolve_password 占约 29%）。需要追踪时调高级别可见。
     log::debug!("[remote] resolve_password: id={}", host.id);
+    #[cfg(target_os = "windows")]
     let pw = credentials::get_password(&host.id).map_err(|e| {
         log::error!("[remote] 钥匙串读取失败: {e}");
         e
     })?;
+    #[cfg(not(target_os = "windows"))]
+    let pw: Option<String> = None;
     match pw {
         Some(p) => {
             log::info!("[remote] 钥匙串命中 id={}", host.id);
