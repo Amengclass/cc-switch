@@ -1791,13 +1791,18 @@ pub fn check_local_cli_installed(app: String) -> Result<bool, String> {
     let bin = cli_binary_for_app(&app).ok_or_else(|| format!("未知应用: {app}"))?;
 
     #[cfg(target_os = "windows")]
-    let found = std::process::Command::new("where")
-        .arg(bin)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+    let found = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("where")
+            .arg(bin)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
 
     #[cfg(not(target_os = "windows"))]
     let found = std::process::Command::new("sh")
