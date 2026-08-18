@@ -311,7 +311,7 @@
   - clippy 16 个 warning 均在官方 v3.19.2 / fork 遗留代码(不在 merge 改动里),未处理
 
 ### 构建与基础设施
-- 构建脚本 `C:\build\build-exe.ps1`(规避火绒 `sysdiag` 文件锁 LNK1105)
+- 直接运行 `cargo build`（在 src-tauri 目录下）
 - 推送到 GitHub fork `https://github.com/Amengclass/cc-switch`
 
 ### PR Checklist / 合并前自检清单
@@ -538,23 +538,23 @@
   1. `pnpm run build:renderer`（Vite 打包前端到 `dist/`）
   2. `cargo build --features tauri/custom-protocol`（编译 Rust）
   3. 产物在 `src-tauri/target/debug/cc-switch.exe`
-- Windows 构建脚本：`C:\build\build-exe.ps1`（仅 cargo build，重试 12 次应对 LNK1105；**不含前端构建**）
+- 在 src-tauri 目录下运行 `cargo build`（仅 Rust 编译；**不含前端构建**）
 - 构建前需 `Stop-Process -Name cc-switch -Force` 避免 exe 被占用导致 `os error 5`
 - `CARGO_BUILD_JOBS = "2"` 控制并行度（避免 LNK1105 防火墙锁定）
 
 **开发验证流程（改动→检查的最小化路径）：**
 
-原则：**先把整批改动做完，再统一检查一次**，不「编辑→全量检查→编辑→全量检查」地频繁打断（Windows 上 `cargo test` 2~3 分钟、`build-exe.ps1` 链接 1 分钟，太慢）。
+原则：**先把整批改动做完，再统一检查一次**，不「编辑→全量检查→编辑→全量检查」地频繁打断（Windows 上 `cargo test` 2~3 分钟、`cargo build` 链接 1 分钟，太慢）。
 
 | 阶段 | 命令 | 作用 | 成本 |
 |---|---|---|---|
 | 快路径（每次改动后） | `pnpm typecheck` + `pnpm format:check` + 受影响的 `pnpm vitest run <file>` | 前端类型/格式/相关逻辑 | 秒~十几秒 |
 | Rust 编译验证（开发期） | `cargo check`（只编译不链接） | 抓编译错误，比 `cargo test` 快 | ~1min |
-| 慢路径（整批交付前，跑一次） | 完整 `cargo test` + `cargo clippy` + `pnpm build:renderer` + `build-exe.ps1` + 启动 | 功能回归 + lint + 产出可运行 exe | 几分钟 |
+| 慢路径（整批交付前，跑一次） | 完整 `cargo test` + `cargo clippy` + `pnpm build:renderer` + `cargo build` + 启动 | 功能回归 + lint + 产出可运行 exe | 几分钟 |
 
 - 只改前端/注释/文档时，可完全跳过 cargo 系列。
 - 例外：Rust 改动是跨模块签名变更时，提前跑一次 `cargo check` 定位级联编译错误值得。
-- 完整 `cargo test` / `build-exe.ps1` 前先 `Stop-Process -Name cc-switch -Force`。
+- 完整 `cargo test` / `cargo build` 前先 `Stop-Process -Name cc-switch -Force`。
 
 ---
 
@@ -654,7 +654,7 @@ cc-switch/                     # fork 自 farion1231/cc-switch
 
 ## 构建方法(Windows 开发机)
 
-> **必须用 `C:\build\build-exe.ps1`,不要直接 `cargo build --release`。**
+> **必须用 `cargo build`（在 src-tauri 目录下）,不要直接 `cargo build --release`。**
 > 踩坑实录:`cargo build --release`(未设 `/DEBUG:NONE`)全量编译,多次撞火绒 `sysdiag` 文件锁(LNK1105 / 错误码 1224),重试 5 次仍失败;改用脚本第 1 次即成功。
 
 **两种运行方式(务必分清):**
@@ -683,12 +683,12 @@ cc-switch/                     # fork 自 farion1231/cc-switch
 1. 前端有改动 → 先 `pnpm build:renderer`(dist 由 `--features tauri/custom-protocol` 嵌入 exe)
 2. **必须先杀进程**：`Stop-Process -Name cc-switch -Force`，否则 exe 被锁报 os error 5，cargo 重试 12 次全部 LNK1105
 3. 删旧产物：`Remove-Item ...\cc-switch.exe -Force` + `Remove-Item ...\build.log -Force`
-4. 跑 `C:\build\build-exe.ps1`(脚本内部 `Set-Location` 到 `src-tauri`)
+4. 跑 `cargo build`（在 src-tauri 目录下）(脚本内部 `Set-Location` 到 `src-tauri`)
 5. 启动：`Start-Process -FilePath ...\cc-switch.exe`
 
 > **一键构建命令**（含停进程+清理+编译+启动）：
 > ```powershell
-> Stop-Process -Name cc-switch -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Remove-Item "C:\Users\Ameng\Desktop\claude_woker\cc-switch\src-tauri\target\debug\cc-switch.exe" -Force -ErrorAction SilentlyContinue; Remove-Item "C:\Users\Ameng\Desktop\claude_woker\cc-switch\src-tauri\build.log" -Force -ErrorAction SilentlyContinue; Set-Location C:\Users\Ameng\Desktop\claude_woker\cc-switch; pnpm build:renderer; C:\build\build-exe.ps1
+> Stop-Process -Name cc-switch -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Remove-Item "C:\Users\Ameng\Desktop\claude_woker\cc-switch\src-tauri\target\debug\cc-switch.exe" -Force -ErrorAction SilentlyContinue; Set-Location C:\Users\Ameng\Desktop\claude_woker\cc-switch; pnpm build:renderer; Set-Location src-tauri; cargo build
 > ```
 
 **脚本关键点(规避火绒 sysdiag LNK1105)**
@@ -713,7 +713,7 @@ cc-switch/                     # fork 自 farion1231/cc-switch
 | 全量(首次 / target 被清 / 换了编译模式) | 几百个 crate | 10 分钟+ |
 | 撞火绒 LNK1105 | 链接失败 + 重试 + sleep 2s | 每次失败额外 +2s |
 
-> ⚠️ **不要在构建流程里跑 `cargo check`**：`check` 与 `build` 产物格式不同，来回切换会互相触发大面积重编译。要验语法就在**单独一次**里做完，别和 `build-exe.ps1` 交叉使用。
+> ⚠️ **不要在构建流程里跑 `cargo check`**：`check` 与 `build` 产物格式不同，来回切换会互相触发大面积重编译。要验语法就在**单独一次**里做完，别和 `cargo build` 交叉使用。
 
 ---
 
