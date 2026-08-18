@@ -789,6 +789,7 @@ export interface RemoteSkillApps {
   opencode: boolean;
   openclaw: boolean;
   hermes: boolean;
+  pi: boolean;
 }
 
 /** 切换远端技能在某应用的启用状态 */

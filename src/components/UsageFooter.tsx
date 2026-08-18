@@ -4,7 +4,10 @@ import { useTranslation } from "react-i18next";
 import { type AppId } from "@/lib/api";
 import { useUsageQuery } from "@/lib/query/queries";
 import { UsageData, Provider } from "@/types";
-import { TierBadge, TIER_I18N_KEYS } from "@/components/SubscriptionQuotaFooter";
+import {
+  TierBadge,
+  TIER_I18N_KEYS,
+} from "@/components/SubscriptionQuotaFooter";
 import type { QuotaTier } from "@/types/subscription";
 import { isAdditiveAppId } from "@/config/appConfig";
 
@@ -321,7 +324,10 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 // ── 通用用量组件 ────────────────────────────────────────────
 
 /** 格式化 ISO 日期字符串为倒计时 + 可读时间 */
-function formatResetInfo(isoStr: string, showMinutes = true): { countdown: string; date: string } {
+function formatResetInfo(
+  isoStr: string,
+  showMinutes = true,
+): { countdown: string; date: string } {
   try {
     const date = new Date(isoStr);
     if (isNaN(date.getTime())) return { countdown: "", date: isoStr };
@@ -338,7 +344,10 @@ function formatResetInfo(isoStr: string, showMinutes = true): { countdown: strin
     const day = date.getDate();
     const h = date.getHours().toString().padStart(2, "0");
     const m = date.getMinutes().toString().padStart(2, "0");
-    return { countdown, date: `${month.toString().padStart(2, "0")}/${day.toString().padStart(2, "0")} ${h}:${m}` };
+    return {
+      countdown,
+      date: `${month.toString().padStart(2, "0")}/${day.toString().padStart(2, "0")} ${h}:${m}`,
+    };
   } catch {
     return { countdown: "", date: isoStr };
   }
@@ -373,7 +382,8 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             className={`font-medium truncate block ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={planName}
           >
-            💰 {TIER_I18N_KEYS[planName] ? t(TIER_I18N_KEYS[planName]) : planName}
+            💰{" "}
+            {TIER_I18N_KEYS[planName] ? t(TIER_I18N_KEYS[planName]) : planName}
           </span>
         ) : (
           <span className="opacity-50">—</span>
@@ -385,18 +395,22 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
         className="text-xs text-gray-500 dark:text-gray-400 min-w-0 flex items-center gap-2"
         style={{ width: "30%" }}
       >
-        {extra && (() => {
-          const { countdown, date } = formatResetInfo(extra, planName === "five_hour");
-          return (
-            <span
-              className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums flex items-center gap-1 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
-              title={extra}
-            >
-              <Clock size={10} className="flex-shrink-0" />
-              {countdown} {date}
-            </span>
-          );
-        })()}
+        {extra &&
+          (() => {
+            const { countdown, date } = formatResetInfo(
+              extra,
+              planName === "five_hour",
+            );
+            return (
+              <span
+                className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums flex items-center gap-1 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+                title={extra}
+              >
+                <Clock size={10} className="flex-shrink-0" />
+                {countdown} {date}
+              </span>
+            );
+          })()}
         {isExpired && (
           <span className="text-red-500 dark:text-red-400 font-medium text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
             {invalidMessage || t("usage.invalid")}
@@ -415,7 +429,10 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.total")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400" style={{ minWidth: "4ch", textAlign: "right" }}>
+            <span
+              className="tabular-nums text-gray-600 dark:text-gray-400"
+              style={{ minWidth: "4ch", textAlign: "right" }}
+            >
               {total === -1 ? "∞" : total.toFixed(2)}
             </span>
             <span className="text-gray-500 dark:text-gray-400">%</span>
@@ -491,4 +508,3 @@ function formatRelativeTime(
 }
 
 export default UsageFooter;
-

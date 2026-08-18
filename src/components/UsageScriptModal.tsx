@@ -1514,152 +1514,153 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
                 </div>
               )}
 
-              {script.codingPlanProvider === "opencode_go" && (
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-foreground">
-                      {t("usageScript.credentialsConfig")}
-                    </h4>
-                    <div className="text-xs text-muted-foreground mt-1 leading-relaxed space-y-1">
-                      <p>
-                        {t("usageScript.opencodeWorkspaceHint", {
-                          defaultValue:
-                            "Workspace ID：登录后地址栏 /workspace/ 后面的值（形如 wrk_xxxxxxxx）",
-                        })}
-                      </p>
-                      <p>
-                        {t("usageScript.opencodeCookieHint", {
-                          defaultValue:
-                            "Auth Cookie：登录后按 F12 → Network，刷新页面，点发往 opencode.ai 的请求，复制请求头 cookie 里 Fe26.2** 开头的那段即可（带 auth= 前缀也能正常识别）。约 1 年有效，过期后需重新获取",
-                        })}
-                      </p>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1.5">
-                      {t("usageScript.opencodeGoConsoleLink", {
-                        defaultValue: "登录 OpenCode Go：",
-                      })}{" "}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          settingsApi.openExternal(OPENCODE_GO_USAGE_URL)
-                        }
-                        className="inline-flex items-center gap-1 text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors break-all align-baseline underline-offset-2 hover:underline"
-                      >
-                        {OPENCODE_GO_USAGE_URL}
-                        <ExternalLink size={12} className="shrink-0" />
-                      </button>
+            {script.codingPlanProvider === "opencode_go" && (
+              <div className="space-y-4">
+                <div>
+                  <h4 className="text-sm font-medium text-foreground">
+                    {t("usageScript.credentialsConfig")}
+                  </h4>
+                  <div className="text-xs text-muted-foreground mt-1 leading-relaxed space-y-1">
+                    <p>
+                      {t("usageScript.opencodeWorkspaceHint", {
+                        defaultValue:
+                          "Workspace ID：登录后地址栏 /workspace/ 后面的值（形如 wrk_xxxxxxxx）",
+                      })}
+                    </p>
+                    <p>
+                      {t("usageScript.opencodeCookieHint", {
+                        defaultValue:
+                          "Auth Cookie：登录后按 F12 → Network，刷新页面，点发往 opencode.ai 的请求，复制请求头 cookie 里 Fe26.2** 开头的那段即可（带 auth= 前缀也能正常识别）。约 1 年有效，过期后需重新获取",
+                      })}
                     </p>
                   </div>
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {t("usageScript.opencodeGoConsoleLink", {
+                      defaultValue: "登录 OpenCode Go：",
+                    })}{" "}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        settingsApi.openExternal(OPENCODE_GO_USAGE_URL)
+                      }
+                      className="inline-flex items-center gap-1 text-blue-400 dark:text-blue-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors break-all align-baseline underline-offset-2 hover:underline"
+                    >
+                      {OPENCODE_GO_USAGE_URL}
+                      <ExternalLink size={12} className="shrink-0" />
+                    </button>
+                  </p>
+                </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="usage-opencode-ws">
-                        {t("usageScript.workspaceId", {
-                          defaultValue: "Workspace ID",
-                        })}
-                      </Label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="usage-opencode-ws">
+                      {t("usageScript.workspaceId", {
+                        defaultValue: "Workspace ID",
+                      })}
+                    </Label>
+                    <Input
+                      id="usage-opencode-ws"
+                      type="text"
+                      value={script.workspaceId || ""}
+                      onChange={(e) =>
+                        setScript({
+                          ...script,
+                          workspaceId: e.target.value.trim(),
+                        })
+                      }
+                      placeholder="wrk_xxxxx"
+                      autoComplete="off"
+                      className="border-white/10"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="usage-opencode-cookie">
+                      {t("usageScript.authCookie", {
+                        defaultValue: "Auth Cookie",
+                      })}
+                    </Label>
+                    <div className="relative">
                       <Input
-                        id="usage-opencode-ws"
-                        type="text"
-                        value={script.workspaceId || ""}
+                        id="usage-opencode-cookie"
+                        type={showAuthCookie ? "text" : "password"}
+                        value={script.authCookie || ""}
                         onChange={(e) =>
                           setScript({
                             ...script,
-                            workspaceId: e.target.value.trim(),
+                            // 容错：用户可能带 auth= 前缀 / 整行请求头粘贴，统一归一化成纯值
+                            authCookie: normalizeOpencodeCookie(e.target.value),
                           })
                         }
-                        placeholder="wrk_xxxxx"
+                        placeholder="Fe26.2**"
                         autoComplete="off"
-                        className="border-white/10"
+                        className="border-white/10 pr-9"
                       />
+                      {script.authCookie && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAuthCookie(!showAuthCookie)}
+                          className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground transition-colors"
+                          aria-label={showAuthCookie ? "隐藏" : "显示"}
+                        >
+                          {showAuthCookie ? (
+                            <EyeOff size={16} />
+                          ) : (
+                            <Eye size={16} />
+                          )}
+                        </button>
+                      )}
                     </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="usage-opencode-cookie">
-                        {t("usageScript.authCookie", {
-                          defaultValue: "Auth Cookie",
-                        })}
-                      </Label>
-                      <div className="relative">
-                        <Input
-                          id="usage-opencode-cookie"
-                          type={showAuthCookie ? "text" : "password"}
-                          value={script.authCookie || ""}
-                          onChange={(e) =>
-                            setScript({
-                              ...script,
-                              // 容错：用户可能带 auth= 前缀 / 整行请求头粘贴，统一归一化成纯值
-                              authCookie: normalizeOpencodeCookie(
-                                e.target.value,
-                              ),
-                            })
-                          }
-                          placeholder="Fe26.2**"
-                          autoComplete="off"
-                          className="border-white/10 pr-9"
-                        />
-                        {script.authCookie && (
-                          <button
-                            type="button"
-                            onClick={() => setShowAuthCookie(!showAuthCookie)}
-                            className="absolute inset-y-0 right-0 flex items-center pr-3 text-muted-foreground hover:text-foreground transition-colors"
-                            aria-label={showAuthCookie ? "隐藏" : "显示"}
-                          >
-                            {showAuthCookie ? (
-                              <EyeOff size={16} />
-                            ) : (
-                              <Eye size={16} />
-                            )}
-                          </button>
-                        )}
-                      </div>
-                      {/* 剩余有效期：从 cookie 里的过期时间戳解析 */}
-                      {script.authCookie
-                        ? (() => {
-                            const expiry = parseOpencodeCookieExpiry(
-                              script.authCookie,
-                            );
-                            if (expiry === null) return null;
-                            const days = Math.floor(
-                              (expiry - Date.now()) / 86400000,
-                            );
-                            if (days < 0) {
-                              return (
-                                <p className="text-[11px] leading-snug text-red-500 font-medium">
-                                  {t("usageScript.opencodeCookieExpired", {
-                                    defaultValue: "Auth Cookie 已过期，请重新获取",
-                                  })}
-                                </p>
-                              );
-                            }
-                            const months = Math.floor(days / 30.4);
-                            // 按剩余时长分档配色：≥6 月健康(绿) / ≥1 月留意(橙) / <1 月快过期(红)
-                            const color =
-                              months >= 6
-                                ? "text-emerald-500"
-                                : months >= 1
-                                  ? "text-amber-500"
-                                  : "text-red-500";
+                    {/* 剩余有效期：从 cookie 里的过期时间戳解析 */}
+                    {script.authCookie
+                      ? (() => {
+                          const expiry = parseOpencodeCookieExpiry(
+                            script.authCookie,
+                          );
+                          if (expiry === null) return null;
+                          const days = Math.floor(
+                            (expiry - Date.now()) / 86400000,
+                          );
+                          if (days < 0) {
                             return (
-                              <p className={cn("text-[11px] leading-snug font-medium", color)}>
-                                {months >= 1
-                                  ? t(
-                                      "usageScript.opencodeCookieRemaining",
-                                      {
-                                        defaultValue: `Auth Cookie 约 ${months} 个月后过期`,
-                                      },
-                                    )
-                                  : t("usageScript.opencodeCookieRemainingDays", {
-                                      defaultValue: `Auth Cookie 约 ${days} 天后过期`,
-                                    })}
+                              <p className="text-[11px] leading-snug text-red-500 font-medium">
+                                {t("usageScript.opencodeCookieExpired", {
+                                  defaultValue:
+                                    "Auth Cookie 已过期，请重新获取",
+                                })}
                               </p>
                             );
-                          })()
-                        : null}
-                    </div>
+                          }
+                          const months = Math.floor(days / 30.4);
+                          // 按剩余时长分档配色：≥6 月健康(绿) / ≥1 月留意(橙) / <1 月快过期(红)
+                          const color =
+                            months >= 6
+                              ? "text-emerald-500"
+                              : months >= 1
+                                ? "text-amber-500"
+                                : "text-red-500";
+                          return (
+                            <p
+                              className={cn(
+                                "text-[11px] leading-snug font-medium",
+                                color,
+                              )}
+                            >
+                              {months >= 1
+                                ? t("usageScript.opencodeCookieRemaining", {
+                                    defaultValue: `Auth Cookie 约 ${months} 个月后过期`,
+                                  })
+                                : t("usageScript.opencodeCookieRemainingDays", {
+                                    defaultValue: `Auth Cookie 约 ${days} 天后过期`,
+                                  })}
+                            </p>
+                          );
+                        })()
+                      : null}
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
             {/* 通用配置（始终显示） */}
             <div className="grid gap-4 md:grid-cols-2 pt-4 border-t border-white/10">

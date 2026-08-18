@@ -1,6 +1,6 @@
 ﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Search } from "lucide-react";
+
 import { toast } from "sonner";
 import { type AppId } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
@@ -401,22 +401,6 @@ const StandardPromptPanel = React.forwardRef<
     };
 
     const promptEntries = useMemo(() => Object.entries(prompts), [prompts]);
-    const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase();
-    const filteredPromptEntries = useMemo(() => {
-      if (!normalizedSearchQuery) return promptEntries;
-
-      return promptEntries.filter(([recordId, prompt]) =>
-        [
-          recordId,
-          prompt.id,
-          prompt.name,
-          prompt.description,
-          prompt.content,
-        ].some((value) =>
-          value?.toLocaleLowerCase().includes(normalizedSearchQuery),
-        ),
-      );
-    }, [normalizedSearchQuery, promptEntries]);
     const enabledPrompt = promptEntries.find(([_, p]) => p.enabled);
 
     return (

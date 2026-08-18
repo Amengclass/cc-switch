@@ -64,7 +64,9 @@ const classifyHostError = (err: unknown): "ssh" | "docker" => {
   if (msg.startsWith("SSH_ERR:")) return "ssh";
   if (msg.startsWith("DOCKER_ERR:")) return "docker";
   // 老后端（未加前缀）兜底：仅凭文案含连接类关键词判为 ssh
-  if (/连接.*失败|连接.*超时|SSH 连接失败|认证失败|最近一次连接未成功/.test(msg)) {
+  if (
+    /连接.*失败|连接.*超时|SSH 连接失败|认证失败|最近一次连接未成功/.test(msg)
+  ) {
     return "ssh";
   }
   return "docker";
@@ -137,8 +139,7 @@ export function BatchApplyPanel({
     hosts.forEach((host) => {
       listDockerContainers(host.id)
         .then((list) => {
-          if (alive)
-            setContainersMap((prev) => ({ ...prev, [host.id]: list }));
+          if (alive) setContainersMap((prev) => ({ ...prev, [host.id]: list }));
         })
         .catch((e) => {
           if (alive) {
@@ -216,7 +217,9 @@ export function BatchApplyPanel({
   const isHostFullyChecked = (host: RemoteHost) => {
     const cs = containersMap[host.id] ?? [];
     if (!selected.has(host.id)) return false;
-    return cs.length === 0 || cs.every((c) => selected.has(contKey(host.id, c)));
+    return (
+      cs.length === 0 || cs.every((c) => selected.has(contKey(host.id, c)))
+    );
   };
 
   // 展开区「宿主机账号」行：只切换 host.id（不连容器）
@@ -260,16 +263,19 @@ export function BatchApplyPanel({
       label: res.label,
       container: res.container,
       status: res.ok ? "ok" : "fail",
-      message: res.ok ? res.providerName : (res.error ?? t("batchApply.failed")),
+      message: res.ok
+        ? res.providerName
+        : (res.error ?? t("batchApply.failed")),
     });
 
     // 监听后端逐台进度事件：每切完一台立即更新对应落点，实时反馈
-    const un = await listen<BroadcastSwitchResult>("broadcast-progress", (ev) => {
-      const row = fromResult(ev.payload);
-      setResults((prev) =>
-        prev.map((r) => (r.key === row.key ? row : r)),
-      );
-    });
+    const un = await listen<BroadcastSwitchResult>(
+      "broadcast-progress",
+      (ev) => {
+        const row = fromResult(ev.payload);
+        setResults((prev) => prev.map((r) => (r.key === row.key ? row : r)));
+      },
+    );
 
     // 一次调用后端广播命令（后端逐落点建连切换并推进度，失败不阻断其它）
     try {
@@ -287,7 +293,9 @@ export function BatchApplyPanel({
       // 整个广播调用崩了（如参数错误）：当前未完成的全标失败
       setResults((prev) =>
         prev.map((r) =>
-          r.status === "pending" ? { ...r, status: "fail", message: String(e) } : r,
+          r.status === "pending"
+            ? { ...r, status: "fail", message: String(e) }
+            : r,
         ),
       );
     }
@@ -384,13 +392,12 @@ export function BatchApplyPanel({
                   <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent
-                align="end"
-                className="w-80 p-0"
-              >
+              <PopoverContent align="end" className="w-80 p-0">
                 <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
                   <span className="text-xs font-semibold text-foreground/80">
-                    {t("batchApply.selectedCount", { count: selectedTargets.length })}
+                    {t("batchApply.selectedCount", {
+                      count: selectedTargets.length,
+                    })}
                   </span>
                   <button
                     type="button"
@@ -419,7 +426,9 @@ export function BatchApplyPanel({
                             <Server className="h-4 w-4 shrink-0 text-primary" />
                           )}
                           <span className="min-w-0 flex-1 truncate">
-                            {target.container ? target.container : target.hostName}
+                            {target.container
+                              ? target.container
+                              : target.hostName}
                           </span>
                           <span
                             className={cn(
@@ -429,7 +438,9 @@ export function BatchApplyPanel({
                                 : "bg-primary/15 text-primary",
                             )}
                           >
-                            {isContainer ? t("batchApply.container") : t("batchApply.host")}
+                            {isContainer
+                              ? t("batchApply.container")
+                              : t("batchApply.host")}
                           </span>
                         </div>
                       );
@@ -490,9 +501,7 @@ export function BatchApplyPanel({
                   <Server
                     className={cn(
                       "h-4 w-4 shrink-0",
-                      sshDown
-                        ? "text-red-500/70"
-                        : "text-muted-foreground",
+                      sshDown ? "text-red-500/70" : "text-muted-foreground",
                     )}
                   />
                   <button
@@ -556,7 +565,9 @@ export function BatchApplyPanel({
                             onCheckedChange={() => toggleHostOnly(host.id)}
                           />
                           <Server className="h-3.5 w-3.5 shrink-0 text-primary" />
-                          <span className="truncate font-medium text-primary">{t("batchApply.host")}</span>
+                          <span className="truncate font-medium text-primary">
+                            {t("batchApply.host")}
+                          </span>
                         </label>
                         <div className="border-t border-border/50" />
                         {cs != null && cs.length === 0 && (
@@ -571,7 +582,9 @@ export function BatchApplyPanel({
                           >
                             <Checkbox
                               checked={selected.has(contKey(host.id, c))}
-                              onCheckedChange={() => toggleContainer(host.id, c)}
+                              onCheckedChange={() =>
+                                toggleContainer(host.id, c)
+                              }
                             />
                             <Container className="h-3.5 w-3.5 shrink-0" />
                             <span className="truncate">{c}</span>
@@ -585,7 +598,6 @@ export function BatchApplyPanel({
             );
           })}
         </div>
-
       </div>
 
       {/* 执行结果（独立展示在落点下方、底部固定条上方） */}
@@ -594,10 +606,14 @@ export function BatchApplyPanel({
           <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-foreground/60">
             {t("batchApply.resultTitle")}
             <span className="font-medium normal-case text-emerald-500">
-              {t("batchApply.succeeded", { count: results.filter((r) => r.status === "ok").length })}
+              {t("batchApply.succeeded", {
+                count: results.filter((r) => r.status === "ok").length,
+              })}
             </span>
             <span className="font-medium normal-case text-red-500">
-              {t("batchApply.failedCount", { count: results.filter((r) => r.status === "fail").length })}
+              {t("batchApply.failedCount", {
+                count: results.filter((r) => r.status === "fail").length,
+              })}
             </span>
           </div>
           <div className="max-h-[26vh] space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">
@@ -627,10 +643,14 @@ export function BatchApplyPanel({
                       : "bg-primary/15 text-primary",
                   )}
                 >
-                  {r.container ? t("batchApply.container") : t("batchApply.host")}
+                  {r.container
+                    ? t("batchApply.container")
+                    : t("batchApply.host")}
                 </span>
                 {r.status === "ok" && (
-                  <span className="text-xs text-muted-foreground">{t("batchApply.switched")}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {t("batchApply.switched")}
+                  </span>
                 )}
                 {r.status === "fail" && (
                   <span className="max-w-[40%] truncate text-xs text-red-500">

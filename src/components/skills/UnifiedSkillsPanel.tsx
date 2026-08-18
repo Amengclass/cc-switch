@@ -507,6 +507,7 @@ const UnifiedSkillsPanel = React.forwardRef<
                   opencode: record.apps.opencode ?? false,
                   openclaw: record.apps.openclaw ?? false,
                   hermes: record.apps.hermes ?? false,
+                  pi: record.apps.pi ?? false,
                 },
                 installedAt: record.installedAt,
                 updatedAt: record.updatedAt,
@@ -1058,9 +1059,7 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
         className="flex-shrink-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
         style={hasUpdate ? { opacity: 1 } : undefined}
       >
-        {hasUpdate &&
-          onUpdate &&
-          (!isRemote || Boolean(skill.repoOwner)) && (
+        {hasUpdate && onUpdate && (!isRemote || Boolean(skill.repoOwner)) && (
           <Button
             type="button"
             variant="ghost"

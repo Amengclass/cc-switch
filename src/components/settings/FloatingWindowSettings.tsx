@@ -40,9 +40,10 @@ export function FloatingWindowSettings({
   useEffect(() => {
     let alive = true;
     (
-      invoke(
-        "get_floating_ball_target",
-      ) as Promise<{ appType: string; isPinned: boolean } | null>
+      invoke("get_floating_ball_target") as Promise<{
+        appType: string;
+        isPinned: boolean;
+      } | null>
     )
       .then((target) => {
         if (!alive) return;
@@ -107,7 +108,9 @@ export function FloatingWindowSettings({
                   </div>
                   <Switch
                     checked={!!settings.floatingLocked}
-                    onCheckedChange={(value) => onChange({ floatingLocked: value })}
+                    onCheckedChange={(value) =>
+                      onChange({ floatingLocked: value })
+                    }
                   />
                 </div>
                 {/* 悬浮窗内容显示 */}

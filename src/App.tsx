@@ -295,8 +295,8 @@ function App() {
     );
   }, [servers]);
   // 设置开关：远端非 additive 面板是否每次自动读入当前 live 配置（default 卡）
-  const [autoImportDefault, setAutoImportDefault] = useState<boolean>(() =>
-    localStorage.getItem("cc-switch-remote-auto-import-default") !== "0",
+  const [autoImportDefault, setAutoImportDefault] = useState<boolean>(
+    () => localStorage.getItem("cc-switch-remote-auto-import-default") !== "0",
   );
 
   // ===== 远端功能总开关：关 = 还原原生 cc-switch（隐藏所有远端入口）=====
@@ -331,14 +331,17 @@ function App() {
   );
 
   // 开关切换后使远端面板查询失效（refetch 用新值），并持久化
-  const handleAutoImportDefaultChange = useCallback((next: boolean) => {
-    setAutoImportDefault(next);
-    localStorage.setItem(
-      "cc-switch-remote-auto-import-default",
-      next ? "1" : "0",
-    );
-    queryClient.invalidateQueries({ queryKey: ["remoteProviders"] });
-  }, [queryClient]);
+  const handleAutoImportDefaultChange = useCallback(
+    (next: boolean) => {
+      setAutoImportDefault(next);
+      localStorage.setItem(
+        "cc-switch-remote-auto-import-default",
+        next ? "1" : "0",
+      );
+      queryClient.invalidateQueries({ queryKey: ["remoteProviders"] });
+    },
+    [queryClient],
+  );
 
   useEffect(() => {
     localStorage.setItem("cc-switch-remote-target", remoteTargetId);
@@ -632,7 +635,11 @@ function App() {
     return target?.provider_id;
   }, [proxyStatus?.active_targets, proxyAppId]);
 
-  const { data, isLoading: localIsLoading, refetch } = useProvidersQuery(activeApp, {
+  const {
+    data,
+    isLoading: localIsLoading,
+    refetch,
+  } = useProvidersQuery(activeApp, {
     isProxyRunning,
   });
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
@@ -684,7 +691,6 @@ function App() {
     sharedFeatureApp === "gemini" ||
     sharedFeatureApp === "hermes" ||
     sharedFeatureApp === "pi";
-  const hasMcpSupport = sharedFeatureApp !== "pi";
 
   const {
     addProvider,
@@ -698,36 +704,6 @@ function App() {
     currentAppUsesProxy && isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
   );
-  const handleEnablePiProvider = async (provider: Provider) => {
-    try {
-      await providersApi.switch(provider.id, "pi");
-      await invalidatePiProviderCaches(queryClient);
-      await providersApi.updateTrayMenu().catch((error) => {
-        console.error(
-          "Failed to update tray menu after enabling Pi provider",
-          error,
-        );
-      });
-      toast.success(
-        t("pi.provider.enabled", {
-          defaultValue: "已在 Pi 中启用",
-        }),
-        { closeButton: true },
-      );
-    } catch (error) {
-      const detail = extractErrorMessage(error);
-      toast.error(
-        t("pi.provider.enableFailed", {
-          defaultValue: "无法在 Pi 中启用此供应商",
-        }),
-        {
-          description:
-            translatePiProviderMutationError(detail, t) || detail || undefined,
-          closeButton: true,
-        },
-      );
-    }
-  };
 
   // 远程切换 mutation：与本机 useSwitchProviderMutation 同构（onSuccess 回写高亮 +
   // invalidateQueries + 集中 toast；isPending 供按钮禁用防连点）。
@@ -1733,7 +1709,9 @@ function App() {
                       isProxyRunning={currentAppUsesProxy && isProxyRunning}
                       isProxyTakeover={
                         remoteTargetId || remoteContainerId
-                          ? Boolean(remoteProvidersQuery.data?.routeProxyEnabled)
+                          ? Boolean(
+                              remoteProvidersQuery.data?.routeProxyEnabled,
+                            )
                           : isProxyRunning && isCurrentAppTakeoverActive
                       }
                       isSwitching={
@@ -2566,86 +2544,86 @@ function App() {
         {currentView !== "settings" &&
           currentView !== "remote" &&
           remoteAvailableForApp && (
-          <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
-            <TargetBreadcrumb
-              remoteTargetId={remoteTargetId}
-              remoteContainerId={remoteContainerId}
-              setRemoteTargetId={(value) => {
-                setRemoteTargetId(value);
-                // 切主机同步清空旧容器列表（handleSelectHost 只清 containerId，
-                // 不清列表，导致下拉在拉取完成前显示上一台主机的容器）
-                setContainers([]);
-              }}
-              setRemoteContainerId={setRemoteContainerId}
-              servers={servers}
-              containers={containers}
-              hostsOnline={hostsOnline}
-              onProbeHosts={probeHosts}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setBatchApplyOpen(true)}
-              className="hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              {t("remote.batchApply", { defaultValue: "批量应用" })}
-            </Button>
-          {currentInstalled === true || currentInstalled === null ? (
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
-                currentInstalled === true
-                  ? "bg-emerald-500/15 text-emerald-600"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {currentInstalled === true
-                ? `${t(`apps.${sharedFeatureApp}`)} ${t(
-                    "remote.cliInstalledBadge",
-                    { defaultValue: "已安装" },
-                  )}`
-                : t("remote.cliDetectFailed", {
-                    defaultValue: "安装状态检测中/未知",
-                  })}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-0.5">
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
-                {`⚠ ${t(`apps.${sharedFeatureApp}`)} ${t(
-                  "remote.cliNotInstalledBadge",
-                  { defaultValue: "未安装" },
-                )}`}
-              </span>
-              <span className="select-none text-amber-600/60 text-lg leading-none">
-                ·
-              </span>
-              <InstallCommandPopover
-                command={
-                  (remoteTargetId
-                    ? APP_INSTALL_CMDS[sharedFeatureApp]?.remote
-                    : APP_INSTALL_CMDS[sharedFeatureApp]?.local) ?? ""
-                }
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
+              <TargetBreadcrumb
+                remoteTargetId={remoteTargetId}
+                remoteContainerId={remoteContainerId}
+                setRemoteTargetId={(value) => {
+                  setRemoteTargetId(value);
+                  // 切主机同步清空旧容器列表（handleSelectHost 只清 containerId，
+                  // 不清列表，导致下拉在拉取完成前显示上一台主机的容器）
+                  setContainers([]);
+                }}
+                setRemoteContainerId={setRemoteContainerId}
+                servers={servers}
+                containers={containers}
+                hostsOnline={hostsOnline}
+                onProbeHosts={probeHosts}
               />
-            </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setBatchApplyOpen(true)}
+                className="hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                {t("remote.batchApply", { defaultValue: "批量应用" })}
+              </Button>
+              {currentInstalled === true || currentInstalled === null ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                    currentInstalled === true
+                      ? "bg-emerald-500/15 text-emerald-600"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {currentInstalled === true
+                    ? `${t(`apps.${sharedFeatureApp}`)} ${t(
+                        "remote.cliInstalledBadge",
+                        { defaultValue: "已安装" },
+                      )}`
+                    : t("remote.cliDetectFailed", {
+                        defaultValue: "安装状态检测中/未知",
+                      })}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-0.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
+                    {`⚠ ${t(`apps.${sharedFeatureApp}`)} ${t(
+                      "remote.cliNotInstalledBadge",
+                      { defaultValue: "未安装" },
+                    )}`}
+                  </span>
+                  <span className="select-none text-amber-600/60 text-lg leading-none">
+                    ·
+                  </span>
+                  <InstallCommandPopover
+                    command={
+                      (remoteTargetId
+                        ? APP_INSTALL_CMDS[sharedFeatureApp]?.remote
+                        : APP_INSTALL_CMDS[sharedFeatureApp]?.local) ?? ""
+                    }
+                  />
+                </span>
+              )}
+              {remoteTargetId && (
+                <span className="text-xs text-muted-foreground">
+                  {t("remote.targetActiveHint", {
+                    defaultValue:
+                      "供应商 / MCP / Prompts / Skills / 会话 作用于该主机",
+                  })}
+                </span>
+              )}
+              <button
+                onClick={refreshInstallStatus}
+                title={t("remote.refreshStatusTitle")}
+                className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t("remote.refreshStatus")}
+              </button>
+            </div>
           )}
-          {remoteTargetId && (
-            <span className="text-xs text-muted-foreground">
-              {t("remote.targetActiveHint", {
-                defaultValue:
-                  "供应商 / MCP / Prompts / Skills / 会话 作用于该主机",
-              })}
-            </span>
-          )}
-          <button
-            onClick={refreshInstallStatus}
-            title={t("remote.refreshStatusTitle")}
-            className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            {t("remote.refreshStatus")}
-          </button>
-          </div>
-        )}
         <div className="flex-1 min-h-0 flex flex-col pt-2">
           {renderContent()}
         </div>

@@ -161,7 +161,14 @@ export function ProviderList({
       }
       return true; // 其他应用始终返回 true
     },
-    [appId, remoteTargetId, remoteLiveIds, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
+    [
+      appId,
+      remoteTargetId,
+      remoteLiveIds,
+      opencodeLiveIds,
+      openclawLiveIds,
+      hermesLiveIds,
+    ],
   );
 
   // OpenClaw: query default model to determine which provider is default
@@ -276,7 +283,9 @@ export function ProviderList({
               toast.error(
                 t("remote.testFail", {
                   defaultValue: "远端不可达（HTTP {{code}}）",
-                  code: result.httpCode || t("remote.noResponse", { defaultValue: "无响应" }),
+                  code:
+                    result.httpCode ||
+                    t("remote.noResponse", { defaultValue: "无响应" }),
                 }),
                 { description: result.baseUrl, closeButton: true },
               );
