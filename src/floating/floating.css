@@ -345,7 +345,9 @@ body {
   /* 用真 `border: 1px`（供应商页面同款细边框），而非 box-shadow：
      box-shadow 在高 DPI 下 1px 会显粗，真 border 是标准单一线宽，观感最细。 */
   border: 1px solid var(--fb-border);
-  transition: border-color 0.15s ease, background 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
 }
 .dark .row {
   border-color: rgba(255, 255, 255, 0.14);
@@ -463,7 +465,9 @@ body {
   background: transparent;
   color: var(--fb-muted);
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 .row-pin:hover {
   color: var(--fb-fg);

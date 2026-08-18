@@ -314,6 +314,20 @@
 - 构建脚本 `C:\build\build-exe.ps1`(规避火绒 `sysdiag` 文件锁 LNK1105)
 - 推送到 GitHub fork `https://github.com/Amengclass/cc-switch`
 
+### PR Checklist / 合并前自检清单
+
+> 每次向 main 分支合并代码前，必须逐项确认通过：
+
+| 检查项 | 命令 | 说明 |
+|--------|------|------|
+| [ ] TypeScript 类型检查 | `pnpm typecheck` | 无类型错误 |
+| [ ] 代码格式检查 | `pnpm format:check` | Prettier 格式符合规范 |
+| [ ] ESLint 检查 | `pnpm lint` | 代码规范通过 |
+| [ ] 单元测试 | `pnpm test:unit` | 全部测试通过 |
+| [ ] 前端构建 | `pnpm build:renderer` | 前端打包成功 |
+| [ ] Rust Clippy 检查 | `cargo clippy` | 仅 Rust 代码有改动时执行 |
+| [ ] i18n 检查 | 手动检查 | 新增/修改的用户可见文案已添加对应语言 key（zh/en/ja/zh-TW） |
+
 ---
 
 ## 远程工作清单(SSH 远程主机统一控制面)

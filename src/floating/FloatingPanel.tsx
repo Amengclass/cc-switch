@@ -1,4 +1,10 @@
-import { cloneElement, useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -38,8 +44,10 @@ function formatRelativeTime(
   if (ts == null) return t("floating.neverUpdated");
   const diff = Math.floor((now - ts) / 1000);
   if (diff < 60) return t("floating.justNow");
-  if (diff < 3600) return t("floating.minutesAgo", { count: Math.floor(diff / 60) });
-  if (diff < 86400) return t("floating.hoursAgo", { count: Math.floor(diff / 3600) });
+  if (diff < 3600)
+    return t("floating.minutesAgo", { count: Math.floor(diff / 60) });
+  if (diff < 86400)
+    return t("floating.hoursAgo", { count: Math.floor(diff / 3600) });
   return t("floating.daysAgo", { count: Math.floor(diff / 86400) });
 }
 
@@ -113,7 +121,9 @@ export function FloatingPanel() {
 
   // 读取悬浮窗当前置顶的 app（与球同源：get_floating_ball_target）
   const reloadPin = useCallback(() => {
-    void (invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>)
+    void (
+      invoke("get_floating_ball_target") as Promise<FloatingBallTarget | null>
+    )
       .then((t) => setPinnedApp(t?.isPinned ? t.appType : null))
       .catch((e) => console.error("[Floating] 读取置顶 app 失败", e));
   }, []);
@@ -134,16 +144,18 @@ export function FloatingPanel() {
 
   // 逐行置顶/取消置顶悬浮窗显示。乐观更新：先本地置 `pinnedApp` 让按钮立即响应，
   // 再写后端（settings 落盘 + 发事件驱动球/设置页刷新）。
-  const togglePin = useCallback((appType: string, currentlyPinned: boolean) => {
-    const next = currentlyPinned ? null : appType;
-    setPinnedApp(next);
-    void invoke("floating_set_pin_app", { appType: next })
-      .catch((e) => {
+  const togglePin = useCallback(
+    (appType: string, currentlyPinned: boolean) => {
+      const next = currentlyPinned ? null : appType;
+      setPinnedApp(next);
+      void invoke("floating_set_pin_app", { appType: next }).catch((e) => {
         console.error("[Floating] 设置置顶失败", e);
         // 失败回滚到后端真实值，避免按钮停留在错误的置顶态
         reloadPin();
       });
-  }, [reloadPin]);
+    },
+    [reloadPin],
+  );
 
   useEffect(() => {
     void refresh();
@@ -187,7 +199,9 @@ export function FloatingPanel() {
             <div key={e.appType}>
               <div
                 className={`row${e.takeoverActive ? " row-takeover" : ""}`}
-                title={e.takeoverActive ? t("floating.takeoverActive") : undefined}
+                title={
+                  e.takeoverActive ? t("floating.takeoverActive") : undefined
+                }
               >
                 <div className="row-left">
                   <span className="row-app">
@@ -203,7 +217,9 @@ export function FloatingPanel() {
                         {e.providerName}
                       </span>
                     ) : (
-                      <span className="row-provider">{t("floating.notSet")}</span>
+                      <span className="row-provider">
+                        {t("floating.notSet")}
+                      </span>
                     )}
                     {e.model ? (
                       <span className="row-model">{e.model}</span>
@@ -226,9 +242,7 @@ export function FloatingPanel() {
                       </span>
                       <UsageDetail
                         d={e.usage![0]}
-                        dimPrefix={
-                          planAbbr(e.usage![0].planName) || undefined
-                        }
+                        dimPrefix={planAbbr(e.usage![0].planName) || undefined}
                         t={t}
                       />
                       {extraItems.length > 0 && (
@@ -277,9 +291,7 @@ export function FloatingPanel() {
                       ? t("floating.unpin")
                       : t("floating.pin")
                   }
-                  onClick={() =>
-                    togglePin(e.appType, pinnedApp === e.appType)
-                  }
+                  onClick={() => togglePin(e.appType, pinnedApp === e.appType)}
                 >
                   <Pin
                     size={11}

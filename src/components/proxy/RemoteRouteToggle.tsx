@@ -113,7 +113,8 @@ export function RemoteRouteToggle({
         console.error("[RemoteRouteToggle] reapply failed:", error);
         toast.error(
           t("remote.route.reapplyFailed", {
-            defaultValue: "开关已保存，但重新应用当前供应商到远端失败，请再切一次供应商",
+            defaultValue:
+              "开关已保存，但重新应用当前供应商到远端失败，请再切一次供应商",
           }),
         );
       }

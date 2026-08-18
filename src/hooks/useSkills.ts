@@ -44,6 +44,7 @@ function remoteToInstalled(entry: {
     opencode?: boolean;
     openclaw?: boolean;
     hermes?: boolean;
+    pi?: boolean;
   };
   installedAt?: number;
   updatedAt?: number;
@@ -66,6 +67,7 @@ function remoteToInstalled(entry: {
       opencode: entry.apps?.opencode ?? false,
       openclaw: entry.apps?.openclaw ?? false,
       hermes: entry.apps?.hermes ?? false,
+      pi: entry.apps?.pi ?? false,
     },
     installedAt: entry.installedAt ?? 0,
     updatedAt: entry.updatedAt ?? 0,
@@ -637,10 +639,7 @@ export function useInstallSkillsFromZip(
  * 否则为本机 skillsApi.checkUpdates。queryKey 含 host + container 维度，互不干扰；
  * enabled:false，由手动 refetch（checkUpdates()）触发。
  */
-export function useCheckSkillUpdates(
-  hostId?: string,
-  container?: string,
-) {
+export function useCheckSkillUpdates(hostId?: string, container?: string) {
   return useQuery({
     queryKey: hostId
       ? ["skills", "updates", "remote", hostId, container ?? "__host__"]
@@ -717,7 +716,11 @@ export function useUpdateRemoteSkill(
   ];
   return useMutation({
     mutationFn: (skillId: string) =>
-      updateRemoteSkill(remoteTargetId!, skillId, remoteContainerId || undefined),
+      updateRemoteSkill(
+        remoteTargetId!,
+        skillId,
+        remoteContainerId || undefined,
+      ),
     onSuccess: (updatedSkill) => {
       queryClient.setQueryData<InstalledSkill[]>(installedKey, (oldData) => {
         if (!oldData) return [updatedSkill];
@@ -727,7 +730,9 @@ export function useUpdateRemoteSkill(
       });
       queryClient.setQueryData<unknown[]>(updatesKey, (oldData) => {
         if (!oldData) return oldData;
-        return oldData.filter((u) => (u as { id?: string }).id !== updatedSkill.id);
+        return oldData.filter(
+          (u) => (u as { id?: string }).id !== updatedSkill.id,
+        );
       });
       // 更新后当前目标的「可导入」圆点应归零（该 Skill 已是最新，受管理）。
       queryClient.invalidateQueries({ queryKey: unmanagedRemoteKey });

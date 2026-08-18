@@ -66,7 +66,12 @@ export const useSwitchRemoteProviderMutation = (
       // 并启用），因此要同时更新 currentProviderId 与 liveIds（按钮态「添加」→「移除」
       // 立即翻转）。直接用服务端返回的 current 更新缓存，免第二次 SSH refetch。
       queryClient.setQueryData<RemoteProvidersView | undefined>(
-        ["remoteProviders", vars.hostId, vars.container || "__host__", vars.app],
+        [
+          "remoteProviders",
+          vars.hostId,
+          vars.container || "__host__",
+          vars.app,
+        ],
         (old) => {
           if (!old) return old;
           const isAdditive =

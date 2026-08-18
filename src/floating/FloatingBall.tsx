@@ -275,7 +275,11 @@ export function FloatingBall() {
           <AppIcon size={10} appType={summary.appType} />
           <span className="ball-app-text">{summary.app}</span>
           {summary.isPinned && (
-            <span className="ball-pin" title={t("floating.pinnedTitle")} aria-label={t("floating.pinnedAria")}>
+            <span
+              className="ball-pin"
+              title={t("floating.pinnedTitle")}
+              aria-label={t("floating.pinnedAria")}
+            >
               <Pin size={9} />
             </span>
           )}
