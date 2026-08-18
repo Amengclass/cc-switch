@@ -4545,6 +4545,15 @@ base_url = "https://production.api/v1"
         }
     }
 
+    const DEEPSEEK_NATIVE_CONFIG: &str = r#"model = "deepseek-v4-flash"
+  model_provider = "custom"
+
+  [model_providers.custom]
+  name = "deepseek"
+  base_url = "https://api.deepseek.com"
+  wire_api = "responses"
+  "#;
+
     #[test]
     fn deepseek_official_catalog_unknown_model_clones_flagship() {
         // A user-added model id the official file doesn't know keeps the
