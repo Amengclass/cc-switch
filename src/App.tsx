@@ -78,6 +78,7 @@ import {
   listDockerContainers,
   listRemoteHosts,
   probeHostsOnline,
+  getRemoteOpenClawDefaultModel,
   setRemoteOpenClawDefaultModel,
   removeRemoteProviderFromLive,
   addRemoteProvider,
@@ -727,10 +728,14 @@ function App() {
     await switchProvider(provider);
   };
 
-  // 远端 OpenClaw「设为默认」：写该目标机器的 models.defaultModel（对齐本机 setAsDefaultModel）
+  // 远端 OpenClaw「设为默认」：对齐本机 setAsDefaultModel 的完整语义 ——
+  // 后端写远端 openclaw.json 的 agents.defaults.model（openclaw 实际读取的键），
+  // 支持下拉选具体模型，并保留原默认的 fallback 链（除去新 primary）。
   const handleRemoteSetAsDefault = useCallback(
-    async (provider: Provider) => {
-      const config = provider.settingsConfig as { models?: { id?: string }[] };
+    async (provider: Provider, modelId?: string) => {
+      const config = provider.settingsConfig as {
+        models?: { id?: string; name?: string }[];
+      };
       const models = config?.models ?? [];
       if (models.length === 0) {
         toast.error(
@@ -740,17 +745,39 @@ function App() {
         );
         return;
       }
-      const model = {
-        primary: `${provider.id}/${models[0].id}`,
-        fallbacks: models.slice(1).map((m) => `${provider.id}/${m.id}`),
-      };
+      const selectedModel = modelId
+        ? models.find((model) => model.id === modelId)
+        : models[0];
+      if (!selectedModel) {
+        toast.error(
+          t("notifications.openclawModelNotFound", {
+            defaultValue: "所选模型已不存在，请刷新后重试",
+          }),
+        );
+        return;
+      }
       try {
+        const primary = `${provider.id}/${selectedModel.id}`;
+        const existingDefault = await getRemoteOpenClawDefaultModel(
+          remoteTargetId,
+          remoteContainerId || undefined,
+        );
+        const model: { primary: string; fallbacks: string[] } = {
+          primary,
+          fallbacks: existingDefault?.fallbacks?.filter(
+            (fallback) => fallback !== primary,
+          ) ?? [],
+        };
         await setRemoteOpenClawDefaultModel(
           remoteTargetId,
           remoteContainerId || undefined,
           model,
         );
         void remoteProvidersQuery.refetch();
+        // 失效远端 openclaw defaultModel 查询缓存，使"设为默认"按钮状态更新
+        void queryClient.invalidateQueries({
+          queryKey: ["remoteOpenclawDefaultModel", remoteTargetId, remoteContainerId],
+        });
         toast.success(
           t("notifications.openclawDefaultModelSet", {
             defaultValue: "已设为默认模型",
@@ -766,7 +793,7 @@ function App() {
         );
       }
     },
-    [remoteTargetId, remoteContainerId, remoteProvidersQuery, t],
+    [remoteTargetId, remoteContainerId, remoteProvidersQuery, queryClient, t],
   );
 
   const disableOmoMutation = useDisableCurrentOmo();
@@ -1761,12 +1788,6 @@ function App() {
                               void remoteProvidersQuery.refetch();
                             }
                           : undefined
-                      }
-                      remoteRefreshing={
-                        remoteTargetId
-                          ? remoteProvidersQuery.isFetching &&
-                            !remoteProvidersQuery.isLoading
-                          : false
                       }
                       activeProviderId={activeProviderId}
                       onSwitch={handleProviderSwitch}

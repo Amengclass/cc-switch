@@ -482,17 +482,59 @@ async fn connect_fresh(
 
         // 反向隧道不在此处建立，统一由 pooled_connect 取连接时按宿主当前意图
         // sync_route_tunnel 对账（补建/取消），避免开关变更后旧连接缺隧道。
-        Ok(Arc::new(RemoteSession {
+        let session = Arc::new(RemoteSession {
             channel,
             sftp,
             host_id: host.id.clone(),
             tunnel_active: Mutex::new(false),
-        }))
+        });
+
+        // 探测远端真实 `$HOME`（best-effort）：default_home() 的推导只在未探测时兜底
+        // （remote/mod.rs）。失败/不可信不影响建连，只丢失「比推导更准」的机会。
+        ensure_probed_home(&session, host, &host_display).await;
+
+        Ok(session)
     };
 
     tokio::time::timeout(Duration::from_secs(10), connect_fut)
         .await
         .map_err(|_| format!("连接 {host_display} 超时（10 秒内未建立连接，请检查地址/网络）"))?
+}
+
+/// 确保已探测并缓存该主机的远端 `$HOME`（best-effort；已缓存则跳过）。
+/// 复用已建立的会话查 `$HOME`，一次往返。临时探测主机（无稳定 host_id）不缓存。
+async fn ensure_probed_home(session: &Arc<RemoteSession>, host: &RemoteHost, host_display: &str) {
+    if super::home_is_cached(&host.id) {
+        return;
+    }
+    match probe_remote_home(&session.channel).await {
+        Ok(Some(home)) => {
+            log::debug!("[remote] {host_display} 探测远端 $HOME: {home}");
+            super::remember_probed_home(&host.id, &home);
+        }
+        Ok(None) => {
+            log::debug!("[remote] {host_display} 远端 $HOME 为空或非绝对路径，回退推导值");
+        }
+        Err(e) => {
+            log::debug!("[remote] {host_display} 探测远端 $HOME 失败: {e}");
+        }
+    }
+}
+
+/// 探测远端 shell 的 `$HOME`。返回 None 表示不可信（空/非绝对路径），调用方回退推导。
+///
+/// 语义：claude/codex/openclaw 等远端 CLI 都按运行时 `$HOME` 展开 `~/` 落盘，
+/// 所以取 shell 的 `$HOME` 才与它们实际使用路径一致（`getent passwd` 的授信 home
+/// 字段在 LDAP/NSS 或自定义 home 下可能与此不一致）。经现有 exec 通道执行，
+/// 由 sshd 经用户 shell 展开 `$HOME`。
+async fn probe_remote_home(channel: &Handle<RemoteHandler>) -> Result<Option<String>, String> {
+    let out = exec_command(channel, "printf '%s' \"$HOME\"").await?;
+    let home = out.trim();
+    Ok(if home.starts_with('/') {
+        Some(home.to_string())
+    } else {
+        None
+    })
 }
 
 /// 连接失败冷却：某主机最近失败后，冷却期内直接快速报错（不再白等 TCP 超时）。
@@ -564,6 +606,9 @@ async fn pooled_connect(
             session
                 .sync_route_tunnel(&host.id, &host_display, host_wants_tunnel(host))
                 .await;
+            // 缓存可能已被「编辑主机」清空（forget_probed_home）：复用旧连接时代回退
+            // 推导/写到旧路径，这里补一次探测。一次往返，成本可忽略。
+            ensure_probed_home(&session, host, &host_display).await;
             clear_connect_fail(&key);
             put_back(&key, session.clone());
             return Ok(session);

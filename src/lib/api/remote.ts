@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { McpServer, Provider, SessionMessage, SessionMeta } from "@/types";
+import type {
+  HermesModelConfig,
+  McpServer,
+  Provider,
+  SessionMessage,
+  SessionMeta,
+} from "@/types";
 import type {
   EffectReport,
   RemoteConnectionInfo,
@@ -47,6 +53,28 @@ export async function setRemoteOpenClawDefaultModel(
     hostId,
     container: container ?? null,
     defaultModel,
+  });
+}
+
+/** 获取远端 OpenClaw 默认模型（对齐本机 getDefaultModel） */
+export async function getRemoteOpenClawDefaultModel(
+  hostId: string,
+  container: string | undefined,
+): Promise<{ primary: string; fallbacks: string[] } | null> {
+  return invoke("get_remote_openclaw_default_model", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 获取远端 Hermes 的 model 段（对齐本机 getModelConfig；远端「设为默认」按钮态用） */
+export async function getRemoteHermesModelConfig(
+  hostId: string,
+  container: string | undefined,
+): Promise<HermesModelConfig | null> {
+  return invoke("get_remote_hermes_model_config", {
+    hostId,
+    container: container ?? null,
   });
 }
 

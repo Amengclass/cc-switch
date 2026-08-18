@@ -234,7 +234,7 @@ export function ProviderCard({
   // OMO and OMO Slim share the same card behavior
   const isAnyOmo = isOmo || isOmoSlim;
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
-  const isAdditiveMode = (appId === "opencode" && !isAnyOmo) || appId === "pi";
+  const isAdditiveMode = isAdditiveAppId(appId) && (appId !== "opencode" || !isAnyOmo);
 
   const { data: health } = useProviderHealth(
     provider.id,

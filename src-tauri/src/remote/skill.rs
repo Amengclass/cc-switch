@@ -67,6 +67,8 @@ pub struct RemoteSkillApps {
     pub openclaw: bool,
     #[serde(default)]
     pub hermes: bool,
+    #[serde(default)]
+    pub pi: bool,
 }
 
 impl RemoteSkillApps {
@@ -79,6 +81,7 @@ impl RemoteSkillApps {
             "opencode" => self.opencode = enabled,
             "openclaw" => self.openclaw = enabled,
             "hermes" => self.hermes = enabled,
+            "pi" => self.pi = enabled,
             _ => {}
         }
     }
@@ -243,6 +246,7 @@ fn enabled_app_dirs(apps: &RemoteSkillApps) -> Vec<&'static str> {
         (".config/opencode/skills", apps.opencode),
         (".openclaw/workspace/skills", apps.openclaw),
         (".hermes/skills", apps.hermes),
+        (".pi/agent/skills", apps.pi),
     ];
     map.iter()
         .filter(|(_, enabled)| *enabled)

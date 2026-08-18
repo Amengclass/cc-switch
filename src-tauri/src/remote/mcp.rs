@@ -136,6 +136,9 @@ fn hermes_config_path(root: &str) -> String {
 fn openclaw_config_path(root: &str) -> String {
     format!("{root}/.openclaw/openclaw.json")
 }
+fn pi_config_path(root: &str) -> String {
+    format!("{root}/.pi/agent/settings.json")
+}
 
 /// 该 app 的配置目录（判断 CLI 是否安装，与 live 配置文件不一定同名）。
 fn app_dir(root: &str, app: &str) -> Option<String> {
@@ -147,6 +150,7 @@ fn app_dir(root: &str, app: &str) -> Option<String> {
         "opencode" => Some(format!("{root}/.config/opencode")),
         "hermes" => Some(format!("{root}/.hermes")),
         "openclaw" => Some(format!("{root}/.openclaw")),
+        "pi" => Some(format!("{root}/.pi")),
         _ => None,
     }
 }
@@ -349,6 +353,7 @@ pub async fn import_remote_mcp_from_apps<F: FileOps>(fs: &F, root: &str) -> Resu
         "opencode",
         "openclaw",
         "hermes",
+        "pi",
     ] {
         let servers = read_live_servers(fs, root, app).await?;
         for (id, spec) in servers {
@@ -442,6 +447,7 @@ async fn sync_mcp_to_app_many<F: FileOps>(
             }
             openclaw_json_upsert_many(fs, &openclaw_config_path(root), &converted).await
         }
+        "pi" => json_upsert_many(fs, &pi_config_path(root), "mcpServers", items).await,
         _ => Ok(()),
     }
 }
@@ -478,6 +484,7 @@ async fn remove_mcp_from_app_many<F: FileOps>(
         "opencode" => json_remove_many(fs, &opencode_config_path(root), "mcp", ids).await,
         "hermes" => hermes_remove_many(fs, &hermes_config_path(root), ids).await,
         "openclaw" => openclaw_json_remove_many(fs, &openclaw_config_path(root), ids).await,
+        "pi" => json_remove_many(fs, &pi_config_path(root), "mcpServers", ids).await,
         _ => Ok(()),
     }
 }

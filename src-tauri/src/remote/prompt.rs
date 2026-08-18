@@ -22,6 +22,7 @@ pub fn remote_prompt_path(root: &str, app: &str) -> String {
         "opencode" => (".config/opencode", "AGENTS.md"),
         "openclaw" => (".openclaw", "AGENTS.md"),
         "hermes" => (".hermes", "SOUL.md"),
+        "pi" => (".pi/agent", "AGENTS.md"),
         _ => (".claude", "CLAUDE.md"),
     };
     format!("{root}/{dir}/{file}")

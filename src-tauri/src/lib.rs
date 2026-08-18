@@ -1512,6 +1512,7 @@ pub fn run() {
             commands::get_pi_current_state,
             commands::update_pi_provider_usage_script,
             commands::get_pi_session_discovery,
+            commands::get_pi_live_provider_ids,
             // Profile management (项目配置方案)
             commands::list_profiles,
             commands::create_profile,
@@ -1671,6 +1672,8 @@ pub fn run() {
             remote::commands::test_remote_connection,
             remote::commands::test_remote_connection_info,
             remote::commands::set_remote_openclaw_default_model,
+            remote::commands::get_remote_openclaw_default_model,
+            remote::commands::get_remote_hermes_model_config,
             remote::commands::set_remote_route_proxy_app,
             remote::commands::probe_hosts_online,
             remote::commands::test_remote_provider_connection,

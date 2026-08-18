@@ -241,7 +241,13 @@ impl OpenClawConfigDocument {
         } else {
             None
         };
+        Self::from_source(original_source, path)
+    }
 
+    /// 从任意源文本构造 round-trip 文档（不落盘）。`None` → 默认骨架。
+    /// 供远端等「非本机文件系统」场景复用同一保形回写语义；`path` 仅用于
+    /// `save()` 的错误信息，纯变换场景可传空 PathBuf。
+    fn from_source(original_source: Option<String>, path: PathBuf) -> Result<Self, AppError> {
         let source = original_source
             .clone()
             .unwrap_or_else(|| OPENCLAW_DEFAULT_SOURCE.to_string());
@@ -653,12 +659,14 @@ pub fn get_provider(id: &str) -> Result<Option<Value>, AppError> {
     Ok(get_providers()?.get(id).cloned())
 }
 
-/// 设置供应商配置（原始 JSON）
-///
-/// 写入到 `models.providers`
-pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOutcome, AppError> {
-    let mut full_config = read_openclaw_config()?;
-    let root = ensure_object(&mut full_config);
+/// 把 `providers.{id} = provider_config` 合并进 `full_config` 的 models 段，
+/// 返回重建后的完整 `models` 值（保留 models 下其它字段与 `mode`）。
+fn merge_provider_into_models(
+    full_config: &mut Value,
+    id: &str,
+    provider_config: &Value,
+) -> Value {
+    let root = ensure_object(full_config);
     let models = root.entry("models".to_string()).or_insert_with(|| {
         json!({
             "mode": "merge",
@@ -668,15 +676,107 @@ pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOut
     let providers = ensure_object(models)
         .entry("providers".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
-    ensure_object(providers).insert(id.to_string(), provider_config);
+    ensure_object(providers).insert(id.to_string(), provider_config.clone());
 
-    let models_value = root.get("models").cloned().unwrap_or_else(|| {
+    root.get("models").cloned().unwrap_or_else(|| {
         json!({
             "mode": "merge",
             "providers": {}
         })
-    });
-    write_root_section("models", &models_value)
+    })
+}
+
+/// 设置供应商配置（原始 JSON）
+///
+/// 写入到 `models.providers`
+pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut full_config = read_openclaw_config()?;
+    let merged_models = merge_provider_into_models(&mut full_config, id, &provider_config);
+    write_root_section("models", &merged_models)
+}
+
+/// Round-trip upsert 供应商到任意源文本，返回**保形**（保留顶层注释/排版）的新文本。
+/// 仅重写 `models` 段，其余顶层段（agents/env/tools/mcp 等）原样保留。
+/// 语义与 `set_provider` 的合并逻辑逐字一致，只是不落盘——供远端 SFTP/容器场景
+/// 复用本机同一 json-five 保形回写。
+///
+/// - `source=None`（或空白）→ 以本机默认骨架
+///   `{"models":{"mode":"merge","providers":{}}}` 起步（文件缺失时无历史格式可保）。
+/// - 源非合法 JSON5 → 报错（对齐本机 `read_openclaw_config` 的严格解析，不静默丢注释）。
+/// 保形重写任意顶层段（供远端复用的纯变换，不落盘）。
+/// 解析 `source`（JSON5，严格；None/空白 → 默认骨架），将 `value` 替换到
+/// `section` 键，返回保形新文本；其余顶层段注释/排版原样保留。
+fn set_section_preserve_format(
+    source: Option<&str>,
+    section: &str,
+    value: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+
+    let mut doc =
+        OpenClawConfigDocument::from_source(Some(effective_source.to_string()), PathBuf::new())?;
+    doc.set_root_section(section, value)?;
+    Ok(doc.text.to_string())
+}
+
+pub(crate) fn upsert_provider_preserve_format(
+    source: Option<&str>,
+    id: &str,
+    provider_config: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+
+    // 合并逻辑用普通 `Value` 计算（与 set_provider 同一份 merge），再注入
+    // round-trip AST：仅替换 models 键的值 → 顶层注释/排版完整保留。
+    let merged_models = {
+        let mut full_config = json5::from_str::<Value>(effective_source).map_err(|e| {
+            AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+        })?;
+        merge_provider_into_models(&mut full_config, id, provider_config)
+    };
+
+    set_section_preserve_format(Some(effective_source), "models", &merged_models)
+}
+
+/// 保形设置 `agents.defaults.model`（镜像本机 `set_default_model` 的合并逻辑，不落盘）。
+/// 供远端 SFTP/容器场景使用：仅重写 `agents` 段，保留顶层注释、其它顶层段，
+/// 以及 agents 下其它 defaults 字段（subagents/workspace/timeoutSeconds 等）。
+pub(crate) fn set_default_model_preserve_format(
+    source: Option<&str>,
+    model: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+
+    // 与 set_default_model 同一合并：读现有 config → 在 agents.defaults 下插入
+    // `model` → 整体写回 agents 段（不丢 defaults 里其它字段）。
+    let agents_value = {
+        let mut config = json5::from_str::<Value>(effective_source).map_err(|e| {
+            AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+        })?;
+        let root = ensure_object(&mut config);
+        let agents = root
+            .entry("agents".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        let defaults = ensure_object(agents)
+            .entry("defaults".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        ensure_object(defaults).insert("model".to_string(), model.clone());
+
+        root.get("agents")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Map::new()))
+    };
+
+    set_section_preserve_format(Some(effective_source), "agents", &agents_value)
 }
 
 /// 删除供应商配置
@@ -1164,5 +1264,152 @@ mod tests {
             let written = fs::read_to_string(get_openclaw_config_path()).unwrap();
             assert!(written.contains("\"providers\": {}"));
         });
+    }
+
+    // =========================================================================
+    // upsert_provider_preserve_format（保形 round-trip，纯字符串变换，不碰磁盘/env）
+    // =========================================================================
+
+    #[test]
+    fn upsert_preserve_keeps_top_level_comments_and_sections() {
+        let source = r#"{
+  // top-level comment
+  models: {
+    mode: 'merge',
+    providers: {
+      existing: { api: 'anthropic-messages' },
+    },
+  },
+  env: { vars: { DEBUG: '1' } },  // env comment
+}
+"#;
+        let next = upsert_provider_preserve_format(
+            Some(source),
+            "new-provider",
+            &json!({ "api": "anthropic-messages", "baseUrl": "https://x.example" }),
+        )
+        .unwrap();
+
+        // 顶层注释与其它顶层段原样保留
+        assert!(next.contains("// top-level comment"));
+        assert!(next.contains("// env comment"));
+        assert!(next.contains("env"));
+        // 既不丢已有 provider 也不丢新 provider
+        assert!(next.contains("new-provider"));
+        assert!(next.contains("existing"));
+        assert!(next.contains("https://x.example"));
+
+        // 仍是合法 JSON5 且结构正确
+        let parsed = json5::from_str::<Value>(&next).unwrap();
+        assert_eq!(
+            parsed.pointer("/models/mode").and_then(Value::as_str),
+            Some("merge")
+        );
+        assert!(
+            parsed
+                .pointer("/models/providers/new-provider/api")
+                .is_some()
+        );
+        assert!(parsed.pointer("/models/providers/existing").is_some());
+        assert_eq!(
+            parsed.pointer("/env/vars/DEBUG").and_then(Value::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn upsert_preserve_missing_source_uses_default_skeleton() {
+        let next = upsert_provider_preserve_format(
+            None,
+            "p",
+            &json!({ "api": "anthropic-messages" }),
+        )
+        .unwrap();
+        let parsed = json5::from_str::<Value>(&next).unwrap();
+        assert!(parsed.pointer("/models/providers/p").is_some());
+        assert_eq!(
+            parsed.pointer("/models/mode").and_then(Value::as_str),
+            Some("merge")
+        );
+
+        // 空白源同样按默认骨架处理（不误报解析失败）
+        let next2 = upsert_provider_preserve_format(
+            Some("   "),
+            "q",
+            &json!({ "api": "openai-messages" }),
+        )
+        .unwrap();
+        let parsed2 = json5::from_str::<Value>(&next2).unwrap();
+        assert!(parsed2.pointer("/models/providers/q").is_some());
+    }
+
+    #[test]
+    fn upsert_preserve_invalid_source_errors() {
+        let err = upsert_provider_preserve_format(Some("{ invalid json5"), "p", &json!({}))
+            .unwrap_err();
+        assert!(err.to_string().contains("Failed to parse"));
+    }
+
+    #[test]
+    fn upsert_preserve_idempotent_noop_keeps_source() {
+        // 已存在同一 provider 时再来一次：合并结果一致（不产生重复键、不抖动格式）
+        let source = r#"{
+  // keep me
+  models: {
+    mode: 'merge',
+    providers: {
+      p: { api: 'anthropic-messages' },
+    },
+  },
+}
+"#;
+        let p = json!({ "api": "anthropic-messages" });
+        let once = upsert_provider_preserve_format(Some(source), "p", &p).unwrap();
+        let twice = upsert_provider_preserve_format(Some(&once), "p", &p).unwrap();
+        assert_eq!(once, twice);
+        assert!(twice.contains("// keep me"));
+    }
+
+    #[test]
+    fn set_default_model_preserve_keeps_comments_and_other_defaults() {
+        let source = r#"{
+  // keep me
+  models: {
+    mode: 'merge',
+    providers: {},
+  },
+  agents: {
+    defaults: {
+      timeoutSeconds: 120,
+      model: { primary: 'old/provider/old', fallbacks: [] },
+    },
+  },
+}
+"#;
+        let next = set_default_model_preserve_format(
+            Some(source),
+            &json!({ "primary": "new/provider/new", "fallbacks": ["new/provider/f2"] }),
+        )
+        .unwrap();
+
+        // 顶层注释 & 其它顶层段、agents.defaults 其它字段均保留
+        assert!(next.contains("// keep me"));
+        assert!(next.contains("models"));
+        assert!(next.contains("timeoutSeconds"));
+
+        // model 已替换为新值
+        let parsed = json5::from_str::<Value>(&next).unwrap();
+        assert_eq!(
+            parsed
+                .pointer("/agents/defaults/model/primary")
+                .and_then(Value::as_str),
+            Some("new/provider/new")
+        );
+        assert_eq!(
+            parsed
+                .pointer("/agents/defaults/timeoutSeconds")
+                .and_then(Value::as_i64),
+            Some(120)
+        );
     }
 }

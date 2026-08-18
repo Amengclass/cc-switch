@@ -13,6 +13,7 @@ use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, AuthMethod, RemoteHost};
 use base64::Engine as _;
+use sha2::{Digest, Sha256};
 
 /// 取该主机「per-app 走本机路由」意图（宿主机目标）：
 /// - route_proxy_apps（JSON）有该 app → 用它的值；
@@ -323,6 +324,10 @@ pub async fn save_remote_host(
         .upsert_remote_host(&host)
         .map_err(|e| e.to_string())?;
 
+    // 主机信息（username / host 等）可能已变 → 清掉旧 `$HOME` 探测缓存，
+    // 下次连接重新探测（复用旧连接时 connection::ensure_probed_home 会补探测）。
+    crate::remote::forget_probed_home(&host.id);
+
     // 只要提供了密码，就无条件写入系统钥匙串，保证连接/切换可用。
     // save_password 仅作为「记住密码」的偏好标记；若用户刻意留空密码则不覆盖旧密码。
     if let Some(pw) = password.as_deref().filter(|p| !p.is_empty()) {
@@ -436,6 +441,8 @@ pub async fn delete_remote_host(
         #[cfg(target_os = "windows")]
         let _ = credentials::delete_password(&host_id);
         let _ = crate::remote::current::delete_current_provider(state.db.as_ref(), &host_id);
+        // 清掉该主机的 `$HOME` 探测缓存，防止残留记忆
+        crate::remote::forget_probed_home(&host_id);
     }
     Ok(deleted)
 }
@@ -1902,6 +1909,7 @@ pub async fn list_remote_sessions_detailed(
         "codex" => format!("{home}/.codex"),
         "gemini" => format!("{home}/.gemini/tmp"),
         "openclaw" => format!("{home}/.openclaw/agents"),
+        "pi" => format!("{home}/.pi/sessions"),
         "hermes" | "opencode" => home.clone(),
         other => {
             return Err(format!("远程会话管理暂不支持应用 {other}"));
@@ -3254,6 +3262,11 @@ pub async fn probe_hosts_online(
 
 /// 设置远端 OpenClaw 的默认模型（对齐本机 `openclawApi.setDefaultModel`）。
 /// `default_model` 形如 `{"primary": "prov/模型id", "fallbacks": [...]}`。
+///
+/// 写 **`agents.defaults.model`** —— openclaw 实际读取的键（读 `docs/tools/*.md` 的
+/// `agents.defaults.model.primary` 语义）；旧实现误写 `models.defaultModel`，
+/// 该键 openclaw 不读 → 切了不生效。同时做保形回写（json-five round-trip，
+/// 保留顶层注释）与 expected_hash 脏写防护。
 #[tauri::command]
 pub async fn set_remote_openclaw_default_model(
     state: State<'_, AppState>,
@@ -3267,26 +3280,65 @@ pub async fn set_remote_openclaw_default_model(
     let home = host.default_home();
     let config_path = format!("{home}/.openclaw/openclaw.json");
 
-    let mut merged: serde_json::Value = match session
+    // 读远端 openclaw.json（JSON5；不存在/空 → 默认骨架起步）
+    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
+    let source = read.as_deref();
+
+    let new_text =
+        crate::openclaw_config::set_default_model_preserve_format(source, &default_model)
+            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
+
+    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
+    session
+        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
+        .await?;
+    Ok(())
+}
+
+/// 获取远端 OpenClaw 的默认模型（对齐本机 `openclawApi.getDefaultModel`）。
+/// 从 `agents.defaults.model` 读取（与 set 同一键）。
+#[tauri::command]
+pub async fn get_remote_openclaw_default_model(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let merged: serde_json::Value = match session
         .read_remote_text(&config_path, container.as_deref())
         .await?
     {
         Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
         None => json!({}),
     };
-    let mut models = merged
-        .get("models")
-        .cloned()
-        .unwrap_or_else(|| json!({ "mode": "merge", "providers": {} }));
-    models["defaultModel"] = default_model;
-    merged["models"] = models;
+    let default_model = merged
+        .get("agents")
+        .and_then(|a| a.get("defaults"))
+        .and_then(|d| d.get("model"))
+        .cloned();
+    Ok(default_model)
+}
 
-    let text = serde_json::to_string_pretty(&merged)
-        .map_err(|e| format!("序列化 openclaw.json 失败: {e}"))?;
-    session
-        .write_settings_with_backup(&config_path, &text, container.as_deref(), None)
-        .await?;
-    Ok(())
+/// 获取远端 Hermes 的 `model` 段（对齐本机 `get_hermes_model_config`）。
+/// 远端「设为默认 / 切换」写远端 config.yaml 的 model.provider，前端按钮态必须读
+/// 同一文件才能正确高亮「当前激活」；本机命令读本机文件，远端目标下会读到错误数据。
+#[tauri::command]
+pub async fn get_remote_hermes_model_config(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Option<crate::hermes_config::HermesModelConfig>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    crate::remote::hermes::read_remote_hermes_model_config(&session, container.as_deref(), &home)
+        .await
 }
 
 /// 按 id 加载主机，不存在时报错。

@@ -4,8 +4,12 @@
 //! 与本机一致：additive 模式 —— settings_config 能解析为 `OpenClawProviderConfig`
 //! 或含 `baseUrl`/`api`/`models` 才写；对远端 `~/.openclaw/openclaw.json` 的
 //! `models.providers` 段 upsert `providers[id]`（保留 `models.mode` 与其他顶层段）。
+//! 保形回写：复用本机 `openclaw_config::upsert_provider_preserve_format` 的
+//! json-five round-trip，仅重写 `models` 段，远端文件顶层注释/排版原样保留；
+//! 写前以读到内容的 sha256 做脏写防护（文件被外部改动则拒绝，对齐本机 save()）。
 
-use serde_json::{json, Value};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use super::connection::RemoteSession;
 use super::effect::EffectReport;
@@ -38,33 +42,24 @@ pub async fn apply_openclaw_provider_settings(
         ));
     }
 
-    // 读远端 openclaw.json（JSON5 兼容解析；不存在视为空）
-    let existing: Value = session
-        .read_remote_text(&config_path, container)
-        .await?
-        .map(|t| json5::from_str(&t).unwrap_or_else(|_| json!({})))
-        .unwrap_or_else(|| json!({}));
-    let mut merged = existing;
+    // 读远端 openclaw.json（JSON5；不存在/分隔空文件 → 默认骨架起步）
+    let read = session.read_remote_text(&config_path, container).await?;
+    let source = read.as_deref();
 
-    // models 段：缺失时按本机 set_provider 默认 {"mode":"merge","providers":{}}
-    let mut models = merged
-        .get("models")
-        .cloned()
-        .unwrap_or_else(|| json!({ "mode": "merge", "providers": {} }));
-    let mut providers = models
-        .get("providers")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
-    if let Some(p) = providers.as_object_mut() {
-        p.insert(provider_id.to_string(), settings.clone());
-    }
-    models["providers"] = providers;
-    merged["models"] = models;
+    // 保形 round-trip upsert（复用本机同一 merge + json-five 回写）：仅重写
+    // models 段，远端文件顶层注释/排版原样保留；源非合法 JSON5 时报错。
+    let new_text = crate::openclaw_config::upsert_provider_preserve_format(
+        source,
+        provider_id,
+        settings,
+    )
+    .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
 
-    let text = serde_json::to_string_pretty(&merged)
-        .map_err(|e| format!("序列化 openclaw.json 失败: {e}"))?;
+    // 脏写防护（对齐本机 save() 的「磁盘被外部改动则拒绝」）：以读到内容 sha256
+    // 作 expected_hash，同一脚本内先校验远端文件未被外部修改，冲突则中止不覆盖。
+    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
     session
-        .write_settings_with_backup(&config_path, &text, container, None)
+        .write_settings_with_backup(&config_path, &new_text, container, expected_hash.as_deref())
         .await?;
 
     Ok(EffectReport {

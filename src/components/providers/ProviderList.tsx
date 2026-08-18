@@ -26,7 +26,11 @@ import { useDragSort } from "@/hooks/useDragSort";
 import { useOpenClawDefaultModel } from "@/hooks/useOpenClaw";
 import { useHermesModelConfig } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
-import { testRemoteProviderConnection } from "@/lib/api/remote";
+import {
+  testRemoteProviderConnection,
+  getRemoteOpenClawDefaultModel,
+  getRemoteHermesModelConfig,
+} from "@/lib/api/remote";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -77,8 +81,6 @@ interface ProviderListProps {
   remoteError?: string;
   /** 远端加载失败的重试回调 */
   onRetryRemote?: () => void;
-  /** 远端有旧数据时的刷新中指示（isFetching 且非首次加载） */
-  remoteRefreshing?: boolean;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider, modelId?: string) => void; // OpenClaw: set as default model
 }
@@ -110,7 +112,6 @@ export function ProviderList({
   remoteLoadingLabel,
   remoteError,
   onRetryRemote,
-  remoteRefreshing,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
@@ -141,11 +142,43 @@ export function ProviderList({
     enabled: appId === "hermes" && !remoteTargetId,
   });
 
+  // Pi: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
+  const { data: piLiveIds } = useQuery<string[]>({
+    queryKey: ["pi", "liveProviderIds"],
+    queryFn: () => providersApi.getPiLiveProviderIds(),
+    enabled: appId === "pi" && !remoteTargetId,
+  });
+
   // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
-  const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
+  // 远端目标下必须读远端 config.yaml（本机命令读本机文件会读到错误数据）——
+  // 否则远端「设为默认 / 切换」后按钮态不刷新。container 归一化：宿主机目标
+  // 时 remoteContainerId 是 ""，须转 undefined 走宿主机路径。
+  const { data: localHermesModelConfig } = useHermesModelConfig(
+    appId === "hermes" && !remoteTargetId,
+  );
+  const { data: remoteHermesModelConfig } = useQuery({
+    // 第三位统一用 `remoteContainerId || "__host__"`（宿主机归一化为 "__host__"），
+    // 与 remoteMutations 失效时的 `vars.container || "__host__"` 逐字一致——
+    // react-query partialMatchKey 要求逐元素匹配，宿主机下 remoteContainerId 是 ""
+    // 而 mutation 的 vars.container 是 undefined，两者不一致会导致失效落空。
+    queryKey: [
+      "remoteHermesModelConfig",
+      remoteTargetId,
+      remoteContainerId || "__host__",
+    ],
+    queryFn: () =>
+      getRemoteHermesModelConfig(
+        remoteTargetId!,
+        remoteContainerId || undefined,
+      ),
+    enabled: appId === "hermes" && Boolean(remoteTargetId),
+  });
+  const hermesModelConfig = remoteTargetId
+    ? remoteHermesModelConfig
+    : localHermesModelConfig;
   const hermesCurrentProviderId = hermesModelConfig?.provider;
 
-  // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes）
+  // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes/Pi）
   const isProviderInConfig = useCallback(
     (providerId: string): boolean => {
       // 远端目标：live ID 集来自 get_remote_providers 返回（remoteLiveIds prop）
@@ -159,6 +192,9 @@ export function ProviderList({
       if (appId === "hermes") {
         return (liveIds ?? hermesLiveIds)?.includes(providerId) ?? false;
       }
+      if (appId === "pi") {
+        return (liveIds ?? piLiveIds)?.includes(providerId) ?? false;
+      }
       return true; // 其他应用始终返回 true
     },
     [
@@ -168,13 +204,30 @@ export function ProviderList({
       opencodeLiveIds,
       openclawLiveIds,
       hermesLiveIds,
+      piLiveIds,
     ],
   );
 
   // OpenClaw: query default model to determine which provider is default
-  const { data: openclawDefaultModel } = useOpenClawDefaultModel(
-    appId === "openclaw",
+  // 远端场景使用远端 API，本机场景使用本机 API
+  const { data: localOpenclawDefaultModel } = useOpenClawDefaultModel(
+    appId === "openclaw" && !remoteTargetId,
   );
+  const { data: remoteOpenclawDefaultModel } = useQuery({
+    queryKey: ["remoteOpenclawDefaultModel", remoteTargetId, remoteContainerId],
+    queryFn: () =>
+      // 宿主机目标时 remoteContainerId 是 ""（App 传原始值），必须归一化为
+      // undefined 走宿主机路径；否则后端 Option<String> 收到 Some("") 会进
+      // DockerExecFileOps 的空容器名校验 → 查询报错 → 「设为默认」按钮态读不到。
+      getRemoteOpenClawDefaultModel(
+        remoteTargetId!,
+        remoteContainerId || undefined,
+      ),
+    enabled: appId === "openclaw" && Boolean(remoteTargetId),
+  });
+  const openclawDefaultModel = remoteTargetId
+    ? remoteOpenclawDefaultModel
+    : localOpenclawDefaultModel;
 
   const isProviderDefaultModel = useCallback(
     (providerId: string): boolean => {
@@ -244,19 +297,11 @@ export function ProviderList({
     refetchInterval: appId === "claude-desktop" ? 5000 : false,
   });
   const {
-    data: piCurrentState,
     isSuccess: isPiCurrentStateSuccess,
     isError: isPiCurrentStateError,
     error: piCurrentStateError,
   } = usePiCurrentState(appId === "pi");
   const isPiAuthoritativeStateReady = appId !== "pi" || isPiCurrentStateSuccess;
-  const isPiProviderInConfig = useCallback(
-    (provider: Provider): boolean => {
-      if (!isPiAuthoritativeStateReady) return false;
-      return piCurrentState?.enabledProviderIds.includes(provider.id) ?? false;
-    },
-    [isPiAuthoritativeStateReady, piCurrentState],
-  );
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
   // 远程目标下改为经 SSH 在远端 curl base_url（真实反映远端到 API 的网络）。
@@ -543,12 +588,6 @@ export function ProviderList({
         strategy={verticalListSortingStrategy}
       >
         <div className="space-y-3">
-          {remoteRefreshing && remoteLoadingLabel && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-              <span>{remoteLoadingLabel}</span>
-            </div>
-          )}
           {filteredProviders.map((provider) => {
             const isOmo = provider.category === "omo";
             const isOmoSlim = provider.category === "omo-slim";
@@ -573,11 +612,7 @@ export function ProviderList({
                 provider={provider}
                 isCurrent={isCurrent}
                 appId={appId}
-                isInConfig={
-                  appId === "pi"
-                    ? isPiProviderInConfig(provider)
-                    : isProviderInConfig(provider.id)
-                }
+                isInConfig={isProviderInConfig(provider.id)}
                 isOmo={isOmo}
                 isOmoSlim={isOmoSlim}
                 onSwitch={onSwitch}
