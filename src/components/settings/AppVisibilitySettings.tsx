@@ -31,7 +31,7 @@ const APP_CONFIG: Array<{
   { id: "opencode", icon: "opencode", nameKey: "apps.opencode" },
   { id: "openclaw", icon: "openclaw", nameKey: "apps.openclaw" },
   { id: "hermes", icon: "hermes", nameKey: "apps.hermes" },
-  { id: "pi", icon: "pi", nameKey: "apps.pi" },
+  // { id: "pi", icon: "pi", nameKey: "apps.pi" }, // 暂时隐藏
 ];
 
 export function AppVisibilitySettings({
