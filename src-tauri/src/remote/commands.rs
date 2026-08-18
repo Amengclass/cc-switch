@@ -1665,6 +1665,7 @@ pub async fn get_remote_current_provider(
 }
 
 /// 远端当前供应商判定（`get_remote_providers` / `get_remote_current_provider` 共用）。
+#[allow(clippy::too_many_arguments)]
 async fn resolve_remote_current_provider_id(
     state: &AppState,
     host_id: &str,

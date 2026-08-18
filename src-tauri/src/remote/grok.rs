@@ -30,7 +30,7 @@ pub async fn apply_grok_provider_settings(
         .ok_or_else(|| "Grok Build 配置缺少 config 字段".to_string())?;
 
     // 与本机 write_grok_provider_live 一致：非官方必须携带完整的自定义模型配置
-    if category.as_deref() != Some("official") {
+    if category != Some("official") {
         crate::grok_config::validate_config_toml(config).map_err(|e| e.to_string())?;
     }
 

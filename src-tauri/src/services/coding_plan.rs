@@ -1274,6 +1274,7 @@ async fn query_zhipu_team_at(
 ///
 /// `coding_plan_provider` 显式标识用于无法靠 base_url 区分的供应商（当前为智谱团队版
 /// `zhipu_team`——其 base_url 与个人版智谱相同）；其余情况走 `detect_provider`。
+#[allow(clippy::too_many_arguments)]
 pub async fn get_coding_plan_quota(
     base_url: &str,
     api_key: &str,
@@ -1628,7 +1629,7 @@ fn extract_usage_records(html: &str) -> Vec<serde_json::Value> {
 /// - rolling(five_hour)：近 5 小时内的记录累计
 /// - weekly(weekly_limit)：本周一(UTC 00:00) 到 now 的累计
 /// - monthly：基于「最早记录」锚定的订阅月周期内的累计
-/// cost 字段单位是 1e-8（USD），此处已统一转成 USD 金额。
+///   cost 字段单位是 1e-8（USD），此处已统一转成 USD 金额。
 #[allow(dead_code)]
 fn opencode_windows(
     records: &[serde_json::Value],
@@ -1643,7 +1644,7 @@ fn opencode_windows(
         let ts = r
             .get("timeCreated")
             .and_then(|v| v.as_str())
-            .and_then(|s| parse_date_ts(s));
+            .and_then(parse_date_ts);
         if let Some(ts) = ts {
             if cost > 0.0 {
                 parsed.push((ts, cost / 100_000_000.0));

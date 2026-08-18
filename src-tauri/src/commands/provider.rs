@@ -141,7 +141,7 @@ pub async fn switch_provider(
     log::info!("[Provider] 手动切换成功 {app_type_log} -> {id_log}，emit floating-data-refresh");
     let _ = app_handle.emit("floating-data-refresh", ());
 
-    Ok(result?)
+    result
 }
 
 fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result<bool, AppError> {

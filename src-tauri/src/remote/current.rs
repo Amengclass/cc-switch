@@ -53,7 +53,7 @@ pub fn save_current_provider(
 ) -> Result<(), String> {
     ensure_migrated(db)?;
     let config_json = provider
-        .map(|p| serde_json::to_string(p))
+        .map(serde_json::to_string)
         .transpose()
         .map_err(|e| format!("序列化供应商配置失败: {e}"))?;
     db.save_remote_current_provider(host_id, app, provider_id, config_json.as_deref())

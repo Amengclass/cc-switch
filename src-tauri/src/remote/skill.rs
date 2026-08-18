@@ -404,6 +404,7 @@ pub(crate) fn apply_skill_toggles(
 ///
 /// 单次连接内完成:skills.json 读一次 → 内存改全部 → base64 一次 → 把每条
 /// 链接脚本拼进同一个 `&&` 链,最终一次 `exec_command_with_stdin` 写盘 + 操作链接。
+#[allow(clippy::too_many_arguments)]
 pub async fn bulk_toggle_remote_skill_app<F: FileOps>(
     fs: &F,
     channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
@@ -613,6 +614,7 @@ pub async fn scan_remote_unmanaged_skills<F: FileOps>(
 }
 
 /// 在远端将技能目录复制到 SSOT → 更新 skills.json → 创建 symlink。
+#[allow(clippy::too_many_arguments)]
 pub async fn import_remote_skill_local<F: FileOps>(
     fs: &F,
     channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
@@ -724,6 +726,7 @@ pub(crate) async fn upload_dir_via_tar(
 /// 构造一条远端技能记录（纯内存，无 I/O）。
 ///
 /// zip 安装与「发现技能」远端安装共用，保证两端记录结构一致。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_remote_skill_record(
     name: &str,
     display_name: Option<String>,
@@ -792,7 +795,7 @@ pub async fn install_remote_skills_from_zip_generic(
             if skill_dir == &temp_dir || dir_name.is_empty() || dir_name.starts_with('.') {
                 zip_stem
                     .as_deref()
-                    .map(|s| sanitize_name(s))
+                    .map(sanitize_name)
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "skill".to_string())
             } else {

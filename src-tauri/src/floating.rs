@@ -251,9 +251,7 @@ fn finish_drag(app: &tauri::AppHandle) {
     let menu_just_closed = MENU_CLOSED_AT
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .map_or(false, |t| {
-            t.elapsed() < std::time::Duration::from_millis(300)
-        });
+        .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300));
     if !FLOATING_DRAG_MOVED.load(Ordering::Acquire) && !menu_just_closed {
         log::info!("[Floating] 单击悬浮球，打开主窗口");
         open_main_window_impl(app);
@@ -1132,8 +1130,8 @@ fn emit_pin_changed(app: &tauri::AppHandle) {
 ///   球贴在弹窗靠屏幕边缘侧的角上（角对齐，不居中）。
 /// - 垂直：球偏上 → 弹窗向下展开，弹窗顶缘 = 球底缘 + 间隙；
 ///   球偏下 → 弹窗向上展开，弹窗底缘 = 球顶缘 - 间隙。
-/// 某方向放不下翻转该轴。
-/// 面板与菜单共用同一个函数 → 弹出位置始终一致。
+///   某方向放不下翻转该轴。
+///   面板与菜单共用同一个函数 → 弹出位置始终一致。
 fn position_for_ball(
     app: &tauri::AppHandle,
     ball_pos: (f64, f64),

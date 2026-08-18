@@ -20,6 +20,7 @@ use crate::services::provider::gemini_auth::{detect_gemini_auth_type, GeminiAuth
 ///
 /// - `settings`：DB 中该 provider 的 `settings_config`（含 `env` 与 `config` 字段）
 /// - `provider`：用于与本机一致的 auth 类型检测（Google 官方 / Packycode / 通用）
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_gemini_provider_settings(
     session: &RemoteSession,
     container: Option<&str>,

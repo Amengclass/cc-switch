@@ -578,6 +578,7 @@ pub async fn remove_container_dnat(
 /// 把 provider 定义应用到远端对应 app 的 live 文件（复用各 remote::*::apply_*
 /// 纯变换，产出与本机切换逐字节一致）。claude 分支与本机一致走
 /// `build_effective_settings_with_common_config`（通用配置片段来自本机 DB）。
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_remote_provider_to_live(
     db: &crate::database::Database,
     session: &crate::remote::connection::RemoteSession,
@@ -611,7 +612,7 @@ pub async fn apply_remote_provider_to_live(
     let route_proxy = route_proxy && tunnel_ok;
     let route_base = if !route_proxy {
         // 直连态：撤掉该容器先前走路由时下发的 per-container DNAT（幂等）
-        if let Some(c) = container.as_deref() {
+        if let Some(c) = container {
             if let Some(ip) = container_ip(session, c).await {
                 if let Err(e) = remove_container_dnat(session, &ip, port).await {
                     log::warn!("[remote] 容器 {c} 直连态清理 DNAT 失败: {e}");
@@ -619,7 +620,7 @@ pub async fn apply_remote_provider_to_live(
             }
         }
         None
-    } else if let Some(c) = container.as_deref() {
+    } else if let Some(c) = container {
         match detect_container_route_base(session, c, port).await {
             Ok(Some((base, _ip))) => Some(base),
             Ok(None) => {

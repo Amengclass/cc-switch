@@ -29,6 +29,7 @@ fn codex_auth_path(root: &str) -> String {
 /// 产出与本机完全一致：① modelCatalog 变换（写远端同名 catalog 文件 + 注入字段）
 /// ② unified 会话路由（官方 + 设置开启）③ bearer token 注入 ④ auth.json 判定
 /// （官方+登录材料 / 第三方且不保留官方登录态 → 写；否则保留远端登录态）。
+#[allow(clippy::too_many_arguments)]
 pub async fn apply_codex_provider_settings(
     session: &RemoteSession,
     container: Option<&str>,

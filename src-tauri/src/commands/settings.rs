@@ -51,11 +51,11 @@ fn merge_settings_for_save(
     // floating_locked 由设置页「固定当前位置」开关管理；若某些保存路径未携带该字段
     // （None，如旧版前端），保留现有值避免被清掉。
     if incoming.floating_locked.is_none() {
-        incoming.floating_locked = existing.floating_locked.clone();
+        incoming.floating_locked = existing.floating_locked;
     }
     // floating_opacity 同理：设置页滑块；旧版/未携带该字段的保存路径不清掉已有值。
     if incoming.floating_opacity.is_none() {
-        incoming.floating_opacity = existing.floating_opacity.clone();
+        incoming.floating_opacity = existing.floating_opacity;
     }
     incoming
 }

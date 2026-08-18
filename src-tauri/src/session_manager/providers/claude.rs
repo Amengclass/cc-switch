@@ -294,6 +294,7 @@ pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
     // 串行扫描 N 个文件 = N×往返/文件，公网 RTT 下几十秒；并发后降到约 N/24×往返。
     // SFTP 多请求复用同一条连接、容器 exec 每次独立 channel，并发安全。
     const PARALLEL: usize = 24;
+    #[allow(clippy::type_complexity)]
     let head_tails: Vec<(String, Option<(Vec<String>, Vec<String>)>)> = stream::iter(files)
         .map(|path| async move {
             let ht = fs.read_head_tail_lines(&path, 10, 30).await.ok();
@@ -340,6 +341,7 @@ async fn collect_jsonl_files_fs<F: crate::fsops::FileOps + Sync>(
     // 串行 N 个目录 = N×RTT；并发后目录往返从 N 降到约 2（顶层 + 一层子目录）。
     // Claude 会话结构仅两层（project-slug / *.jsonl），并发安全。
     let sub_files: Vec<Vec<String>> = futures::future::join_all(dirs.into_iter().map(|dir| {
+        #[allow(clippy::redundant_locals)]
         let fs = fs;
         async move {
             let mut sub = Vec::new();

@@ -34,11 +34,11 @@ fn blob(bytes: &[u8]) -> CRYPT_INTEGER_BLOB {
 
 /// DPAPI 加密（绑定当前用户账户）。
 fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
-    let mut in_blob = blob(data);
+    let in_blob = blob(data);
     let mut out_blob = CRYPT_INTEGER_BLOB::default();
     let ok = unsafe {
         CryptProtectData(
-            &mut in_blob,
+            &in_blob,
             std::ptr::null(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
@@ -58,11 +58,11 @@ fn protect(data: &[u8]) -> Result<Vec<u8>, String> {
 
 /// DPAPI 解密。
 fn unprotect(data: &[u8]) -> Result<Vec<u8>, String> {
-    let mut in_blob = blob(data);
+    let in_blob = blob(data);
     let mut out_blob = CRYPT_INTEGER_BLOB::default();
     let ok = unsafe {
         CryptUnprotectData(
-            &mut in_blob,
+            &in_blob,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),

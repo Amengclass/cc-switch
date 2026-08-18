@@ -38,6 +38,7 @@ impl<'a> RemoteTarget<'a> {
     }
 
     /// 获取底层 SFTP 句柄（仅宿主机模式可用，供 zip 安装等二进制写场景）。
+    #[allow(dead_code)]
     pub fn sftp(&self) -> Option<&'a SftpSession> {
         match self {
             RemoteTarget::Sftp(f) => Some(f.sftp),

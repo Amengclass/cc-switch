@@ -225,8 +225,8 @@ impl RemoteSession {
     /// - 意图要隧道且未建 → 补发 tcpip_forward；
     /// - 意图不要隧道且已建 → 撤销 cancel_tcpip_forward；
     /// - 其余情况（已一致）不动。
-    /// 全程复用现有连接，不重建。成功/撤销会同步**主机级**隧道状态
-    /// （HOST_TUNNEL_STATE）：绑定成功即整机可用，不依赖本连接是唯一持有者。
+    ///   全程复用现有连接，不重建。成功/撤销会同步**主机级**隧道状态
+    ///   （HOST_TUNNEL_STATE）：绑定成功即整机可用，不依赖本连接是唯一持有者。
     pub async fn sync_route_tunnel(&self, host_id: &str, host_display: &str, wants_tunnel: bool) {
         // 锁内只做状态判定（不跨 await）：决定动作后立即释放锁。
         enum Action {

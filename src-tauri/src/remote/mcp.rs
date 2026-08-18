@@ -791,12 +791,12 @@ async fn hermes_remove_many<F: FileOps>(fs: &F, path: &str, ids: &[String]) -> R
     };
     let mut removed_any = false;
     if let Some(servers) = map
-        .get_mut(&serde_yaml::Value::String("mcp_servers".to_string()))
+        .get_mut(serde_yaml::Value::String("mcp_servers".to_string()))
         .and_then(|v| v.as_mapping_mut())
     {
         for id in ids {
             removed_any |= servers
-                .remove(&serde_yaml::Value::String(id.clone()))
+                .remove(serde_yaml::Value::String(id.clone()))
                 .is_some();
         }
     }

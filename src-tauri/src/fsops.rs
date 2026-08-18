@@ -37,6 +37,7 @@ pub trait FileOps {
 }
 
 /// 本机实现：直接走 std::fs。
+#[allow(dead_code)]
 pub struct LocalFileOps;
 
 impl FileOps for LocalFileOps {
