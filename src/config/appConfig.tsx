@@ -25,7 +25,7 @@ export const APP_IDS: AppId[] = [
   "opencode",
   "openclaw",
   "hermes",
-  // "pi", // 暂时隐藏，PI 功能完善后再开放
+  "pi",
 ];
 
 /** App IDs shown in Skills panels */
@@ -38,7 +38,7 @@ export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   opencode: true,
   openclaw: true,
   hermes: true,
-  pi: false, // 暂时隐藏
+  pi: true,
 };
 
 /** App IDs shown in Skills panels. */
@@ -50,7 +50,7 @@ export const SKILLS_APP_IDS: AppId[] = [
   "opencode",
   "openclaw",
   "hermes",
-  // "pi", // 暂时隐藏
+  "pi",
 ];
 
 export type ProxyAppId = Extract<
@@ -72,15 +72,14 @@ export function isProxyAppId(appId: string): appId is ProxyAppId {
 
 export type AdditiveAppId = Extract<
   AppId,
-  "opencode" | "openclaw" | "hermes"
-  // | "pi" // 暂时隐藏
+  "opencode" | "openclaw" | "hermes" | "pi"
 >;
 
 export const ADDITIVE_APP_IDS: AdditiveAppId[] = [
   "opencode",
   "openclaw",
   "hermes",
-  // "pi", // 暂时隐藏
+  "pi",
 ];
 
 export function isAdditiveAppId(appId: string): appId is AdditiveAppId {
