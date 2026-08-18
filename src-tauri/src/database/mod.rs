@@ -53,7 +53,10 @@ use std::sync::Mutex;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-pub(crate) const SCHEMA_VERSION: i32 = 17;
+///
+/// 增强版暂时把版本标回 v16 以兼容原生 cc-switch：原生应用在
+/// `user_version` 高于其支持版本时会拒绝打开数据库。
+pub(crate) const SCHEMA_VERSION: i32 = 16;
 
 /// 增强版历史写入过的最大 schema 版本。
 ///
