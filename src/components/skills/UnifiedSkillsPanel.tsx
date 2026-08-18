@@ -56,11 +56,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-// 本机导入不支持持久化 Pi 启用标志（本地 skills 表无 enabled_pi 列，DAO 硬编码 pi:false），
-// 因此本机导入对话框不显示 Pi 徽章；远端导入走 remote/skill.rs（写 ~/.pi/agent/skills），
-// 已完整支持 Pi，故远端导入保留 Pi。
-const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS.filter((app) => app !== "pi");
-const IMPORT_SKILLS_APP_IDS_REMOTE = SKILLS_APP_IDS;
+// 本机导入勾选 Pi 时，后端 services/skill.rs 会把技能真正部署到 ~/.pi/agent/skills/
+// （Pi 的 exists=active 规则：目录在即启用），与远端导入语义一致，故本机/远端都显示 Pi 徽章。
+const IMPORT_SKILLS_APP_IDS = SKILLS_APP_IDS;
 
 interface UnifiedSkillsPanelProps {
   onOpenDiscovery: () => void;
@@ -949,7 +947,7 @@ const UnifiedSkillsPanel = React.forwardRef<
               isImporting={importMutation.isPending}
               onImport={handleImport}
               onClose={() => setImportDialogOpen(false)}
-              appIds={isRemote ? IMPORT_SKILLS_APP_IDS_REMOTE : IMPORT_SKILLS_APP_IDS}
+              appIds={IMPORT_SKILLS_APP_IDS}
             />
           )}
 

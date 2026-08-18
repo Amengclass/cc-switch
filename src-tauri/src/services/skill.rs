@@ -2035,6 +2035,12 @@ impl SkillService {
 
             // 其他应用保存用户选择；Pi 的 exists=active 必须直接来自原生目录。
             let mut apps = selection.apps;
+            // 若用户勾选 Pi：把技能真正部署到 ~/.pi/agent/skills/（与其他 app 的
+            // "勾选 = 启用"一致）。sync_to_app_dir 内含同名冲突保护，若 Pi 目录已存在
+            // 同名但内容不同的外部技能会报错，此时让该技能导入失败，避免静默"勾了没生效"。
+            if apps.pi {
+                Self::sync_to_app_dir(&dir_name, &AppType::Pi)?;
+            }
             apps.pi = Self::skill_exists_in_app(&dir_name, &AppType::Pi);
 
             // 从 lock 文件提取仓库信息
@@ -5004,6 +5010,47 @@ mod tests {
         assert_eq!(imported.len(), 1);
         assert!(imported[0].apps.pi);
         assert!(SkillService::get_all_installed(&db).unwrap()[0].apps.pi);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn importing_pi_selection_deploys_to_pi_directory() {
+        let temp = tempdir().expect("tempdir");
+        let _home = TestHomeGuard::set(temp.path());
+        let _pi_dir = crate::pi_config::test_support::TestAgentDir::new();
+        let db = std::sync::Arc::new(Database::memory().expect("memory db"));
+
+        // 在 Claude 目录放一个未管理的技能（源目录），勾选 Pi 导入。
+        let claude_dir = SkillService::get_app_skills_dir(&AppType::Claude)
+            .unwrap()
+            .join("test-skill");
+        write_skill(&claude_dir, "test-skill");
+
+        let mut apps = SkillApps::default();
+        apps.set_enabled_for(&AppType::Pi, true);
+
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "test-skill".to_string(),
+                apps,
+                path: None,
+            }],
+        )
+        .expect("import with Pi selected");
+
+        assert_eq!(imported.len(), 1);
+        assert!(
+            imported[0].apps.pi,
+            "勾选 Pi 导入后 apps.pi 应为 true"
+        );
+        let pi_dest = SkillService::get_app_skills_dir(&AppType::Pi)
+            .unwrap()
+            .join("test-skill");
+        assert!(
+            pi_dest.is_dir(),
+            "勾选 Pi 导入后应真正部署到 ~/.pi/agent/skills"
+        );
     }
 
     #[test]
