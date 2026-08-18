@@ -6,11 +6,11 @@ use serde_json::{json, Value};
 use std::str::FromStr;
 use tauri::{Emitter, State};
 
-use base64::Engine as _;
 use crate::fsops::FileOps as _;
 use crate::remote::effect::EffectReport;
 use crate::remote::settings;
 use crate::remote::{connection, credentials, AuthMethod, RemoteHost};
+use base64::Engine as _;
 
 /// 取该主机「per-app 走本机路由」意图（宿主机目标）：
 /// - route_proxy_apps（JSON）有该 app → 用它的值；
@@ -56,9 +56,7 @@ async fn effective_route_proxy(
     if proxy_service.is_running().await {
         true
     } else {
-        log::warn!(
-            "[remote] 本机路由未运行，「走本机路由」不生效，本次切换按直连写入"
-        );
+        log::warn!("[remote] 本机路由未运行，「走本机路由」不生效，本次切换按直连写入");
         false
     }
 }
@@ -95,8 +93,7 @@ use crate::store::AppState;
 
 /// 内嵌的远端 SQLite helper（musl 静态，x86_64 / aarch64）。
 const SQLITE_HELPER_X86_64: &[u8] = include_bytes!("../../resources/sqlite-helper-x86_64-linux");
-const SQLITE_HELPER_AARCH64: &[u8] =
-    include_bytes!("../../resources/sqlite-helper-aarch64-linux");
+const SQLITE_HELPER_AARCH64: &[u8] = include_bytes!("../../resources/sqlite-helper-aarch64-linux");
 
 /// 确保远端 `~/.cc-switch/sqlite-helper` 已部署（按远端架构从内嵌资源上传），
 /// 返回 helper 的绝对路径。仅首次上传（`test -x` 命中即跳过）。
@@ -107,7 +104,10 @@ async fn ensure_remote_sqlite_helper(
 ) -> Result<String, String> {
     let path = format!("{root}/.cc-switch/sqlite-helper");
     let check_cmd = match container {
-        None => format!("sh -c {}", connection::shell_quote(&format!("test -x {path}"))),
+        None => format!(
+            "sh -c {}",
+            connection::shell_quote(&format!("test -x {path}"))
+        ),
         Some(c) => {
             let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
             format!(
@@ -201,15 +201,19 @@ async fn run_sqlite_helper(
         None => format!("sh -c {}", connection::shell_quote(&inner)),
         Some(c) => {
             let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
-            format!("docker exec -i {} sh -c {}", ops.container, connection::shell_quote(&inner))
+            format!(
+                "docker exec -i {} sh -c {}",
+                ops.container,
+                connection::shell_quote(&inner)
+            )
         }
     };
     let out = connection::exec_command(&session.channel, &cmd).await?;
     let trimmed = out.trim();
     // 输出可能是多行（最后一行才是 JSON）；取最后一行
     let json_line = trimmed.lines().next_back().unwrap_or(trimmed);
-    let value: Value =
-        serde_json::from_str(json_line).map_err(|e| format!("解析 helper 输出失败: {e} → {json_line}"))?;
+    let value: Value = serde_json::from_str(json_line)
+        .map_err(|e| format!("解析 helper 输出失败: {e} → {json_line}"))?;
     if value.get("ok").and_then(Value::as_bool) != Some(true) {
         return Err(value
             .get("error")
@@ -253,8 +257,8 @@ pub async fn test_remote_provider_connection(
         .get(&provider_id)
         .ok_or_else(|| "供应商不存在，可能已被删除".to_string())?;
 
-    let app_type = crate::app_config::AppType::from_str(&app)
-        .map_err(|_| format!("未知应用类型: {app}"))?;
+    let app_type =
+        crate::app_config::AppType::from_str(&app).map_err(|_| format!("未知应用类型: {app}"))?;
     // 与本机连通性测试同一地址提取（官方 provider 会在此报错）
     let base_url =
         crate::services::stream_check::StreamCheckService::resolve_base_url(&app_type, provider)
@@ -271,7 +275,11 @@ pub async fn test_remote_provider_connection(
         None => format!("sh -c {}", connection::shell_quote(&curl)),
         Some(c) => {
             let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
-            format!("docker exec {} sh -c {}", ops.container, connection::shell_quote(&curl))
+            format!(
+                "docker exec {} sh -c {}",
+                ops.container,
+                connection::shell_quote(&curl)
+            )
         }
     };
     let out = connection::exec_command(&session.channel, &cmd).await?;
@@ -347,7 +355,10 @@ pub async fn set_remote_route_proxy_app(
     let mut host = load_host(&state, &host_id)?;
     host.updated_at = chrono::Utc::now().timestamp_millis();
     if let Some(c) = container.as_deref() {
-        let entry = host.route_proxy_container_apps.entry(c.to_string()).or_default();
+        let entry = host
+            .route_proxy_container_apps
+            .entry(c.to_string())
+            .or_default();
         entry.insert(app.clone(), enabled);
     } else if enabled {
         host.route_proxy_apps.insert(app.clone(), true);
@@ -369,9 +380,7 @@ pub async fn set_remote_route_proxy_app(
                 .map_err(|e| format!("开启远端接管时启动本机代理失败: {e}"))?;
         }
     } else if !any_route_consumer(&state).await && state.proxy_service.is_running().await {
-        log::info!(
-            "[remote] 关闭 {app} 远端接管后无任何接管/路由需要，自动停止本机代理进程"
-        );
+        log::info!("[remote] 关闭 {app} 远端接管后无任何接管/路由需要，自动停止本机代理进程");
         let _ = state.proxy_service.stop().await;
     }
 
@@ -480,11 +489,8 @@ async fn probe_remote(
 ) -> Result<serde_json::Value, String> {
     let session = connection::connect(host, Some(password)).await?;
     let home = host.default_home();
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container,
-    )?;
+    let target =
+        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container)?;
 
     // 当前 app 的主配置文件是否存在（测试连接/环境检查用）
     let settings_exists = match remote_app_config_path(app, &home) {
@@ -691,7 +697,9 @@ pub async fn remove_remote_provider_from_live(
             Ok(())
         }
         other => {
-            return Err(format!("应用 {other} 不支持从 live 配置移除（与本机语义一致）"));
+            return Err(format!(
+                "应用 {other} 不支持从 live 配置移除（与本机语义一致）"
+            ));
         }
     };
 
@@ -801,21 +809,10 @@ async fn build_remote_providers_view(
     live_ids: Vec<String>,
 ) -> Result<RemoteProvidersView, String> {
     let current_provider_id = resolve_remote_current_provider_id(
-        state,
-        host_id,
-        target,
-        home,
-        app,
-        container,
-        session,
-        &ssot,
+        state, host_id, target, home, app, container, session, &ssot,
     )
     .await?;
-    let route_proxy_enabled = route_proxy_for_target(
-        &load_host(state, host_id)?,
-        container,
-        app,
-    );
+    let route_proxy_enabled = route_proxy_for_target(&load_host(state, host_id)?, container, app);
     Ok(RemoteProvidersView {
         providers: ssot.providers,
         current_provider_id,
@@ -831,15 +828,13 @@ async fn load_remote_ssot_for_mutation<F: crate::fsops::FileOps>(
     home: &str,
     app: &str,
 ) -> Result<crate::remote::providers::RemoteProvidersSsot, String> {
-    let mut ssot =
-        crate::remote::providers::read_remote_providers_ssot(target, home, app).await?;
+    let mut ssot = crate::remote::providers::read_remote_providers_ssot(target, home, app).await?;
     if ssot.providers.is_empty() {
         // 操作命令不刷新 default 卡（开关只管读面板），仅空库时确保有数据
         let (changed, _) =
             crate::remote::providers::sync_remote_live_into_ssot(target, home, app, false).await?;
         if changed > 0 {
-            ssot = crate::remote::providers::read_remote_providers_ssot(target, home, app)
-                .await?;
+            ssot = crate::remote::providers::read_remote_providers_ssot(target, home, app).await?;
         }
     }
     Ok(ssot)
@@ -922,13 +917,22 @@ pub async fn add_remote_provider(
             &host.name,
             &app,
             p,
-            effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+            effective_route_proxy(
+                &state.proxy_service,
+                route_proxy_for_target(&host, container.as_deref(), &app),
+            )
+            .await,
             current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
         )
         .await?;
         if !additive {
-            let _ =
-                crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id, Some(p));
+            let _ = crate::remote::current::save_current_provider(
+                state.db.as_ref(),
+                &host_id,
+                &app,
+                &provider_id,
+                Some(p),
+            );
         }
     }
 
@@ -1003,10 +1007,7 @@ pub async fn update_remote_provider(
             ));
         }
         if live_ids.iter().any(|id| id == &provider.id) {
-            return Err(format!(
-                "供应商 '{}' 已存在于远端 live 配置中",
-                provider.id
-            ));
+            return Err(format!("供应商 '{}' 已存在于远端 live 配置中", provider.id));
         }
     }
 
@@ -1067,11 +1068,21 @@ pub async fn update_remote_provider(
             &host.name,
             &app,
             p,
-            effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+            effective_route_proxy(
+                &state.proxy_service,
+                route_proxy_for_target(&host, container.as_deref(), &app),
+            )
+            .await,
             current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
         )
         .await?;
-        let _ = crate::remote::current::save_current_provider(state.db.as_ref(), &host_id, &app, &provider_id_after, Some(p));
+        let _ = crate::remote::current::save_current_provider(
+            state.db.as_ref(),
+            &host_id,
+            &app,
+            &provider_id_after,
+            Some(p),
+        );
     }
 
     // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
@@ -1146,7 +1157,8 @@ pub async fn delete_remote_provider(
     crate::remote::providers::write_remote_providers_ssot(&target, &home, &app, &ssot).await?;
 
     // 清理该远端「当前供应商」持久化记录（对齐本机 delete 后前端清 current）
-    let _ = crate::remote::current::delete_current_provider_for_app(state.db.as_ref(), &host_id, &app);
+    let _ =
+        crate::remote::current::delete_current_provider_for_app(state.db.as_ref(), &host_id, &app);
 
     // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
     // 按钮态需要最新集合）
@@ -1225,11 +1237,8 @@ async fn switch_remote_provider_target(
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
 
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container,
-    )?;
+    let target =
+        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container)?;
 
     // 首次访问（SSOT 空）时从远端 live 导入（对齐本机启动导入语义）
     let mut ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
@@ -1240,11 +1249,7 @@ async fn switch_remote_provider_target(
     // ===== 如何改「Provider 池来源」=====
     // 当前来源 = 本机 DB（get_provider_by_id）。若未来想改成从其它源取（如某台远端 SSOT、
     // 某个配置文件），只需改下面这一处「取 Provider 完整定义」的调用即可，写入/切换逻辑不变。
-    let mut provider = ssot
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .cloned();
+    let mut provider = ssot.providers.iter().find(|p| p.id == provider_id).cloned();
     if provider.is_none() && allow_local_fallback {
         // 批量广播：远端没有该 Provider 时，从「Provider 池来源」取定义写入远端再切换。
         // 单机切换（allow_local_fallback=false）不走这里 → 保持原「严格报错」行为不变。
@@ -1283,7 +1288,11 @@ async fn switch_remote_provider_target(
         &host.name,
         app,
         &provider,
-        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container, app)).await,
+        effective_route_proxy(
+            &state.proxy_service,
+            route_proxy_for_target(&host, container, app),
+        )
+        .await,
         current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
     )
     .await?;
@@ -1295,8 +1304,7 @@ async fn switch_remote_provider_target(
         let mut ssot = ssot;
         ssot.current_provider_id = Some(provider_id.to_string());
         if let Err(e) =
-            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot)
-                .await
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot).await
         {
             log::warn!("[remote] 写回远端 SSOT current 失败 host_id={host_id}: {e}");
         }
@@ -1316,13 +1324,18 @@ async fn switch_remote_provider_target(
             }
         }
         if let Err(e) =
-            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot)
-                .await
+            crate::remote::providers::write_remote_providers_ssot(&target, &home, app, &ssot).await
         {
             log::warn!("[remote] 切换后同步 SSOT 标记失败 host_id={host_id}: {e}");
         }
     }
-    if let Err(e) = crate::remote::current::save_current_provider(state.db.as_ref(), host_id, app, provider_id, Some(&provider)) {
+    if let Err(e) = crate::remote::current::save_current_provider(
+        state.db.as_ref(),
+        host_id,
+        app,
+        provider_id,
+        Some(&provider),
+    ) {
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
@@ -1332,9 +1345,7 @@ async fn switch_remote_provider_target(
     // 下次切换 / 任一 MCP 启停都会重新投影），不阻断已成功的切换。
     let reproject = match container {
         Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
-            Ok(ops) => {
-                crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await
-            }
+            Ok(ops) => crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await,
             Err(e) => Err(e),
         },
         None => {
@@ -1349,14 +1360,7 @@ async fn switch_remote_provider_target(
     }
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
-    revert_route_switch_on_tunnel_failure(
-        state,
-        &report,
-        host_id,
-        container,
-        app,
-    )
-    .await;
+    revert_route_switch_on_tunnel_failure(state, &report, host_id, container, app).await;
 
     // 直接带上前端需要的当前供应商 id，避免前端再调一次 get_remote_current_provider
     let mut report = report;
@@ -1522,7 +1526,11 @@ pub async fn reapply_remote_provider(
         &host.name,
         &app,
         &provider,
-        effective_route_proxy(&state.proxy_service, route_proxy_for_target(&host, container.as_deref(), &app)).await,
+        effective_route_proxy(
+            &state.proxy_service,
+            route_proxy_for_target(&host, container.as_deref(), &app),
+        )
+        .await,
         current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
     )
     .await?;
@@ -1554,20 +1562,12 @@ pub async fn reapply_remote_provider(
         }
     };
     if let Err(e) = reproject {
-        log::warn!(
-            "[remote] 重新应用 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}"
-        );
+        log::warn!("[remote] 重新应用 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}");
     }
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
-    revert_route_switch_on_tunnel_failure(
-        &state,
-        &report,
-        &host_id,
-        container.as_deref(),
-        &app,
-    )
-    .await;
+    revert_route_switch_on_tunnel_failure(&state, &report, &host_id, container.as_deref(), &app)
+        .await;
 
     let mut report = report;
     report.current_provider_id = Some(provider_id);
@@ -1674,7 +1674,9 @@ async fn resolve_remote_current_provider_id(
     // 1) 持久化记录优先：本应用上次「切换」写入的真实当前供应商，不受用户后续
     //    编辑 base_url / 通用配置片段影响（那正是匹配法失效的场景）。校验其仍
     //    存在于该远端 SSOT（per-target 独立：本机 DB 里有没有不再相关）。
-    if let Some(persisted) = crate::remote::current::get_current_provider(state.db.as_ref(), host_id, app)? {
+    if let Some(persisted) =
+        crate::remote::current::get_current_provider(state.db.as_ref(), host_id, app)?
+    {
         if ssot.providers.iter().any(|p| p.id == persisted) {
             return Ok(Some(persisted));
         }
@@ -1737,18 +1739,17 @@ async fn resolve_remote_current_provider_id(
         return Ok(None);
     }
 
-    let app_type = crate::app_config::AppType::from_str(app)
-        .map_err(|_| format!("未知应用类型: {app}"))?;
+    let app_type =
+        crate::app_config::AppType::from_str(app).map_err(|_| format!("未知应用类型: {app}"))?;
     for p in &ssot.providers {
         // 远端 live 里存的是「生效配置」——即合并通用配置片段后的结果，
         // 与 switch_remote_provider 写入时一致。因此这里必须用同一份生效配置的
         // base_url 去比对，否则开启了通用配置的供应商永远匹配不上，编辑推送会被跳过。
-        let effective = crate::services::provider::live::build_effective_settings_with_common_config(
-            &state.db,
-            &app_type,
-            p,
-        )
-        .map_err(|e| e.to_string())?;
+        let effective =
+            crate::services::provider::live::build_effective_settings_with_common_config(
+                &state.db, &app_type, p,
+            )
+            .map_err(|e| e.to_string())?;
         let local_base = match app {
             "codex" => effective
                 .get("config")
@@ -1820,26 +1821,23 @@ pub async fn check_remote_cli_installed(
 
     let probe = cli_installed_probe(&app, container.as_deref())?;
     let app_name = app.clone();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(15),
-        async move {
-            let session = connection::connect(&host, Some(&password)).await?;
-            match connection::exec_command(&session.channel, &probe).await {
-                Ok(out) => {
-                    // Info 级：默认日志等级可记录，用于确认探测命令的真实返回
-                    log::info!(
-                        "[remote] {app_name} 探测 cmd={probe:?} out={out:?} found={}",
-                        out.contains(CLAUDE_INSTALLED_MARKER)
-                    );
-                    Ok(Some(out.contains(CLAUDE_INSTALLED_MARKER)))
-                }
-                Err(e) => {
-                    log::warn!("[remote] 检测远端 {app_name} 安装状态失败: {e}");
-                    Ok(None)
-                }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(15), async move {
+        let session = connection::connect(&host, Some(&password)).await?;
+        match connection::exec_command(&session.channel, &probe).await {
+            Ok(out) => {
+                // Info 级：默认日志等级可记录，用于确认探测命令的真实返回
+                log::info!(
+                    "[remote] {app_name} 探测 cmd={probe:?} out={out:?} found={}",
+                    out.contains(CLAUDE_INSTALLED_MARKER)
+                );
+                Ok(Some(out.contains(CLAUDE_INSTALLED_MARKER)))
             }
-        },
-    )
+            Err(e) => {
+                log::warn!("[remote] 检测远端 {app_name} 安装状态失败: {e}");
+                Ok(None)
+            }
+        }
+    })
     .await;
 
     match result {
@@ -1915,8 +1913,16 @@ pub async fn list_remote_sessions_detailed(
                     .to_string(),
             )
         };
-        return match run_sqlite_helper(&session, container.as_deref(), &helper, "query", &db, &sql, &[])
-            .await
+        return match run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "query",
+            &db,
+            &sql,
+            &[],
+        )
+        .await
         {
             Ok(v) => {
                 let rows = v
@@ -1954,11 +1960,19 @@ pub async fn list_remote_sessions_detailed(
     }
 
     Ok(match app.as_str() {
-        "claude" => crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await,
-        "grokbuild" => crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await,
+        "claude" => {
+            crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await
+        }
+        "grokbuild" => {
+            crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await
+        }
         "codex" => crate::session_manager::providers::codex::scan_sessions_fs(&target, &root).await,
-        "gemini" => crate::session_manager::providers::gemini::scan_sessions_fs(&target, &root).await,
-        "openclaw" => crate::session_manager::providers::openclaw::scan_sessions_fs(&target, &root).await,
+        "gemini" => {
+            crate::session_manager::providers::gemini::scan_sessions_fs(&target, &root).await
+        }
+        "openclaw" => {
+            crate::session_manager::providers::openclaw::scan_sessions_fs(&target, &root).await
+        }
         _ => unreachable!(),
     })
 }
@@ -2040,17 +2054,23 @@ pub async fn get_remote_session_messages(
             .unwrap_or_default();
         return Ok(
             crate::session_manager::providers::opencode::assemble_opencode_messages(
-                &message_rows, &part_rows,
+                &message_rows,
+                &part_rows,
             ),
         );
     }
 
     match app.as_str() {
         "claude" => {
-            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
-            Ok(crate::session_manager::providers::claude::parse_messages_from_lines(
-                content.lines().map(|s| s.to_string()),
-            ))
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(
+                crate::session_manager::providers::claude::parse_messages_from_lines(
+                    content.lines().map(|s| s.to_string()),
+                ),
+            )
         }
         "grokbuild" => {
             // 列表里 source_path 是 summary.json，消息在同目录 chat_history.jsonl
@@ -2058,26 +2078,44 @@ pub async fn get_remote_session_messages(
                 "{}/chat_history.jsonl",
                 source_path.trim_end_matches("/summary.json")
             );
-            let content = target.read_text_optional(&chat_path).await?.unwrap_or_default();
-            Ok(crate::session_manager::providers::grokbuild::parse_messages_from_lines(
-                content.lines().map(|s| s.to_string()),
-            ))
+            let content = target
+                .read_text_optional(&chat_path)
+                .await?
+                .unwrap_or_default();
+            Ok(
+                crate::session_manager::providers::grokbuild::parse_messages_from_lines(
+                    content.lines().map(|s| s.to_string()),
+                ),
+            )
         }
         "codex" => {
-            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
-            Ok(crate::session_manager::providers::codex::parse_messages_from_lines(
-                content.lines().map(|s| s.to_string()),
-            ))
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(
+                crate::session_manager::providers::codex::parse_messages_from_lines(
+                    content.lines().map(|s| s.to_string()),
+                ),
+            )
         }
         "gemini" => {
-            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
             crate::session_manager::providers::gemini::parse_messages_from_json_text(&content)
         }
         "openclaw" => {
-            let content = target.read_text_optional(&source_path).await?.unwrap_or_default();
-            Ok(crate::session_manager::providers::openclaw::parse_messages_from_lines(
-                content.lines().map(|s| s.to_string()),
-            ))
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(
+                crate::session_manager::providers::openclaw::parse_messages_from_lines(
+                    content.lines().map(|s| s.to_string()),
+                ),
+            )
         }
         other => Err(format!("远程会话管理暂不支持应用 {other}")),
     }
@@ -2108,7 +2146,9 @@ pub async fn delete_remote_session(
             // 校验 session_id 与远端文件匹配（复用本机解析）
             let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
             let meta = crate::session_manager::providers::claude::parse_session_meta_from_lines(
-                &source_path, &head, &tail,
+                &source_path,
+                &head,
+                &tail,
             )
             .ok_or_else(|| format!("无法解析远端会话元数据: {source_path}"))?;
             if meta.session_id != session_id {
@@ -2139,18 +2179,18 @@ pub async fn delete_remote_session(
                 .read_text_optional(&source_path)
                 .await?
                 .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
-            let meta =
-                crate::session_manager::providers::grokbuild::parse_summary_text(&text, &source_path)
-                    .ok_or_else(|| format!("无法解析远端 Grok Build 会话: {source_path}"))?;
+            let meta = crate::session_manager::providers::grokbuild::parse_summary_text(
+                &text,
+                &source_path,
+            )
+            .ok_or_else(|| format!("无法解析远端 Grok Build 会话: {source_path}"))?;
             if meta.session_id != session_id {
                 return Err(format!(
                     "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
                     meta.session_id
                 ));
             }
-            let session_dir = source_path
-                .trim_end_matches("/summary.json")
-                .to_string();
+            let session_dir = source_path.trim_end_matches("/summary.json").to_string();
             target.remove_dir_all(&session_dir).await?;
             Ok(true)
         }
@@ -2177,12 +2217,11 @@ pub async fn delete_remote_session(
                 .read_text_optional(&source_path)
                 .await?
                 .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
-            let meta =
-                crate::session_manager::providers::gemini::parse_session_from_json_text(
-                    &source_path,
-                    &text,
-                )
-                .ok_or_else(|| format!("无法解析远端 Gemini 会话: {source_path}"))?;
+            let meta = crate::session_manager::providers::gemini::parse_session_from_json_text(
+                &source_path,
+                &text,
+            )
+            .ok_or_else(|| format!("无法解析远端 Gemini 会话: {source_path}"))?;
             if meta.session_id != session_id {
                 return Err(format!(
                     "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
@@ -2208,13 +2247,7 @@ pub async fn delete_remote_session(
                 ));
             }
             // 同步清理 sessions.json 索引（对齐本机 prune_sessions_index）
-            let sessions_dir = source_path
-                .trim_end_matches(
-                    &format!(
-                        "/{}.jsonl",
-                        meta.session_id
-                    ),
-                );
+            let sessions_dir = source_path.trim_end_matches(&format!("/{}.jsonl", meta.session_id));
             let index_path = format!("{sessions_dir}/sessions.json");
             if let Ok(Some(index_text)) = target.read_text_optional(&index_path).await {
                 let mut index: serde_json::Map<String, Value> =
@@ -2222,8 +2255,8 @@ pub async fn delete_remote_session(
                 index.retain(|_, entry| {
                     let same_id =
                         entry.get("sessionId").and_then(Value::as_str) == Some(session_id.as_str());
-                    let same_file =
-                        entry.get("sessionFile").and_then(Value::as_str) == Some(source_path.as_str());
+                    let same_file = entry.get("sessionFile").and_then(Value::as_str)
+                        == Some(source_path.as_str());
                     !(same_id || same_file)
                 });
                 if let Ok(json) = serde_json::to_string_pretty(&index) {
@@ -2380,14 +2413,8 @@ pub async fn toggle_remote_mcp_app(
         &session.channel,
         container.as_deref(),
     )?;
-    crate::remote::mcp::toggle_remote_mcp_app(
-        &target,
-        &host.default_home(),
-        &id,
-        &app,
-        enabled,
-    )
-    .await?;
+    crate::remote::mcp::toggle_remote_mcp_app(&target, &host.default_home(), &id, &app, enabled)
+        .await?;
     Ok(true)
 }
 
@@ -2490,7 +2517,9 @@ pub async fn list_remote_prompts(
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
     let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp, &session.channel, container.as_deref(),
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
     )?;
     crate::remote::prompt::read_remote_prompts(&target, &host.default_home(), &app).await
 }
@@ -2508,7 +2537,9 @@ pub async fn save_remote_prompts(
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
     let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp, &session.channel, container.as_deref(),
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
     )?;
     crate::remote::prompt::write_remote_prompts(&target, &host.default_home(), &app, &prompts)
         .await?;
@@ -2577,8 +2608,8 @@ pub async fn toggle_remote_skill_app(
         &session.channel,
         container.as_deref(),
     )?;
-    let use_copy = crate::settings::get_skill_sync_method()
-        == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     let result = crate::remote::skill::bulk_toggle_remote_skill_app(
         &target,
         &session.channel,
@@ -2614,8 +2645,8 @@ pub async fn bulk_toggle_remote_skill_app(
         &session.channel,
         container.as_deref(),
     )?;
-    let use_copy = crate::settings::get_skill_sync_method()
-        == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     crate::remote::skill::bulk_toggle_remote_skill_app(
         &target,
         &session.channel,
@@ -2667,15 +2698,18 @@ pub async fn install_remote_skills_from_zip(
 
     // 对每个新安装的技能：写 skills.json + 创建 symlink，同时收集完整记录
     let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
-    let mut records = crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
+    let mut records =
+        crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
     let mut apps = crate::remote::skill::RemoteSkillApps::default();
     apps.set_enabled(&app, true);
-    let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     let mut result: Vec<crate::remote::skill::RemoteSkillRecord> = Vec::new();
 
     for name in &installed {
         let skill_dir = format!("{ssot_dir}/{name}");
-        let (display_name, description) = crate::remote::skill::read_skill_md_meta_static(&target, &skill_dir).await;
+        let (display_name, description) =
+            crate::remote::skill::read_skill_md_meta_static(&target, &skill_dir).await;
         let record = crate::remote::skill::build_remote_skill_record(
             name,
             display_name,
@@ -2695,7 +2729,8 @@ pub async fn install_remote_skills_from_zip(
             name,
             &apps,
             use_copy,
-        ).await?;
+        )
+        .await?;
     }
 
     crate::remote::skill::write_remote_skills_json(&target, &host.default_home(), &records).await?;
@@ -2728,17 +2763,19 @@ pub async fn install_remote_skill_from_discoverable(
 
     // 1. 安装目录名 = directory 最后一段（对齐本机 sanitize_install_name）。
     let install_name = crate::remote::skill::sanitize_name(
-        skill.directory.rsplit(['/', '\\']).next().unwrap_or(&skill.directory),
+        skill
+            .directory
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&skill.directory),
     );
     if install_name.is_empty() {
         return Err("无效的技能目录名".to_string());
     }
 
     // 2. 冲突检测（对齐本机 install 的 DB 检查：同仓库更新启用，不同仓库报错）。
-    let mut records =
-        crate::remote::skill::read_remote_skills_json(&target, &root).await?;
-    let mut apps =
-        crate::remote::skill::RemoteSkillApps::default();
+    let mut records = crate::remote::skill::read_remote_skills_json(&target, &root).await?;
+    let mut apps = crate::remote::skill::RemoteSkillApps::default();
     apps.set_enabled(&app, true);
     if let Some(existing) = records
         .iter()
@@ -2757,8 +2794,8 @@ pub async fn install_remote_skill_from_discoverable(
         let mut updated = existing.clone();
         updated.apps = apps.clone();
         updated.updated_at = chrono::Utc::now().timestamp_millis();
-        let use_copy = crate::settings::get_skill_sync_method()
-            == crate::services::skill::SyncMethod::Copy;
+        let use_copy =
+            crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
         crate::remote::skill::sync_remote_skill_links(
             channel,
             container_ref,
@@ -2803,8 +2840,8 @@ pub async fn install_remote_skill_from_discoverable(
         apps.clone(),
     );
     records.push(record.clone());
-    let use_copy = crate::settings::get_skill_sync_method()
-        == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     crate::remote::skill::sync_remote_skill_links(
         channel,
         container_ref,
@@ -2846,9 +2883,10 @@ pub async fn install_remote_skill_from_dir(
     let remote_dir = format!("{skills_root}/{install_name}");
 
     // 检查是否已存在（宿主机 SFTP）
-    let fs = crate::fsops::RemoteSftpFileOps { sftp: &session.sftp };
-    let existing =
-        crate::remote::skill::list_remote_skills(&fs, &host.default_home()).await?;
+    let fs = crate::fsops::RemoteSftpFileOps {
+        sftp: &session.sftp,
+    };
+    let existing = crate::remote::skill::list_remote_skills(&fs, &host.default_home()).await?;
     if existing.iter().any(|e| e.name == install_name) {
         return Err(format!("远端已存在技能 {install_name}，请先删除再导入"));
     }
@@ -2875,8 +2913,11 @@ pub async fn update_remote_skill(
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
-    let target =
-        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container.as_deref())?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
     crate::remote::skill::update_remote_skill_impl(
         &target,
         &session.channel,
@@ -2898,8 +2939,11 @@ pub async fn check_remote_skill_updates(
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
-    let target =
-        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container.as_deref())?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
     crate::remote::skill::check_remote_skill_updates_impl(&target, &host.default_home()).await
 }
 
@@ -2921,9 +2965,7 @@ pub async fn scan_remote_unmanaged_skills(
         return scan_container_unmanaged_skills(&session.channel, c, &root).await;
     }
 
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp, &session.channel, None,
-    )?;
+    let target = crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, None)?;
     crate::remote::skill::scan_remote_unmanaged_skills(&target, &root).await
 }
 
@@ -2937,8 +2979,14 @@ async fn scan_container_unmanaged_skills(
     let json_path = crate::remote::skill::remote_skills_json_path(root);
     let managed_json = crate::remote::connection::exec_command(
         channel,
-        &format!("docker exec {} sh -c {}", container, shell_q_rs(&format!("cat {} 2>/dev/null", shell_q_rs(&json_path)))),
-    ).await.unwrap_or_default();
+        &format!(
+            "docker exec {} sh -c {}",
+            container,
+            shell_q_rs(&format!("cat {} 2>/dev/null", shell_q_rs(&json_path)))
+        ),
+    )
+    .await
+    .unwrap_or_default();
     let managed: std::collections::HashSet<String> = if managed_json.trim().is_empty() {
         Default::default()
     } else {
@@ -2961,8 +3009,10 @@ async fn scan_container_unmanaged_skills(
         ("hermes", ".hermes/skills"),
     ];
 
-    let mut unmanaged: std::collections::HashMap<String, crate::remote::skill::RemoteUnmanagedSkill> =
-        Default::default();
+    let mut unmanaged: std::collections::HashMap<
+        String,
+        crate::remote::skill::RemoteUnmanagedSkill,
+    > = Default::default();
 
     for (label, app_rel) in &sources {
         let src = format!("{root}/{app_rel}");
@@ -2972,27 +3022,36 @@ async fn scan_container_unmanaged_skills(
         let out = crate::remote::connection::exec_command(
             channel,
             &format!("docker exec {} sh -c {}", container, shell_q_rs(&script)),
-        ).await.unwrap_or_default();
+        )
+        .await
+        .unwrap_or_default();
 
         // 解析输出
         for block in out.split("CCSW_END") {
             let block = block.trim();
-            if block.is_empty() { continue; }
-            let dir = block.lines()
+            if block.is_empty() {
+                continue;
+            }
+            let dir = block
+                .lines()
                 .find(|l| l.starts_with("CCSW_NAME:"))
                 .map(|l| l.trim_start_matches("CCSW_NAME:").to_string());
             let dir = match dir {
                 Some(d) => d,
                 None => continue,
             };
-            if managed.contains(&dir) { continue; }
-            let dir_path = block.lines()
+            if managed.contains(&dir) {
+                continue;
+            }
+            let dir_path = block
+                .lines()
                 .find(|l| l.starts_with("CCSW_PATH:"))
                 .map(|l| l.trim_start_matches("CCSW_PATH:").trim().to_string())
                 .unwrap_or_default();
 
             // 解析 SKILL.md 内容中的 YAML frontmatter
-            let filtered: Vec<&str> = block.lines()
+            let filtered: Vec<&str> = block
+                .lines()
                 .filter(|l| !l.starts_with("CCSW_NAME:") && !l.starts_with("CCSW_PATH:"))
                 .collect();
             let content = filtered.join("\n");
@@ -3000,15 +3059,22 @@ async fn scan_container_unmanaged_skills(
             let (display_name, description) = if parts.len() >= 3 {
                 match serde_yaml::from_str::<serde_json::Value>(parts[1].trim()) {
                     Ok(meta) => (
-                        meta.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()),
-                        meta.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                        meta.get("name")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
+                        meta.get("description")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string()),
                     ),
                     Err(_) => (None, None),
                 }
-            } else { (None, None) };
+            } else {
+                (None, None)
+            };
             let name = display_name.unwrap_or_else(|| dir.clone());
             let label_str = label.to_string();
-            unmanaged.entry(dir.clone())
+            unmanaged
+                .entry(dir.clone())
                 .and_modify(|s| s.found_in.push(label_str.clone()))
                 .or_insert(crate::remote::skill::RemoteUnmanagedSkill {
                     directory: dir,
@@ -3020,7 +3086,8 @@ async fn scan_container_unmanaged_skills(
         }
     }
 
-    let mut out: Vec<crate::remote::skill::RemoteUnmanagedSkill> = unmanaged.into_values().collect();
+    let mut out: Vec<crate::remote::skill::RemoteUnmanagedSkill> =
+        unmanaged.into_values().collect();
     out.sort_by(|a, b| a.directory.cmp(&b.directory));
     Ok(out)
 }
@@ -3045,7 +3112,8 @@ pub async fn import_remote_skill(
     )?;
     let mut apps = crate::remote::skill::RemoteSkillApps::default();
     apps.set_enabled(&app, true);
-    let use_copy = crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     crate::remote::skill::import_remote_skill_local(
         &target,
         &session.channel,
@@ -3221,7 +3289,10 @@ fn load_host(state: &AppState, host_id: &str) -> Result<RemoteHost, String> {
     // 软禁用兜底：所有远端命令都经 load_host（约 40 处），此处拦截即全量拒绝。
     // 即使前端漏过滤，禁用的主机也无法被任何操作读到。
     if host.disabled {
-        return Err(format!("远程主机「{}」已被禁用，请先在远程主机管理页启用后再操作", host.name));
+        return Err(format!(
+            "远程主机「{}」已被禁用，请先在远程主机管理页启用后再操作",
+            host.name
+        ));
     }
     Ok(host)
 }

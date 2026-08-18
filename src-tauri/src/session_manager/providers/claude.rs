@@ -38,9 +38,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
 
 /// 纯消息解析：给定 JSONL 各行，返回消息列表。
 /// **本机与远端共用**（FileOps 提供行数据，这里只做解析）。
-pub fn parse_messages_from_lines(
-    lines: impl IntoIterator<Item = String>,
-) -> Vec<SessionMessage> {
+pub fn parse_messages_from_lines(lines: impl IntoIterator<Item = String>) -> Vec<SessionMessage> {
     let mut messages = Vec::new();
 
     for line in lines {
@@ -284,7 +282,10 @@ fn infer_session_id_from_filename_str(path: &str) -> Option<String> {
 }
 
 /// 通过 FileOps 扫描会话（本机 LocalFileOps / 远端 RemoteSftpFileOps 共用）。
-pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(fs: &F, root: &str) -> Vec<SessionMeta> {
+pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
     use futures::{stream, StreamExt};
     let mut files = Vec::new();
     collect_jsonl_files_fs(fs, root, &mut files).await;

@@ -103,8 +103,7 @@ impl FileOps for LocalFileOps {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("创建目录失败 {}: {e}", parent.display()))?;
         }
-        crate::config::write_text_file(p, content)
-            .map_err(|e| format!("写入文件失败 {path}: {e}"))
+        crate::config::write_text_file(p, content).map_err(|e| format!("写入文件失败 {path}: {e}"))
     }
 }
 

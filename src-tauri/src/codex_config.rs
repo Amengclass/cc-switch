@@ -924,7 +924,9 @@ pub fn extract_codex_base_url(config_text: &str) -> Option<String> {
 /// current Codex model alongside the provider name.
 pub fn extract_codex_model(config_text: &str) -> Option<String> {
     let doc = config_text.parse::<toml::Value>().ok()?;
-    doc.get("model").and_then(|v| v.as_str()).map(ToString::to_string)
+    doc.get("model")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string)
 }
 
 pub fn codex_auth_has_login_material(auth: &Value) -> bool {

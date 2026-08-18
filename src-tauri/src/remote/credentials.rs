@@ -134,7 +134,6 @@ fn write_map(map: &HashMap<String, String>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
     }
-    let text =
-        serde_json::to_string_pretty(map).map_err(|e| format!("序列化密码文件失败: {e}"))?;
+    let text = serde_json::to_string_pretty(map).map_err(|e| format!("序列化密码文件失败: {e}"))?;
     std::fs::write(&path, text).map_err(|e| format!("写入密码文件失败: {e}"))
 }

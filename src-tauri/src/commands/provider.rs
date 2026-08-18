@@ -138,9 +138,7 @@ pub async fn switch_provider(
     // provider-switched 事件），悬浮窗面板/小球靠事件驱动刷新，这里补一个
     // 悬浮窗专用事件让面板重新读缓存。用量查询由主窗口自身
     // （useUsageQuery 因 providerId 变化自动发起）完成，悬浮窗不查 API。
-    log::info!(
-        "[Provider] 手动切换成功 {app_type_log} -> {id_log}，emit floating-data-refresh"
-    );
+    log::info!("[Provider] 手动切换成功 {app_type_log} -> {id_log}，emit floating-data-refresh");
     let _ = app_handle.emit("floating-data-refresh", ());
 
     Ok(result?)

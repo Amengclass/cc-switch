@@ -17,8 +17,9 @@ pub fn remote_settings_path(root: &str) -> String {
 /// 读取远端 settings.json;文件缺失时返回空对象。
 pub async fn read_remote_settings<F: FileOps>(fs: &F, root: &str) -> Result<Value, String> {
     match fs.read_text_optional(&remote_settings_path(root)).await? {
-        Some(text) => serde_json::from_str(&text)
-            .map_err(|e| format!("远端 settings.json 解析失败: {e}")),
+        Some(text) => {
+            serde_json::from_str(&text).map_err(|e| format!("远端 settings.json 解析失败: {e}"))
+        }
         None => Ok(Value::Object(Map::new())),
     }
 }
@@ -60,7 +61,8 @@ pub async fn apply_provider_settings(
         notes: vec![
             format!("已整文件覆盖远端 {path}"),
             "新建的 Claude Code 会话立即生效".to_string(),
-            "已在运行的会话按热重载生效；若远端 shell 存在冲突环境变量，建议清理后重新登录终端".to_string(),
+            "已在运行的会话按热重载生效；若远端 shell 存在冲突环境变量，建议清理后重新登录终端"
+                .to_string(),
         ],
         warnings: Vec::new(),
     })

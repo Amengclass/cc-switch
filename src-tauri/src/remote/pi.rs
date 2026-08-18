@@ -30,9 +30,7 @@ pub async fn apply_pi_provider_settings(
 
     // 校验：必须是对象（与 pi_config::validate_provider_node 一致）
     if !config_to_write.is_object() {
-        return Err(format!(
-            "Pi provider '{provider_id}' 的配置必须是对象"
-        ));
+        return Err(format!("Pi provider '{provider_id}' 的配置必须是对象"));
     }
 
     // 读远端 models.json → providers 段 upsert → 原子写回

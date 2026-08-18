@@ -29,13 +29,11 @@ pub async fn apply_hermes_provider_settings(
     let config_path = format!("{root}/.hermes/config.yaml");
 
     // 读远端 config.yaml（不存在 / 解析失败视为空配置）
-    let mut root_yaml: serde_yaml::Value = match session
-        .read_remote_text(&config_path, container)
-        .await?
-    {
-        Some(t) => serde_yaml::from_str(&t).unwrap_or_else(|_| serde_yaml::Value::Null),
-        None => serde_yaml::Value::Null,
-    };
+    let mut root_yaml: serde_yaml::Value =
+        match session.read_remote_text(&config_path, container).await? {
+            Some(t) => serde_yaml::from_str(&t).unwrap_or_else(|_| serde_yaml::Value::Null),
+            None => serde_yaml::Value::Null,
+        };
     if !root_yaml.is_mapping() {
         root_yaml = serde_yaml::Value::Mapping(Default::default());
     }
@@ -97,8 +95,8 @@ pub async fn apply_hermes_provider_settings(
         );
     }
 
-    let text = serde_yaml::to_string(&root_yaml)
-        .map_err(|e| format!("序列化 config.yaml 失败: {e}"))?;
+    let text =
+        serde_yaml::to_string(&root_yaml).map_err(|e| format!("序列化 config.yaml 失败: {e}"))?;
     session
         .write_settings_with_backup(&config_path, &text, container, None)
         .await?;

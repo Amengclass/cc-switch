@@ -63,7 +63,10 @@ pub fn set_tunnel_host(address: &str) {
 fn tunnel_host() -> String {
     match TUNNEL_HOST.lock() {
         Ok(g) => g.clone().unwrap_or_else(|| "127.0.0.1".to_string()),
-        Err(p) => p.into_inner().clone().unwrap_or_else(|| "127.0.0.1".to_string()),
+        Err(p) => p
+            .into_inner()
+            .clone()
+            .unwrap_or_else(|| "127.0.0.1".to_string()),
     }
 }
 
@@ -246,7 +249,11 @@ impl RemoteSession {
         match action {
             Action::None => {}
             Action::Forward => {
-                match self.channel.tcpip_forward(REMOTE_TUNNEL_LISTEN_ADDR, port as u32).await {
+                match self
+                    .channel
+                    .tcpip_forward(REMOTE_TUNNEL_LISTEN_ADDR, port as u32)
+                    .await
+                {
                     Ok(_) => {
                         if let Ok(mut g) = self.tunnel_active.lock() {
                             *g = true;
@@ -415,7 +422,10 @@ fn pool() -> std::sync::MutexGuard<'static, Option<HashMap<String, PooledSession
 /// 带 10 秒总超时：对不可达/无响应主机，Windows 系统 TCP 超时约 21 秒才报错，
 /// 这里统一在 10 秒内提前返回「连接超时」，避免界面长时间无响应；
 /// 正常在线主机 1~2 秒完成连接，不受影响。
-pub async fn connect(host: &RemoteHost, password: Option<&str>) -> Result<Arc<RemoteSession>, String> {
+pub async fn connect(
+    host: &RemoteHost,
+    password: Option<&str>,
+) -> Result<Arc<RemoteSession>, String> {
     // 未保存的主机不参与池（无稳定 host_id 作 key，且是一次性探测）
     if host.id.is_empty() || host.id == "temp" {
         return connect_fresh(host, password).await;
@@ -424,7 +434,10 @@ pub async fn connect(host: &RemoteHost, password: Option<&str>) -> Result<Arc<Re
 }
 
 /// 建连核心（不经过池）：TCP → SSH 握手 → SFTP，带 10 秒总超时与 keepalive。
-async fn connect_fresh(host: &RemoteHost, password: Option<&str>) -> Result<Arc<RemoteSession>, String> {
+async fn connect_fresh(
+    host: &RemoteHost,
+    password: Option<&str>,
+) -> Result<Arc<RemoteSession>, String> {
     let host_display = format!("{}:{}", host.host, host.port);
     let connect_fut = async {
         let config = Arc::new(client::Config {
@@ -432,13 +445,9 @@ async fn connect_fresh(host: &RemoteHost, password: Option<&str>) -> Result<Arc<
             ..client::Config::default()
         });
 
-        let mut channel = client::connect(
-            config,
-            (host.host.as_str(), host.port),
-            RemoteHandler,
-        )
-        .await
-        .map_err(|e| format!("SSH 连接失败 {host_display}: {e}"))?;
+        let mut channel = client::connect(config, (host.host.as_str(), host.port), RemoteHandler)
+            .await
+            .map_err(|e| format!("SSH 连接失败 {host_display}: {e}"))?;
 
         match host.auth_method {
             AuthMethod::Password => {
@@ -651,7 +660,9 @@ pub async fn sync_tunnel_now(host: &RemoteHost) {
     .map(|r| r.is_ok())
     .unwrap_or(false);
     if alive {
-        session.sync_route_tunnel(&host.id, &host_display, wants).await;
+        session
+            .sync_route_tunnel(&host.id, &host_display, wants)
+            .await;
         put_back(&key, session);
     }
     // 不存活则丢弃（下次连接会重建并对账）
@@ -709,9 +720,7 @@ pub async fn exec_command_with_stdin(
             .map_err(|e| format!("写入 stdin 失败: {e}"))?;
         written = end;
     }
-    ch.eof()
-        .await
-        .map_err(|e| format!("发送 EOF 失败: {e}"))?;
+    ch.eof().await.map_err(|e| format!("发送 EOF 失败: {e}"))?;
 
     let mut stream = ch.into_stream();
     let mut output = Vec::new();

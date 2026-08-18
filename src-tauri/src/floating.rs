@@ -90,11 +90,9 @@ static HOVER_STATE: std::sync::Mutex<FloatingHoverState> =
 static POSITION_SAVE_SCHEDULED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 /// 右键菜单是否打开：打开期间悬停球不展开面板、面板互斥不收起菜单
-static MENU_OPEN: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static MENU_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// 右键菜单最近一次收起的时刻（区分「点击球关菜单」与正常单击球）
-static MENU_CLOSED_AT: std::sync::Mutex<Option<std::time::Instant>> =
-    std::sync::Mutex::new(None);
+static MENU_CLOSED_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 // ============================================================
 // 拖动（Rust 端全局光标轮询，绕开 WebView 事件）
@@ -106,8 +104,7 @@ static MENU_CLOSED_AT: std::sync::Mutex<Option<std::time::Instant>> =
 // - 松开左键（GetAsyncKeyState 检测 或 前端 pointerup）→ 停止 + 边缘吸附 + 保存
 // ============================================================
 
-static FLOATING_DRAGGING: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static FLOATING_DRAGGING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// (起点光标 x, 起点光标 y, 起点窗口 x, 起点窗口 y) —— 均为物理像素
 static FLOATING_DRAG_START: std::sync::Mutex<Option<(i32, i32, f64, f64)>> =
     std::sync::Mutex::new(None);
@@ -147,9 +144,7 @@ fn global_cursor_physical() -> Option<(i32, i32)> {
 
 #[cfg(target_os = "windows")]
 fn is_left_button_down() -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, VK_LBUTTON,
-    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
     unsafe { GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000 != 0 }
 }
 
@@ -187,8 +182,9 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     };
     let pos = ball.outer_position().map_err(|e| e.to_string())?;
-    *FLOATING_DRAG_START.lock().unwrap_or_else(|p| p.into_inner()) =
-        Some((cx, cy, pos.x as f64, pos.y as f64));
+    *FLOATING_DRAG_START
+        .lock()
+        .unwrap_or_else(|p| p.into_inner()) = Some((cx, cy, pos.x as f64, pos.y as f64));
     FLOATING_DRAGGING.store(true, Ordering::Release);
     FLOATING_DRAG_MOVED.store(false, Ordering::Release);
     log::info!("[Floating] 开始拖动");
@@ -212,7 +208,9 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
                 continue;
             }
             let moved = {
-                let guard = FLOATING_DRAG_START.lock().unwrap_or_else(|p| p.into_inner());
+                let guard = FLOATING_DRAG_START
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
                 *guard
             };
             if let Some((scx, scy, swx, swy)) = moved {
@@ -253,7 +251,9 @@ fn finish_drag(app: &tauri::AppHandle) {
     let menu_just_closed = MENU_CLOSED_AT
         .lock()
         .unwrap_or_else(|p| p.into_inner())
-        .map_or(false, |t| t.elapsed() < std::time::Duration::from_millis(300));
+        .map_or(false, |t| {
+            t.elapsed() < std::time::Duration::from_millis(300)
+        });
     if !FLOATING_DRAG_MOVED.load(Ordering::Acquire) && !menu_just_closed {
         log::info!("[Floating] 单击悬浮球，打开主窗口");
         open_main_window_impl(app);
@@ -345,8 +345,10 @@ fn save_ball_logical_position(app: &tauri::AppHandle, px: f64, py: f64) {
     };
     let lx = (px / scale).round();
     let ly = (py / scale).round();
-    let _ =
-        crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x: lx, y: ly }));
+    let _ = crate::settings::set_floating_window_position(Some(FloatingWindowPosition {
+        x: lx,
+        y: ly,
+    }));
     log::info!("[Floating] 拖动结束，保存位置: ({lx:.0}, {ly:.0})");
 }
 
@@ -404,33 +406,30 @@ fn build_floating_window(
     width: f64,
     height: f64,
 ) -> Result<WebviewWindow, AppError> {
-    let window = WebviewWindowBuilder::new(
-        app,
-        label,
-        tauri::WebviewUrl::App("floating.html".into()),
-    )
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .shadow(false)
-        // 固定尺寸：禁止用户拖边缘调整大小（避免出现边缘调整光标/误操作）
-        .resizable(false)
-        .inner_size(width, height)
-        .visible(false)
-        // WebView2 加载内容后会把悬浮窗窗口 resize 成异常宽度（实测球/菜单
-        // 被拉宽成 133 逻辑），这里在页面加载完成时强制设回逻辑尺寸。
-        .on_page_load(move |window, _| {
-            let _ = window.set_size(tauri::LogicalSize::new(width, height));
-            // 再延迟一次，兜底 WebView 加载后的异步 resize
-            let w = window.clone();
-            tauri::async_runtime::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                let _ = w.set_size(tauri::LogicalSize::new(width, height));
-            });
-        })
-        .build()
-        .map_err(|e| AppError::Message(format!("创建悬浮窗 {label} 失败: {e}")))?;
+    let window =
+        WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App("floating.html".into()))
+            .decorations(false)
+            .transparent(true)
+            .always_on_top(true)
+            .skip_taskbar(true)
+            .shadow(false)
+            // 固定尺寸：禁止用户拖边缘调整大小（避免出现边缘调整光标/误操作）
+            .resizable(false)
+            .inner_size(width, height)
+            .visible(false)
+            // WebView2 加载内容后会把悬浮窗窗口 resize 成异常宽度（实测球/菜单
+            // 被拉宽成 133 逻辑），这里在页面加载完成时强制设回逻辑尺寸。
+            .on_page_load(move |window, _| {
+                let _ = window.set_size(tauri::LogicalSize::new(width, height));
+                // 再延迟一次，兜底 WebView 加载后的异步 resize
+                let w = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    let _ = w.set_size(tauri::LogicalSize::new(width, height));
+                });
+            })
+            .build()
+            .map_err(|e| AppError::Message(format!("创建悬浮窗 {label} 失败: {e}")))?;
     Ok(window)
 }
 
@@ -539,10 +538,9 @@ pub(crate) fn schedule_position_save(x: f64, y: f64) {
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_millis(800)).await;
         POSITION_SAVE_SCHEDULED.store(false, Ordering::Release);
-        if let Err(e) = crate::settings::set_floating_window_position(Some(FloatingWindowPosition {
-            x,
-            y,
-        })) {
+        if let Err(e) =
+            crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x, y }))
+        {
             log::warn!("[Floating] 保存球位置失败: {e}");
         } else {
             log::debug!("[Floating] 球位置已保存: ({x:.0}, {y:.0})");
@@ -555,7 +553,8 @@ pub(crate) fn save_ball_position_now(app: &tauri::AppHandle) {
     let Some((x, y)) = current_ball_position(app) else {
         return;
     };
-    if let Err(e) = crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x, y }))
+    if let Err(e) =
+        crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x, y }))
     {
         log::warn!("[Floating] 退出前保存球位置失败: {e}");
     }
@@ -662,9 +661,7 @@ fn resolve_model(app_type: &AppType, provider: &crate::provider::Provider) -> Op
             .flatten()
             .and_then(|d| d.model.map(|m| m.primary))
             .filter(|s| !s.is_empty()),
-        AppType::Claude | AppType::ClaudeDesktop => {
-            str_at(&["ANTHROPIC_MODEL"]).map(String::from)
-        }
+        AppType::Claude | AppType::ClaudeDesktop => str_at(&["ANTHROPIC_MODEL"]).map(String::from),
         AppType::Gemini => str_at(&["GEMINI_MODEL"]).map(String::from),
         AppType::Codex => settings
             .get("config")
@@ -684,46 +681,46 @@ fn worst_utilization_pct(
 ) -> Option<f64> {
     let is_official_provider = provider.category.as_deref() == Some("official");
     let can_use_script = provider.has_usage_script_enabled()
-        && (!is_official_provider
-            || crate::tray::provider_uses_official_subscription(provider));
+        && (!is_official_provider || crate::tray::provider_uses_official_subscription(provider));
 
     if can_use_script {
-        if let Some(Some(result)) = app_state.usage_cache.with_script(
-            app_type,
-            provider_id,
-            |result| -> Option<f64> {
-                let data = result.data.as_ref()?;
-                let entries: Vec<(&str, f64)> = data
-                    .iter()
-                    .filter_map(|d| Some((d.plan_name.as_deref()?, crate::tray::tier_pct(d)?)))
-                    .collect();
-                let parts = crate::tray::labeled_tier_parts(&entries);
-                if !parts.is_empty() {
-                    return parts.into_iter().map(|(_, u)| u).fold(None, |acc, u| {
-                        Some(acc.map_or(u, |a: f64| a.max(u)))
-                    });
-                }
-                entries
-                    .first()
-                    .map(|(_, u)| *u)
-            },
-        ) {
+        if let Some(Some(result)) =
+            app_state
+                .usage_cache
+                .with_script(app_type, provider_id, |result| -> Option<f64> {
+                    let data = result.data.as_ref()?;
+                    let entries: Vec<(&str, f64)> = data
+                        .iter()
+                        .filter_map(|d| Some((d.plan_name.as_deref()?, crate::tray::tier_pct(d)?)))
+                        .collect();
+                    let parts = crate::tray::labeled_tier_parts(&entries);
+                    if !parts.is_empty() {
+                        return parts
+                            .into_iter()
+                            .map(|(_, u)| u)
+                            .fold(None, |acc, u| Some(acc.map_or(u, |a: f64| a.max(u))));
+                    }
+                    entries.first().map(|(_, u)| *u)
+                })
+        {
             return Some(result);
         }
         if crate::tray::provider_uses_official_subscription(provider) {
             if let Some(Some(quota)) =
-                app_state.usage_cache.with_subscription(app_type, |quota| -> Option<f64> {
-                    let entries: Vec<(&str, f64)> = quota
-                        .tiers
-                        .iter()
-                        .map(|tier| (tier.name.as_str(), tier.utilization))
-                        .collect();
-                    let parts = crate::tray::labeled_tier_parts(&entries);
-                    parts
-                        .into_iter()
-                        .map(|(_, u)| u)
-                        .fold(None, |acc, u| Some(acc.map_or(u, |a: f64| a.max(u))))
-                })
+                app_state
+                    .usage_cache
+                    .with_subscription(app_type, |quota| -> Option<f64> {
+                        let entries: Vec<(&str, f64)> = quota
+                            .tiers
+                            .iter()
+                            .map(|tier| (tier.name.as_str(), tier.utilization))
+                            .collect();
+                        let parts = crate::tray::labeled_tier_parts(&entries);
+                        parts
+                            .into_iter()
+                            .map(|(_, u)| u)
+                            .fold(None, |acc, u| Some(acc.map_or(u, |a: f64| a.max(u))))
+                    })
             {
                 return Some(quota);
             }
@@ -744,8 +741,7 @@ fn floating_usage_data(
 ) -> Option<Vec<crate::provider::UsageData>> {
     let is_official_provider = provider.category.as_deref() == Some("official");
     let can_use_script = provider.has_usage_script_enabled()
-        && (!is_official_provider
-            || crate::tray::provider_uses_official_subscription(provider));
+        && (!is_official_provider || crate::tray::provider_uses_official_subscription(provider));
     if !can_use_script {
         return None;
     }
@@ -800,8 +796,7 @@ fn floating_queried_at(
 ) -> Option<i64> {
     let is_official_provider = provider.category.as_deref() == Some("official");
     let can_use_script = provider.has_usage_script_enabled()
-        && (!is_official_provider
-            || crate::tray::provider_uses_official_subscription(provider));
+        && (!is_official_provider || crate::tray::provider_uses_official_subscription(provider));
     if !can_use_script {
         return None;
     }
@@ -852,8 +847,12 @@ async fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingE
                 match provider {
                     Some(provider) => {
                         let model = resolve_model(app_type, &provider);
-                        let usage_summary =
-                            crate::tray::format_usage_suffix(state, app_type, &provider, &provider_id);
+                        let usage_summary = crate::tray::format_usage_suffix(
+                            state,
+                            app_type,
+                            &provider,
+                            &provider_id,
+                        );
                         let worst_pct =
                             worst_utilization_pct(state, app_type, &provider, &provider_id);
                         let usage = floating_usage_data(state, app_type, &provider, &provider_id);
@@ -869,10 +868,26 @@ async fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingE
                             true,
                         )
                     }
-                    None => (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false),
+                    None => (
+                        UNKNOWN_PROVIDER.to_string(),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        false,
+                    ),
                 }
             }
-            None => (UNKNOWN_PROVIDER.to_string(), None, None, None, None, None, false),
+            None => (
+                UNKNOWN_PROVIDER.to_string(),
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+            ),
         };
 
     FloatingEntry {
@@ -969,10 +984,7 @@ fn resolve_ball_target() -> Option<FloatingBallTarget> {
     let settings = crate::settings::get_settings();
     let takeover_active = settings.floating_remote_takeover.unwrap_or(false);
     // 不透明度随设置走；None 回退到默认 0.97（与 current --fb-bg 相仿）
-    let opacity = settings
-        .floating_opacity
-        .unwrap_or(0.97)
-        .clamp(0.2, 1.0);
+    let opacity = settings.floating_opacity.unwrap_or(0.97).clamp(0.2, 1.0);
     if let Some(pin) = settings.floating_pin_app.as_deref() {
         if let Some(app_type) = parse_app_type(pin) {
             return Some(FloatingBallTarget {
@@ -1054,7 +1066,10 @@ pub async fn floating_set_pin_app(
     let t1 = std::time::Instant::now();
     emit_pin_changed(&app);
     let _ = app.emit("floating-data-refresh", ());
-    log::info!("[Floating] 置顶事件已发出 (emit 耗时 {}ms)", t1.elapsed().as_millis());
+    log::info!(
+        "[Floating] 置顶事件已发出 (emit 耗时 {}ms)",
+        t1.elapsed().as_millis()
+    );
     Ok(())
 }
 
@@ -1069,7 +1084,8 @@ pub async fn floating_record_active_app(
         log::debug!("[Floating] 忽略未知活跃 app: {app_type}");
         return Ok(());
     };
-    crate::settings::set_floating_last_app(parsed.as_str().to_string()).map_err(|e| e.to_string())?;
+    crate::settings::set_floating_last_app(parsed.as_str().to_string())
+        .map_err(|e| e.to_string())?;
     log::info!("[Floating] 记录最近活跃 app: {}", parsed.as_str());
     // 未置顶时球跟随最近活跃：发 target 事件让球即时更新
     emit_pin_changed(&app);
@@ -1387,8 +1403,7 @@ pub async fn show_floating_context_menu(app: tauri::AppHandle) -> Result<(), Str
 pub fn hide_floating_menu_sync(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     if MENU_OPEN.swap(false, Ordering::AcqRel) {
-        *MENU_CLOSED_AT.lock().unwrap_or_else(|p| p.into_inner()) =
-            Some(std::time::Instant::now());
+        *MENU_CLOSED_AT.lock().unwrap_or_else(|p| p.into_inner()) = Some(std::time::Instant::now());
     }
     if let Some(menu) = app.get_webview_window(MENU_LABEL) {
         let _ = menu.hide();
@@ -1412,10 +1427,7 @@ pub async fn floating_open_settings(app: tauri::AppHandle) -> Result<(), String>
 
 /// 保存球位置（前端拖动结束后调用；fallback 到 Rust 端 Moved 事件）
 #[tauri::command]
-pub async fn set_floating_ball_position(
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
+pub async fn set_floating_ball_position(x: f64, y: f64) -> Result<(), String> {
     crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x, y }))
         .map_err(|e| e.to_string())
 }

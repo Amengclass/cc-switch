@@ -296,9 +296,7 @@ pub async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
                 continue;
             }
             if let Ok(Some(text)) = fs.read_text_optional(&file_entry.path).await {
-                if let Some(mut meta) =
-                    parse_session_from_json_text(&file_entry.path, &text)
-                {
+                if let Some(mut meta) = parse_session_from_json_text(&file_entry.path, &text) {
                     meta.project_dir = project_dir.clone();
                     sessions.push(meta);
                 }

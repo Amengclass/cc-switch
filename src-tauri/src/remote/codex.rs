@@ -85,8 +85,8 @@ pub async fn apply_codex_provider_settings(
 
     // 4) auth.json：仅当本机语义要求时写入；否则保留远端用户自己的登录态
     if plan.write_auth {
-        let auth_text =
-            serde_json::to_string_pretty(&auth).map_err(|e| format!("序列化 auth.json 失败: {e}"))?;
+        let auth_text = serde_json::to_string_pretty(&auth)
+            .map_err(|e| format!("序列化 auth.json 失败: {e}"))?;
         session
             .write_settings_with_backup(&auth_path, &auth_text, container, None)
             .await?;

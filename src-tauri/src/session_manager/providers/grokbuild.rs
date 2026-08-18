@@ -58,7 +58,9 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     let file = File::open(&chat_path)
         .map_err(|e| format!("Failed to open Grok Build chat history: {e}"))?;
     let reader = BufReader::new(file);
-    Ok(parse_messages_from_lines(reader.lines().map_while(Result::ok)))
+    Ok(parse_messages_from_lines(
+        reader.lines().map_while(Result::ok),
+    ))
 }
 
 /// 纯解析：chat_history.jsonl 逐行 → 消息（本机/远端共用）。

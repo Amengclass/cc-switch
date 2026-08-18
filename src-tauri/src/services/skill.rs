@@ -777,14 +777,13 @@ impl SkillService {
         &self,
         skill: &DiscoverableSkill,
     ) -> Result<(tempfile::TempDir, PathBuf, PathBuf, String)> {
-        let source_rel =
-            Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
-                anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
-                    &[("directory", &skill.directory)],
-                    Some("checkZipContent"),
-                ))
-            })?;
+        let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
+            anyhow!(format_skill_error(
+                "INVALID_SKILL_DIRECTORY",
+                &[("directory", &skill.directory)],
+                Some("checkZipContent"),
+            ))
+        })?;
 
         let repo = SkillRepo {
             owner: skill.repo_owner.clone(),

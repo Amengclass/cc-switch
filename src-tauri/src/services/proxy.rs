@@ -1804,10 +1804,7 @@ impl ProxyService {
                         h.route_proxy_container_apps.clear();
                         h.updated_at = chrono::Utc::now().timestamp_millis();
                         if let Err(e) = self.db.upsert_remote_host(&h) {
-                            log::warn!(
-                                "[remote] 清除主机 {} 远端接管意图失败: {e}",
-                                h.name
-                            );
+                            log::warn!("[remote] 清除主机 {} 远端接管意图失败: {e}", h.name);
                         }
                     }
                 }

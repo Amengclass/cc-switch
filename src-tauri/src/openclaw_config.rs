@@ -940,7 +940,10 @@ fn write_mcp_servers(servers: &Map<String, Value>) -> Result<OpenClawWriteOutcom
         .or_insert_with(|| Value::Object(Map::new()));
     let mcp_obj = ensure_object(mcp);
     mcp_obj.insert("servers".to_string(), Value::Object(servers.clone()));
-    let mcp_value = root.get("mcp").cloned().unwrap_or_else(|| Value::Object(Map::new()));
+    let mcp_value = root
+        .get("mcp")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
     write_root_section("mcp", &mcp_value)
 }
 

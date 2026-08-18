@@ -458,7 +458,11 @@ pub fn parse_session_from_lines(
         .filter(|s| !s.is_empty())
         .map(|t| truncate_summary(t, TITLE_MAX_CHARS))
         .or_else(|| first_user_message.map(|t| truncate_summary(&t, TITLE_MAX_CHARS)))
-        .or_else(|| cwd.as_deref().and_then(path_basename).map(|s| s.to_string()));
+        .or_else(|| {
+            cwd.as_deref()
+                .and_then(path_basename)
+                .map(|s| s.to_string())
+        });
 
     let summary = summary.map(|text| truncate_summary(&text, 160));
 

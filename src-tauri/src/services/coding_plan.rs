@@ -1412,7 +1412,9 @@ fn js_object_to_json(text: &str) -> String {
         if ch == '{' || ch == ',' {
             out.push(ch);
             i += 1;
-            while i < n && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t') {
+            while i < n
+                && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t')
+            {
                 out.push(chars[i]);
                 i += 1;
             }
@@ -1424,7 +1426,9 @@ fn js_object_to_json(text: &str) -> String {
                     i += 1;
                 }
                 let key: String = chars[key_start..i].iter().collect();
-                while i < n && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t') {
+                while i < n
+                    && (chars[i] == ' ' || chars[i] == '\n' || chars[i] == '\r' || chars[i] == '\t')
+                {
                     i += 1;
                 }
                 if i < n && chars[i] == ':' {
@@ -1472,9 +1476,7 @@ async fn query_opencode_go(
         .map_err(|e| format!("OpenCode Go 页面请求失败: {e}"))?;
 
     let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED
-        || status == reqwest::StatusCode::FORBIDDEN
-    {
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return Ok(coding_plan_not_found(
             "OpenCode auth cookie 失效或未授权（请重新获取 auth cookie）",
         ));
@@ -1628,7 +1630,10 @@ fn extract_usage_records(html: &str) -> Vec<serde_json::Value> {
 /// - monthly：基于「最早记录」锚定的订阅月周期内的累计
 /// cost 字段单位是 1e-8（USD），此处已统一转成 USD 金额。
 #[allow(dead_code)]
-fn opencode_windows(records: &[serde_json::Value], now: f64) -> std::collections::HashMap<&'static str, f64> {
+fn opencode_windows(
+    records: &[serde_json::Value],
+    now: f64,
+) -> std::collections::HashMap<&'static str, f64> {
     use std::collections::HashMap;
 
     // 解析所有有效记录 (ts, cost_usd)
@@ -1790,10 +1795,7 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 fn parse_date_ts(s: &str) -> Option<f64> {
     // 简化解析：datetime -> UNIX。用 Serde json 的 DateTime 不可用，手写基本解析。
     // 格式: YYYY-MM-DDTHH:MM:SS(.fff)?Z
-    let re = Regex::new(
-        r#"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?"#,
-    )
-    .unwrap();
+    let re = Regex::new(r#"(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?"#).unwrap();
     let c = re.captures(s)?;
     let y: f64 = c[1].parse().ok()?;
     let mo: f64 = c[2].parse().ok()?;
@@ -2508,7 +2510,8 @@ mod tests {
         ensure_no_proxy_for_loopback();
         let (base_url, handle) = spawn_once_server(None);
 
-        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
+        let result =
+            get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
         let err = result.expect_err("响应前连接中断必须走 Err 通道（瞬时）");
         assert!(err.contains("Network error"), "err={err}");
         handle.join().expect("server thread");
@@ -2525,7 +2528,8 @@ mod tests {
                 .to_string(),
         ));
 
-        let result = get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
+        let result =
+            get_coding_plan_quota(&base_url, "k", None, None, None, None, None, None, None).await;
         let err = result.expect_err("读体中断必须走 Err 通道（瞬时，前端 reject 后重试）");
         assert!(err.contains("Failed to read response"), "err={err}");
         handle.join().expect("server thread");

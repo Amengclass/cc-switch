@@ -330,7 +330,8 @@ pub fn parse_messages_from_lines(lines: impl IntoIterator<Item = String>) -> Vec
     messages
 }
 
-pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {    let meta = parse_session(path)
+pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {
+    let meta = parse_session(path)
         .ok_or_else(|| format!("Failed to parse Codex session metadata: {}", path.display()))?;
 
     if meta.session_id != session_id {
@@ -642,8 +643,7 @@ pub fn parse_session_meta_from_lines(
         if last_active_at.is_none() {
             last_active_at = value.get("timestamp").and_then(parse_timestamp_to_ms);
         }
-        if summary.is_none() && value.get("type").and_then(Value::as_str) == Some("response_item")
-        {
+        if summary.is_none() && value.get("type").and_then(Value::as_str) == Some("response_item") {
             if let Some(payload) = value.get("payload") {
                 if payload.get("type").and_then(Value::as_str) == Some("message") {
                     let text = payload.get("content").map(extract_text).unwrap_or_default();

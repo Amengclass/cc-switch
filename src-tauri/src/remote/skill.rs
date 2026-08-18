@@ -268,9 +268,19 @@ pub async fn sync_remote_skill_links(
         let parent = format!("{root}/{app_rel}");
 
         // 确保父目录存在
-        exec_cmd(channel, container, &format!("mkdir -p {}", shell_q(&parent))).await?;
+        exec_cmd(
+            channel,
+            container,
+            &format!("mkdir -p {}", shell_q(&parent)),
+        )
+        .await?;
         // 删除旧链接/目录
-        exec_cmd(channel, container, &format!("rm -rf {}", shell_q(&link_path))).await?;
+        exec_cmd(
+            channel,
+            container,
+            &format!("rm -rf {}", shell_q(&link_path)),
+        )
+        .await?;
 
         let sync_cmd = if use_copy {
             format!("cp -r {} {}", shell_q(&target), shell_q(&link_path))
@@ -291,7 +301,12 @@ pub async fn remove_remote_skill_links(
 ) -> Result<(), String> {
     for app_rel in APP_SKILLS_DIRS {
         let link_path = format!("{root}/{app_rel}/{name}");
-        exec_cmd(channel, container, &format!("rm -rf {}", shell_q(&link_path))).await?;
+        exec_cmd(
+            channel,
+            container,
+            &format!("rm -rf {}", shell_q(&link_path)),
+        )
+        .await?;
     }
     Ok(())
 }
@@ -371,12 +386,7 @@ pub(crate) fn apply_skill_toggles(
                 rec.apps.set_enabled(app, enabled);
                 let dir = rec.directory.clone();
                 scripts.push(build_skill_link_script(
-                    root,
-                    ssot_path,
-                    app_rel,
-                    &dir,
-                    enabled,
-                    use_copy,
+                    root, ssot_path, app_rel, &dir, enabled, use_copy,
                 ));
                 succeeded.push(id.clone());
             }
@@ -462,7 +472,11 @@ pub async fn list_remote_skills<F: FileOps>(
             rec.description,
         );
         out.push(RemoteSkillEntry {
-            id: if rec.id.is_empty() { rec.directory.clone() } else { rec.id.clone() },
+            id: if rec.id.is_empty() {
+                rec.directory.clone()
+            } else {
+                rec.id.clone()
+            },
             name: display_name
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| rec.directory.clone()),
@@ -548,8 +562,14 @@ pub async fn scan_remote_unmanaged_skills<F: FileOps>(
     sources.push((format!("{root}/.codex/skills"), "codex".to_string()));
     sources.push((format!("{root}/.gemini/skills"), "gemini".to_string()));
     sources.push((format!("{root}/.grok/skills"), "grokbuild".to_string()));
-    sources.push((format!("{root}/.config/opencode/skills"), "opencode".to_string()));
-    sources.push((format!("{root}/.openclaw/workspace/skills"), "openclaw".to_string()));
+    sources.push((
+        format!("{root}/.config/opencode/skills"),
+        "opencode".to_string(),
+    ));
+    sources.push((
+        format!("{root}/.openclaw/workspace/skills"),
+        "openclaw".to_string(),
+    ));
     sources.push((format!("{root}/.hermes/skills"), "hermes".to_string()));
 
     let mut unmanaged: HashMap<String, RemoteUnmanagedSkill> = HashMap::new();
@@ -609,7 +629,12 @@ pub async fn import_remote_skill_local<F: FileOps>(
     // cp -r 源到 SSOT
     if let Some(c) = container {
         // 容器：源在容器内部，docker exec cp -r 在容器内复制
-        let cp_cmd = format!("docker exec {} cp -r {} {}", c, shell_q(source_path), shell_q(&dest));
+        let cp_cmd = format!(
+            "docker exec {} cp -r {} {}",
+            c,
+            shell_q(source_path),
+            shell_q(&dest)
+        );
         crate::remote::connection::exec_command(channel, &cp_cmd).await?;
     } else {
         // 宿主机：exec cp -r
@@ -676,8 +701,7 @@ pub(crate) async fn upload_dir_via_tar(
         let gz = archive
             .into_inner()
             .map_err(|e| format!("tar 完成失败: {e}"))?;
-        gz.finish()
-            .map_err(|e| format!("gzip 完成失败: {e}"))?;
+        gz.finish().map_err(|e| format!("gzip 完成失败: {e}"))?;
     }
 
     // 2. 解包目标父目录（remote_dir 的父目录，tar 内已包含 dir_name）
@@ -688,11 +712,7 @@ pub(crate) async fn upload_dir_via_tar(
 
     // 3. 构建命令并执行
     let cmd = if let Some(c) = container {
-        format!(
-            "docker exec -i {} tar xzf - -C {}",
-            c,
-            shell_q(tar_parent)
-        )
+        format!("docker exec -i {} tar xzf - -C {}", c, shell_q(tar_parent))
     } else {
         format!("tar xzf - -C {}", shell_q(tar_parent))
     };
@@ -741,8 +761,8 @@ pub async fn install_remote_skills_from_zip_generic(
     use crate::services::skill::SkillService;
 
     let zip_path = Path::new(zip_path);
-    let temp_guard = SkillService::extract_local_zip(zip_path)
-        .map_err(|e| format!("解压 ZIP 失败: {e}"))?;
+    let temp_guard =
+        SkillService::extract_local_zip(zip_path).map_err(|e| format!("解压 ZIP 失败: {e}"))?;
     let temp_dir = temp_guard.path().to_path_buf();
 
     let skill_dirs = SkillService::scan_skills_in_dir(&temp_dir)
@@ -768,18 +788,16 @@ pub async fn install_remote_skills_from_zip_generic(
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        let install_name = if skill_dir == &temp_dir
-            || dir_name.is_empty()
-            || dir_name.starts_with('.')
-        {
-            zip_stem
-                .as_deref()
-                .map(|s| sanitize_name(s))
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| "skill".to_string())
-        } else {
-            sanitize_name(&dir_name)
-        };
+        let install_name =
+            if skill_dir == &temp_dir || dir_name.is_empty() || dir_name.starts_with('.') {
+                zip_stem
+                    .as_deref()
+                    .map(|s| sanitize_name(s))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "skill".to_string())
+            } else {
+                sanitize_name(&dir_name)
+            };
         if install_name.is_empty() {
             continue;
         }
@@ -835,7 +853,10 @@ pub(crate) async fn read_skill_md_meta_static<F: FileOps>(
     let content = content.trim_start_matches('\u{feff}');
     let parts: Vec<&str> = content.splitn(3, "---").collect();
     if parts.len() < 3 {
-        log::warn!("[remote-skill] SKILL.md 无 YAML frontmatter: {md_path} (parts={})", parts.len());
+        log::warn!(
+            "[remote-skill] SKILL.md 无 YAML frontmatter: {md_path} (parts={})",
+            parts.len()
+        );
         return (None, None);
     }
     let front_matter = parts[1].trim();
@@ -977,8 +998,8 @@ pub async fn update_remote_skill_impl<F: FileOps>(
     write_remote_skills_json(fs, root, &new_records).await?;
 
     // 8. 同步各已启用 app 的链接（symlink 或 copy，取决于设置）。
-    let use_copy = crate::settings::get_skill_sync_method()
-        == crate::services::skill::SyncMethod::Copy;
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
     sync_remote_skill_links(
         channel,
         container,
@@ -1034,23 +1055,26 @@ pub async fn check_remote_skill_updates_impl<F: FileOps>(
             repo_name: name,
             repo_branch: branch,
         };
-        let (_temp_guard, _canonical, source_dir, _used_branch) =
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(60),
-                service.download_and_resolve_skill_source(&discoverable),
-            )
-            .await
-            {
-                Ok(Ok(result)) => result,
-                Ok(Err(e)) => {
-                    log::warn!("检查远端更新时下载 {}/{} 失败: {e}", record.name, record.directory);
-                    continue;
-                }
-                Err(_) => {
-                    log::warn!("检查远端更新时下载 {} 超时", record.name);
-                    continue;
-                }
-            };
+        let (_temp_guard, _canonical, source_dir, _used_branch) = match tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            service.download_and_resolve_skill_source(&discoverable),
+        )
+        .await
+        {
+            Ok(Ok(result)) => result,
+            Ok(Err(e)) => {
+                log::warn!(
+                    "检查远端更新时下载 {}/{} 失败: {e}",
+                    record.name,
+                    record.directory
+                );
+                continue;
+            }
+            Err(_) => {
+                log::warn!("检查远端更新时下载 {} 超时", record.name);
+                continue;
+            }
+        };
         let remote_hash = match SkillService::compute_dir_hash(&source_dir) {
             Ok(h) => h,
             Err(_) => continue,
@@ -1109,7 +1133,10 @@ mod tests {
     #[test]
     fn app_skills_rel_maps_known_apps() {
         assert_eq!(app_skills_rel("claude"), Some(".claude/skills"));
-        assert_eq!(app_skills_rel("openclaw"), Some(".openclaw/workspace/skills"));
+        assert_eq!(
+            app_skills_rel("openclaw"),
+            Some(".openclaw/workspace/skills")
+        );
         assert_eq!(app_skills_rel("hermes"), Some(".hermes/skills"));
         assert_eq!(app_skills_rel("nope"), None);
     }
@@ -1142,10 +1169,9 @@ mod tests {
     fn apply_skill_toggles_collects_success_and_failure() {
         let mut records = vec![record("id-a", "dir-a"), record("id-b", "dir-b")];
         let ids = vec!["id-a".to_string(), "missing".to_string()];
-        let (result, scripts) = apply_skill_toggles(
-            &mut records, &ids, "claude", true, ROOT, SSOT, false,
-        )
-        .expect("apply");
+        let (result, scripts) =
+            apply_skill_toggles(&mut records, &ids, "claude", true, ROOT, SSOT, false)
+                .expect("apply");
 
         assert_eq!(result.succeeded, vec!["id-a"]);
         assert_eq!(result.failed.len(), 1);

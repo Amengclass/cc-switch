@@ -59,7 +59,11 @@ pub async fn write_remote_text_atomic(
     content: &str,
 ) -> Result<(), String> {
     let tmp = format!("{path}.ccswitch.tmp");
-    if let Some(parent) = path.rsplit_once('/').map(|(d, _)| d).filter(|d| !d.is_empty()) {
+    if let Some(parent) = path
+        .rsplit_once('/')
+        .map(|(d, _)| d)
+        .filter(|d| !d.is_empty())
+    {
         ensure_remote_dir(sftp, parent).await?;
     }
     // 注意：不能用 `sftp.write()`（内部只有 WRITE 标志，文件不存在会报 NoSuchFile），

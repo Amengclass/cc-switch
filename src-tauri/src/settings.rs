@@ -1109,7 +1109,9 @@ pub fn get_effective_current_provider(
 // ===== 悬浮窗设置管理函数 =====
 
 /// 保存悬浮球位置；传 `None` 清除（回到默认位置）
-pub fn set_floating_window_position(position: Option<FloatingWindowPosition>) -> Result<(), AppError> {
+pub fn set_floating_window_position(
+    position: Option<FloatingWindowPosition>,
+) -> Result<(), AppError> {
     mutate_settings(|settings| {
         settings.floating_window_position = position;
     })

@@ -363,7 +363,10 @@ pub(crate) fn assemble_opencode_messages(
         let message_id = part.get("message_id").and_then(Value::as_str);
         let data = part.get("data").and_then(Value::as_str);
         if let (Some(id), Some(data)) = (message_id, data) {
-            parts_map.entry(id.to_string()).or_default().push(data.to_string());
+            parts_map
+                .entry(id.to_string())
+                .or_default()
+                .push(data.to_string());
         }
     }
 

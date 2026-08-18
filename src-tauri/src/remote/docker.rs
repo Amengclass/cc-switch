@@ -29,13 +29,11 @@ impl<'a> RemoteTarget<'a> {
         container: Option<&str>,
     ) -> Result<Self, String> {
         match container {
-            Some(c) if c.trim().is_empty() => Ok(RemoteTarget::Sftp(
-                crate::fsops::RemoteSftpFileOps { sftp },
-            )),
+            Some(c) if c.trim().is_empty() => {
+                Ok(RemoteTarget::Sftp(crate::fsops::RemoteSftpFileOps { sftp }))
+            }
             Some(c) => Ok(RemoteTarget::Docker(DockerExecFileOps::new(channel, c)?)),
-            None => Ok(RemoteTarget::Sftp(crate::fsops::RemoteSftpFileOps {
-                sftp,
-            })),
+            None => Ok(RemoteTarget::Sftp(crate::fsops::RemoteSftpFileOps { sftp })),
         }
     }
 
@@ -144,7 +142,15 @@ impl<'a> DockerExecFileOps<'a> {
     }
 
     async fn exec(&self, shell_cmd: &str) -> Result<String, String> {
-        exec_command(self.channel, &format!("docker exec {} sh -c {}", self.container, shell_quote(shell_cmd))).await
+        exec_command(
+            self.channel,
+            &format!(
+                "docker exec {} sh -c {}",
+                self.container,
+                shell_quote(shell_cmd)
+            ),
+        )
+        .await
     }
 
     /// 将二进制数据原子写入容器内文件（base64 编码 → stdin 管道 → 临时文件 → mv）。
@@ -170,12 +176,9 @@ impl<'a> DockerExecFileOps<'a> {
             self.container,
             shell_quote(&script),
         );
-        let _ = crate::remote::connection::exec_command_with_stdin(
-            self.channel,
-            &cmd,
-            b64.as_bytes(),
-        )
-        .await?;
+        let _ =
+            crate::remote::connection::exec_command_with_stdin(self.channel, &cmd, b64.as_bytes())
+                .await?;
         Ok(())
     }
 }
@@ -301,7 +304,9 @@ impl FileOps for DockerExecFileOps<'_> {
 
     async fn read_text_optional(&self, path: &str) -> Result<Option<String>, String> {
         // 直接 cat，文件不存在时返回空（省一次 test -e 的 round-trip）
-        let out = self.exec(&format!("cat {} 2>/dev/null", shell_quote(path))).await;
+        let out = self
+            .exec(&format!("cat {} 2>/dev/null", shell_quote(path)))
+            .await;
         match out {
             Ok(text) => Ok(if text.is_empty() { None } else { Some(text) }),
             Err(_) => Ok(None),
@@ -315,7 +320,9 @@ impl FileOps for DockerExecFileOps<'_> {
 }
 
 /// 通过 `docker ps` 列出容器（id + 名称），供前端选择。
-pub async fn list_docker_containers(channel: &Handle<RemoteHandler>) -> Result<Vec<String>, String> {
+pub async fn list_docker_containers(
+    channel: &Handle<RemoteHandler>,
+) -> Result<Vec<String>, String> {
     // --format 输出 "id\tname"；name 取最后一个（--format '{{.Names}}' 已是逗号分隔，取第一个即可）
     let out = exec_command(channel, "docker ps --format '{{.ID}} {{.Names}}'").await?;
     let mut containers = Vec::new();

@@ -106,10 +106,10 @@ fn migrate_from_json(db: &Database) -> Result<(), String> {
     if !path.exists() {
         return Ok(());
     }
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("读取旧当前供应商文件失败: {e}"))?;
-    let raw: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| format!("解析旧当前供应商文件失败: {e}"))?;
+    let text =
+        std::fs::read_to_string(&path).map_err(|e| format!("读取旧当前供应商文件失败: {e}"))?;
+    let raw: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("解析旧当前供应商文件失败: {e}"))?;
 
     // 兼容旧格式：host -> "provider_id"（历史版本只有 claude 远程）
     if let Some(obj) = raw.as_object() {
@@ -125,8 +125,8 @@ fn migrate_from_json(db: &Database) -> Result<(), String> {
         }
     }
 
-    let map: HashMap<String, HashMap<String, String>> = serde_json::from_value(raw)
-        .map_err(|e| format!("解析旧当前供应商文件失败: {e}"))?;
+    let map: HashMap<String, HashMap<String, String>> =
+        serde_json::from_value(raw).map_err(|e| format!("解析旧当前供应商文件失败: {e}"))?;
     for (host, apps) in map {
         for (app, id) in apps {
             db.save_remote_current_provider(&host, &app, &id, None)

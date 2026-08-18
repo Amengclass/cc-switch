@@ -57,8 +57,7 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
         .unwrap_or(false);
     if remote_has_route {
         return Err(
-            "仍有远端主机开启了远端接管，请先在对应主机关闭远端接管后再停止本地路由。"
-                .to_string(),
+            "仍有远端主机开启了远端接管，请先在对应主机关闭远端接管后再停止本地路由。".to_string(),
         );
     }
 

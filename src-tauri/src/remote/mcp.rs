@@ -172,8 +172,9 @@ pub async fn read_remote_mcp_ssot<F: FileOps>(
 ) -> Result<IndexMap<String, RemoteMcpServer>, String> {
     let path = remote_mcp_ssot_path(root);
     match fs.read_text_optional(&path).await? {
-        Some(text) if !text.trim().is_empty() => serde_json::from_str(&text)
-            .map_err(|e| format!("解析远端 mcp.json 失败 {path}: {e}")),
+        Some(text) if !text.trim().is_empty() => {
+            serde_json::from_str(&text).map_err(|e| format!("解析远端 mcp.json 失败 {path}: {e}"))
+        }
         _ => Ok(IndexMap::new()),
     }
 }
@@ -184,9 +185,10 @@ pub async fn write_remote_mcp_ssot<F: FileOps>(
     root: &str,
     map: &IndexMap<String, RemoteMcpServer>,
 ) -> Result<(), String> {
-    let text = serde_json::to_string_pretty(map)
-        .map_err(|e| format!("序列化远端 mcp.json 失败: {e}"))?;
-    fs.write_text_atomic(&remote_mcp_ssot_path(root), &text).await
+    let text =
+        serde_json::to_string_pretty(map).map_err(|e| format!("序列化远端 mcp.json 失败: {e}"))?;
+    fs.write_text_atomic(&remote_mcp_ssot_path(root), &text)
+        .await
 }
 
 // ========================================================================
@@ -335,10 +337,7 @@ pub async fn reproject_remote_mcp_for_app<F: FileOps>(
 // 从远端各 CLI live 配置导入到 SSOT（对齐本机 importFromApps）
 // ========================================================================
 
-pub async fn import_remote_mcp_from_apps<F: FileOps>(
-    fs: &F,
-    root: &str,
-) -> Result<usize, String> {
+pub async fn import_remote_mcp_from_apps<F: FileOps>(fs: &F, root: &str) -> Result<usize, String> {
     let mut map = read_remote_mcp_ssot(fs, root).await?;
     let mut new_count = 0;
 
@@ -420,9 +419,7 @@ async fn sync_mcp_to_app_many<F: FileOps>(
         return Ok(());
     }
     match app {
-        "claude" => {
-            json_upsert_many(fs, &remote_claude_json_path(root), "mcpServers", items).await
-        }
+        "claude" => json_upsert_many(fs, &remote_claude_json_path(root), "mcpServers", items).await,
         "codex" => toml_upsert_many(fs, &codex_config_path(root), items).await,
         "gemini" => json_upsert_many(fs, &gemini_settings_path(root), "mcpServers", items).await,
         "grokbuild" => toml_upsert_many(fs, &grok_config_path(root), items).await,
@@ -697,11 +694,7 @@ fn upsert_toml_table(
     Ok(())
 }
 
-async fn toml_remove_many<F: FileOps>(
-    fs: &F,
-    path: &str,
-    ids: &[String],
-) -> Result<(), String> {
+async fn toml_remove_many<F: FileOps>(fs: &F, path: &str, ids: &[String]) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -716,7 +709,9 @@ async fn toml_remove_many<F: FileOps>(
         Err(_) => return Ok(()), // 解析失败，无法删除不存在内容
     };
     let mut removed_any = false;
-    if let Some(servers) = doc.get_mut("mcp_servers").and_then(toml_edit::Item::as_table_like_mut)
+    if let Some(servers) = doc
+        .get_mut("mcp_servers")
+        .and_then(toml_edit::Item::as_table_like_mut)
     {
         for id in ids {
             removed_any |= servers.remove(id).is_some();
@@ -752,7 +747,10 @@ async fn hermes_upsert_many<F: FileOps>(
         .ok_or_else(|| "Hermes config.yaml 根必须是映射".to_string())?;
     let servers_key = serde_yaml::Value::String("mcp_servers".to_string());
     if !map.contains_key(&servers_key) {
-        map.insert(servers_key.clone(), serde_yaml::Value::Mapping(Default::default()));
+        map.insert(
+            servers_key.clone(),
+            serde_yaml::Value::Mapping(Default::default()),
+        );
     }
     let servers = map
         .get_mut(&servers_key)
@@ -771,15 +769,12 @@ async fn hermes_upsert_many<F: FileOps>(
         servers.insert(id_key, json_to_yaml(&merged)?);
     }
 
-    let new_text = serde_yaml::to_string(&y).map_err(|e| format!("序列化 Hermes config.yaml 失败: {e}"))?;
+    let new_text =
+        serde_yaml::to_string(&y).map_err(|e| format!("序列化 Hermes config.yaml 失败: {e}"))?;
     fs.write_text_atomic(path, &new_text).await
 }
 
-async fn hermes_remove_many<F: FileOps>(
-    fs: &F,
-    path: &str,
-    ids: &[String],
-) -> Result<(), String> {
+async fn hermes_remove_many<F: FileOps>(fs: &F, path: &str, ids: &[String]) -> Result<(), String> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -885,7 +880,10 @@ async fn read_toml_mcp_map<F: FileOps>(
         .parse()
         .map_err(|e| format!("解析远端 TOML 失败 {path}: {e}"))?;
     let mut out = IndexMap::new();
-    let Some(table) = doc.get("mcp_servers").and_then(toml_edit::Item::as_table_like) else {
+    let Some(table) = doc
+        .get("mcp_servers")
+        .and_then(toml_edit::Item::as_table_like)
+    else {
         return Ok(out);
     };
     for (k, item) in table.iter() {
@@ -983,7 +981,9 @@ mod tests {
         for id in ["a", "b", "c"] {
             map.insert(id.to_string(), seed_server(id));
         }
-        write_remote_mcp_ssot(&fs, &root, &map).await.expect("seed ssot");
+        write_remote_mcp_ssot(&fs, &root, &map)
+            .await
+            .expect("seed ssot");
         // claude 的 app_installed 依赖 ~/.claude.json 或 ~/.claude 目录存在
         fs.write_text_atomic(&remote_claude_json_path(&root), "{}")
             .await
@@ -1097,10 +1097,9 @@ mod tests {
         let root = seed(&tmp).await;
         let fs = LocalFileOps;
 
-        let result =
-            bulk_toggle_remote_mcp_app(&fs, &root, &[], "claude", true)
-                .await
-                .expect("bulk empty");
+        let result = bulk_toggle_remote_mcp_app(&fs, &root, &[], "claude", true)
+            .await
+            .expect("bulk empty");
         assert!(result.succeeded.is_empty());
         assert!(result.failed.is_empty());
 

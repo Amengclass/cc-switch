@@ -1358,15 +1358,23 @@ fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
     let fs_entry = servers
         .get("openclaw-fs")
         .expect("stdio server present in mcp.servers");
-    assert_eq!(fs_entry.get("command").and_then(|v| v.as_str()), Some("npx"));
+    assert_eq!(
+        fs_entry.get("command").and_then(|v| v.as_str()),
+        Some("npx")
+    );
     assert_eq!(
         fs_entry.get("args").and_then(|v| v.as_array()),
-        Some(&serde_json::json!(["-y", "@modelcontextprotocol/server-filesystem"])
-            .as_array()
-            .cloned()
-            .unwrap())
+        Some(
+            &serde_json::json!(["-y", "@modelcontextprotocol/server-filesystem"])
+                .as_array()
+                .cloned()
+                .unwrap()
+        )
     );
-    assert!(fs_entry.get("type").is_none(), "OpenClaw format has no type field");
+    assert!(
+        fs_entry.get("type").is_none(),
+        "OpenClaw format has no type field"
+    );
 
     // http 条目：url + transport（streamable-http）
     let http_entry = servers
@@ -1395,11 +1403,7 @@ fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
     assert!(servers.contains_key("openclaw-fs"));
     assert!(servers.contains_key("openclaw-http"));
     assert!(
-        servers
-            .get("openclaw-fs")
-            .expect("fs server")
-            .apps
-            .openclaw,
+        servers.get("openclaw-fs").expect("fs server").apps.openclaw,
         "fs server openclaw app enabled after import"
     );
     let fs_server = servers.get("openclaw-fs").expect("fs server");

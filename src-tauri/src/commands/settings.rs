@@ -78,8 +78,7 @@ pub async fn save_settings(
     let unify_codex_changed =
         merged.unify_codex_session_history != existing.unify_codex_session_history;
     let unify_codex_enabled = merged.unify_codex_session_history;
-    let floating_changed =
-        merged.enable_floating_window != existing.enable_floating_window;
+    let floating_changed = merged.enable_floating_window != existing.enable_floating_window;
     let floating_enabled = merged.enable_floating_window;
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
 

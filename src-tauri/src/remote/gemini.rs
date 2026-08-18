@@ -101,7 +101,10 @@ pub async fn apply_gemini_provider_settings(
     let mut security = merged.get("security").cloned().unwrap_or_else(|| json!({}));
     let mut auth = security.get("auth").cloned().unwrap_or_else(|| json!({}));
     if let Some(auth_obj) = auth.as_object_mut() {
-        auth_obj.insert("selectedType".to_string(), Value::String(selected.to_string()));
+        auth_obj.insert(
+            "selectedType".to_string(),
+            Value::String(selected.to_string()),
+        );
     }
     security["auth"] = auth;
     merged["security"] = security;

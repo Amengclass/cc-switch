@@ -73,8 +73,8 @@ pub async fn write_remote_providers_ssot<F: FileOps>(
     app: &str,
     ssot: &RemoteProvidersSsot,
 ) -> Result<(), String> {
-    let value = serde_json::to_value(ssot)
-        .map_err(|e| format!("序列化 providers SSOT 失败: {e}"))?;
+    let value =
+        serde_json::to_value(ssot).map_err(|e| format!("序列化 providers SSOT 失败: {e}"))?;
     let sorted = crate::config::sort_json_keys(&value);
     let json = serde_json::to_string_pretty(&sorted)
         .map_err(|e| format!("序列化 providers SSOT 失败: {e}"))?;
@@ -144,9 +144,10 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         let mut ssot = read_remote_providers_ssot(fs, root, app).await?;
         // 清理历史导入的占位 provider（路由残留，非真实供应商）——防止关路由后
         // 面板仍显示隧道 URL。
-        let had_placeholder = ssot.providers.iter().any(|p| {
-            crate::proxy::remote_route::is_route_placeholder_settings(&p.settings_config)
-        });
+        let had_placeholder = ssot
+            .providers
+            .iter()
+            .any(|p| crate::proxy::remote_route::is_route_placeholder_settings(&p.settings_config));
         if had_placeholder {
             ssot.providers.retain(|p| {
                 !crate::proxy::remote_route::is_route_placeholder_settings(&p.settings_config)
@@ -159,9 +160,10 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         // live 当前生效配置已被 SSOT 里**任意一条**完全代表（含用户添加的
         // 供应商，而非仅 id="default"）→ 幂等跳过，避免把「刚应用过的配置」
         // 又重复导入出一条 default。
-        let already_fresh = ssot.providers.iter().any(|p| {
-            p.settings_config == default.settings_config
-        });
+        let already_fresh = ssot
+            .providers
+            .iter()
+            .any(|p| p.settings_config == default.settings_config);
         if already_fresh {
             return Ok((0, Vec::new()));
         }
@@ -190,10 +192,7 @@ async fn parse_remote_live_providers<F: FileOps>(
                 return Ok(out);
             };
             let value = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}));
-            let Some(providers_obj) = value
-                .get("provider")
-                .and_then(Value::as_object)
-            else {
+            let Some(providers_obj) = value.get("provider").and_then(Value::as_object) else {
                 return Ok(out);
             };
             for (id, config_value) in providers_obj {
@@ -201,16 +200,11 @@ async fn parse_remote_live_providers<F: FileOps>(
                     config_value.clone(),
                 ) {
                     Ok(config) => {
-                        let settings_config = serde_json::to_value(&config)
-                            .unwrap_or_else(|_| config_value.clone());
-                        let display_name =
-                            config.name.clone().unwrap_or_else(|| id.clone());
-                        let mut p = Provider::with_id(
-                            id.clone(),
-                            display_name,
-                            settings_config,
-                            None,
-                        );
+                        let settings_config =
+                            serde_json::to_value(&config).unwrap_or_else(|_| config_value.clone());
+                        let display_name = config.name.clone().unwrap_or_else(|| id.clone());
+                        let mut p =
+                            Provider::with_id(id.clone(), display_name, settings_config, None);
                         p.meta = Some(ProviderMeta {
                             live_config_managed: Some(true),
                             ..Default::default()
@@ -245,19 +239,15 @@ async fn parse_remote_live_providers<F: FileOps>(
                         if config.models.is_empty() {
                             continue;
                         }
-                        let settings_config = serde_json::to_value(&config)
-                            .unwrap_or_else(|_| config_value.clone());
+                        let settings_config =
+                            serde_json::to_value(&config).unwrap_or_else(|_| config_value.clone());
                         let display_name = config
                             .models
                             .first()
                             .and_then(|m| m.name.clone())
                             .unwrap_or_else(|| id.clone());
-                        let mut p = Provider::with_id(
-                            id.clone(),
-                            display_name,
-                            settings_config,
-                            None,
-                        );
+                        let mut p =
+                            Provider::with_id(id.clone(), display_name, settings_config, None);
                         p.meta = Some(ProviderMeta {
                             live_config_managed: Some(true),
                             ..Default::default()
@@ -286,12 +276,8 @@ async fn parse_remote_live_providers<F: FileOps>(
                     if name.trim().is_empty() {
                         continue;
                     }
-                    let mut p = Provider::with_id(
-                        name.to_string(),
-                        name.to_string(),
-                        item.clone(),
-                        None,
-                    );
+                    let mut p =
+                        Provider::with_id(name.to_string(), name.to_string(), item.clone(), None);
                     p.meta = Some(ProviderMeta {
                         live_config_managed: Some(true),
                         ..Default::default()
@@ -306,10 +292,7 @@ async fn parse_remote_live_providers<F: FileOps>(
                 return Ok(out);
             };
             let value = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}));
-            let Some(providers_obj) = value
-                .get("providers")
-                .and_then(Value::as_object)
-            else {
+            let Some(providers_obj) = value.get("providers").and_then(Value::as_object) else {
                 return Ok(out);
             };
             for (id, config_value) in providers_obj {
@@ -328,12 +311,7 @@ async fn parse_remote_live_providers<F: FileOps>(
                     .filter(|n| !n.trim().is_empty())
                     .unwrap_or(id)
                     .to_string();
-                let mut p = Provider::with_id(
-                    id.clone(),
-                    display_name,
-                    config_value.clone(),
-                    None,
-                );
+                let mut p = Provider::with_id(id.clone(), display_name, config_value.clone(), None);
                 p.meta = Some(ProviderMeta {
                     live_config_managed: Some(true),
                     ..Default::default()
@@ -480,7 +458,10 @@ async fn detect_container_route_base(
         return Ok(None); // 容器不存在或 inspect 失败
     }
     if mode == "host" {
-        return Ok(Some((crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR.to_string(), String::new())));
+        return Ok(Some((
+            crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR.to_string(),
+            String::new(),
+        )));
     }
     // 2. 非 host：从网络定义拿网关（bridge 网桥 / 自定义网络）。
     //    `default` 与 `bridge` 同义（见 resolve_container_network），否则会被当成
@@ -497,9 +478,7 @@ async fn detect_container_route_base(
     let gw = gw.trim();
     log::debug!("[remote] 容器 {container} 网络 {net} 网关: {gw:?}");
     if gw.is_empty() || !gw.contains('.') {
-        log::warn!(
-            "[remote] 容器 {container} 网络 {net} 网关探测为空/非法（{gw:?}），按直连写入"
-        );
+        log::warn!("[remote] 容器 {container} 网络 {net} 网关探测为空/非法（{gw:?}），按直连写入");
         return Ok(None);
     }
     // 3. 拿容器自身 IP（per-container DNAT 的源限定）
@@ -516,16 +495,12 @@ async fn detect_container_route_base(
     let ip = ip.split_whitespace().next().unwrap_or("").to_string();
     log::debug!("[remote] 容器 {container} IP: {ip:?}");
     if ip.is_empty() || !ip.contains('.') {
-        log::warn!(
-            "[remote] 容器 {container} IP 探测为空/非法（{ip:?}），按直连写入"
-        );
+        log::warn!("[remote] 容器 {container} IP 探测为空/非法（{ip:?}），按直连写入");
         return Ok(None);
     }
     // 4. 下发 per-container DNAT（幂等），让该容器经网关访问隧道
     ensure_container_dnat(session, &ip, port).await?;
-    log::debug!(
-        "[remote] 容器 {container} 走本机路由就绪：网关 {gw} 容器IP {ip}（DNAT 已下发）"
-    );
+    log::debug!("[remote] 容器 {container} 走本机路由就绪：网关 {gw} 容器IP {ip}（DNAT 已下发）");
     Ok(Some((gw.to_string(), ip.to_string())))
 }
 
@@ -679,11 +654,11 @@ pub async fn apply_remote_provider_to_live(
                 let obj = sanitized
                     .as_object_mut()
                     .ok_or_else(|| "sanitized settings 不是对象".to_string())?;
-                let env = obj
-                    .entry("env")
-                    .or_insert_with(|| serde_json::json!({}));
+                let env = obj.entry("env").or_insert_with(|| serde_json::json!({}));
                 if let Some(e) = env.as_object_mut() {
-                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
+                    let base = route_base
+                        .as_deref()
+                        .unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     e.insert(
                         "ANTHROPIC_BASE_URL".to_string(),
                         serde_json::json!(format!("http://{base}:{port}")),
@@ -712,7 +687,9 @@ pub async fn apply_remote_provider_to_live(
                 // 复用本机同一变换 apply_codex_official_proxy_route，保持与本机一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
+                    let base = route_base
+                        .as_deref()
+                        .unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::codex_config::apply_codex_official_proxy_route(
                         config,
                         &format!("http://{base}:{port}/v1"),
@@ -743,7 +720,9 @@ pub async fn apply_remote_provider_to_live(
                 // api_key 占位 + api_backend=responses），与本机产物逐字段一致。
                 let mut s = provider.settings_config.clone();
                 if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base.as_deref().unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
+                    let base = route_base
+                        .as_deref()
+                        .unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
                     let routed = crate::grok_config::apply_proxy_takeover(
                         config,
                         &format!("http://{base}:{port}/grokbuild/v1"),
@@ -1101,7 +1080,8 @@ mod tests {
         let fs = LocalFileOps;
         // 已有候选池（自定义供应商），但无 default
         let mut ssot = RemoteProvidersSsot::default();
-        ssot.providers.push(sample_provider("my-vendor", "My Vendor"));
+        ssot.providers
+            .push(sample_provider("my-vendor", "My Vendor"));
         write_remote_providers_ssot(&fs, &root, "claude", &ssot)
             .await
             .expect("seed");
@@ -1123,7 +1103,7 @@ mod tests {
             .expect("read");
         assert!(read.providers.iter().any(|p| p.id == "default"));
         assert!(read.providers.iter().any(|p| p.id == "my-vendor")); // 候选池保留
-        // 已有候选池时不动 current 标记（空库首导才设 default 为 current）
+                                                                     // 已有候选池时不动 current 标记（空库首导才设 default 为 current）
         assert_eq!(read.current_provider_id.as_deref(), None);
 
         // 幂等：内容一致不再写

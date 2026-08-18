@@ -110,7 +110,8 @@ pub async fn clean_remote_env_conflicts<F: FileOps>(
     for (file, mut lines) in by_file {
         // 备份原文件
         if let Some(original) = fs.read_text_optional(&file).await? {
-            fs.write_text_atomic(&format!("{file}.bak"), &original).await?;
+            fs.write_text_atomic(&format!("{file}.bak"), &original)
+                .await?;
         }
 
         let content = match fs.read_text_optional(&file).await? {

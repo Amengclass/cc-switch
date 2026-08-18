@@ -168,7 +168,10 @@ impl StreamCheckService {
     ///
     /// `pub(crate)`：远端连通性测试（`test_remote_provider_connection`）复用同一
     /// 提取逻辑，保证远端探测的目标地址与本机测试一致。
-    pub(crate) fn resolve_base_url(app_type: &AppType, provider: &Provider) -> Result<String, AppError> {
+    pub(crate) fn resolve_base_url(
+        app_type: &AppType,
+        provider: &Provider,
+    ) -> Result<String, AppError> {
         if provider.category.as_deref() == Some("official") {
             return Err(AppError::Message(
                 "Official providers do not expose a reachability-check target".to_string(),

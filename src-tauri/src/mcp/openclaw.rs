@@ -77,7 +77,11 @@ pub fn convert_to_openclaw_format(spec: &Value) -> Result<Value, AppError> {
             }
             result.insert(
                 "transport".into(),
-                serde_json::json!(if typ == "sse" { "sse" } else { "streamable-http" }),
+                serde_json::json!(if typ == "sse" {
+                    "sse"
+                } else {
+                    "streamable-http"
+                }),
             );
         }
         _ => {
@@ -124,7 +128,10 @@ pub fn convert_from_openclaw_format(id: &str, spec: &Value) -> Result<Value, App
         }
     } else if obj.contains_key("url") {
         // HTTP/SSE type
-        let transport = obj.get("transport").and_then(|v| v.as_str()).unwrap_or("sse");
+        let transport = obj
+            .get("transport")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sse");
         let typ = if transport == "streamable-http" {
             "http"
         } else {
