@@ -395,6 +395,12 @@
         "title": "成本定价",
         "description": "管理各模型 Token 计费规则"
       },
+      "quotaDisplay": {
+        "title": "套餐用量显示",
+        "description": "控制供应商卡片上套餐用量的显示格式",
+        "expanded": "展开模式",
+        "expandedDescription": "开启后：套餐用量在卡片下方独立面板展开显示（含总额/已用/剩余/重置时间）；关闭时：套餐用量直接嵌入供应商卡片（如「5小时: 5%」）"
+      },
       "globalProxy": {
         "title": "全局出站代理",
         "description": "配置 CC Switch 访问外部 API 时使用的代理"
@@ -1139,6 +1145,8 @@
     "disable": "点击禁用（操作排除）",
     "switchTooltipEnabled": "启用中：点击开关禁用（操作排除，可随时恢复）",
     "switchTooltipDisabled": "已禁用此主机：点击开关启用（恢复可操作）",
+    "statusEnabled": "启用中",
+    "statusDisabled": "已禁用",
     "test": "测试连接",
     "testing": "测试中…",
     "testingShort": "测试中…",

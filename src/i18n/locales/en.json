@@ -395,6 +395,12 @@
         "title": "Cost Pricing",
         "description": "Manage token pricing rules for each model"
       },
+      "quotaDisplay": {
+        "title": "Quota Display",
+        "description": "Control how quota usage is displayed on provider cards",
+        "expanded": "Expanded Mode",
+        "expandedDescription": "When enabled: quota usage displays in a separate panel below the card (with total/used/remaining/reset time); when disabled: quota is embedded inline (e.g. '5h: 5%')"
+      },
       "globalProxy": {
         "title": "Global Outbound Proxy",
         "description": "Configure proxy for CC Switch to access external APIs"
@@ -1139,6 +1145,8 @@
     "disable": "Click to disable (excluded from operations)",
     "switchTooltipEnabled": "Enabled: click the switch to disable (excluded from operations, can be restored anytime)",
     "switchTooltipDisabled": "This host is disabled: click the switch to enable (restore operations)",
+    "statusEnabled": "Enabled",
+    "statusDisabled": "Disabled",
     "test": "Test Connection",
     "testing": "Testing…",
     "testingShort": "Testing…",

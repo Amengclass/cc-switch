@@ -395,6 +395,12 @@
         "title": "コスト計算",
         "description": "各モデルのトークン料金ルールを管理"
       },
+      "quotaDisplay": {
+        "title": "クォータ表示",
+        "description": "プロバイダーカード上のクォータ使用量の表示形式を制御",
+        "expanded": "展開モード",
+        "expandedDescription": "有効にすると：クォータ使用量がカード下のパネルに展開表示（合計/使用済み/残り/リセット時間）；無効にすると：クォータがカード内にインライン表示（例：「5h: 5%」）"
+      },
       "globalProxy": {
         "title": "グローバル送信プロキシ",
         "description": "CC Switch が外部 API にアクセスする際のプロキシを設定"
@@ -1139,6 +1145,8 @@
     "disable": "クリックして無効化（操作から除外）",
     "switchTooltipEnabled": "有効：スイッチをクリックすると無効化（操作から除外、いつでも復元可）",
     "switchTooltipDisabled": "このホストは無効です：スイッチをクリックすると有効化（操作を復元）",
+    "statusEnabled": "有効",
+    "statusDisabled": "無効",
     "test": "接続テスト",
     "testing": "テスト中…",
     "testingShort": "テスト中…",

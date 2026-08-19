@@ -530,12 +530,12 @@ export const RemoteHostsPanel = React.forwardRef<
                             {host.disabled ? (
                               <>
                                 <Ban className="h-3 w-3" />
-                                已禁用
+                                {t("remote.statusDisabled", { defaultValue: "已禁用" })}
                               </>
                             ) : (
                               <>
                                 <CircleDot className="h-3 w-3" />
-                                启用中
+                                {t("remote.statusEnabled", { defaultValue: "启用中" })}
                               </>
                             )}
                           </span>
