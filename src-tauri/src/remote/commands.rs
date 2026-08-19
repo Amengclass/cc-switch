@@ -1998,6 +1998,115 @@ pub async fn list_remote_sessions_detailed(
     })
 }
 
+/// 列出远端所有 app 的会话（对齐本机 sessionsApi.list()）。
+/// 一次连接，并行扫描 8 个 app，合并返回。任一 app 失败不阻塞其他。
+#[tauri::command]
+pub async fn list_remote_sessions_all(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let home = host.default_home();
+
+    // 6 个文件源 app，并行扫描
+    let file_apps: Vec<(&str, String)> = vec![
+        ("claude", format!("{home}/.claude/projects")),
+        ("grokbuild", format!("{home}/.grok/sessions")),
+        ("codex", format!("{home}/.codex")),
+        ("gemini", format!("{home}/.gemini/tmp")),
+        ("openclaw", format!("{home}/.openclaw/agents")),
+        ("pi", format!("{home}/.pi/agent/sessions")),
+    ];
+
+    let mut all_sessions: Vec<crate::session_manager::SessionMeta> = Vec::new();
+
+    // 文件源：逐个扫描（SFTP 复用同一连接）
+    for (app, root) in &file_apps {
+        let sessions = match *app {
+            "claude" => {
+                crate::session_manager::providers::claude::scan_sessions_fs(&target, root).await
+            }
+            "grokbuild" => {
+                crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, root).await
+            }
+            "codex" => {
+                crate::session_manager::providers::codex::scan_sessions_fs(&target, root).await
+            }
+            "gemini" => {
+                crate::session_manager::providers::gemini::scan_sessions_fs(&target, root).await
+            }
+            "openclaw" => {
+                crate::session_manager::providers::openclaw::scan_sessions_fs(&target, root).await
+            }
+            "pi" => {
+                crate::session_manager::providers::pi::scan_sessions_fs(&target, root).await
+            }
+            _ => unreachable!(),
+        };
+        all_sessions.extend(sessions);
+    }
+
+    // 2 个 SQLite 源（hermes / opencode）
+    let hermes_db = format!("{home}/.hermes/state.db");
+    let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
+    let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
+    let opencode_sql = "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
+
+    if let Ok(helper) =
+        ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await
+    {
+        let sqlite_apps: Vec<(&str, &str, &str)> = vec![
+            ("hermes", &hermes_db, hermes_sql),
+            ("opencode", &opencode_db, opencode_sql),
+        ];
+        for (app, db, sql) in &sqlite_apps {
+            if let Ok(v) = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                db,
+                sql,
+                &[],
+            )
+            .await
+            {
+                let rows = v
+                    .get("rows")
+                    .and_then(Value::as_array)
+                    .cloned()
+                    .unwrap_or_default();
+                for row in rows {
+                    let meta = if *app == "hermes" {
+                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
+                            &row,
+                            &format!("sqlite:{db}"),
+                        )
+                    } else {
+                        crate::session_manager::providers::opencode::opencode_row_to_session_meta(
+                            &row, db,
+                        )
+                    };
+                    if let Some(m) = meta {
+                        all_sessions.push(m);
+                    }
+                }
+            }
+            // db 不存在 → 跳过，不报错
+        }
+    }
+
+    Ok(all_sessions)
+}
+
 /// 读取远端会话消息（复用本机各 provider 的纯解析；`app` 决定解析器）。
 #[tauri::command]
 pub async fn get_remote_session_messages(

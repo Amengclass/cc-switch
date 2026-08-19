@@ -22,7 +22,7 @@ import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import {
   getRemoteSessionMessages,
-  listRemoteSessionsDetailed,
+  listRemoteSessionsAll,
 } from "@/lib/api/remote";
 
 const sortProviders = (
@@ -311,7 +311,6 @@ export const useUsageQuery = (
 export const useSessionsQuery = (
   remoteTargetId?: string,
   remoteContainerId?: string,
-  appId?: string,
 ) => {
   return useQuery<SessionMeta[]>({
     queryKey: remoteTargetId
@@ -320,12 +319,11 @@ export const useSessionsQuery = (
           "remote",
           remoteTargetId,
           remoteContainerId ?? "__host__",
-          appId ?? "claude",
         ]
       : ["sessions"],
     queryFn: async () =>
       remoteTargetId
-        ? listRemoteSessionsDetailed(remoteTargetId, remoteContainerId, appId)
+        ? listRemoteSessionsAll(remoteTargetId, remoteContainerId)
         : sessionsApi.list(),
     staleTime: 30 * 1000,
   });

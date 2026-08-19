@@ -201,23 +201,11 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  // 远程会话支持全部 8 个 app：claude/grokbuild/codex/gemini/openclaw 为纯文件源，
-  // hermes/opencode 经远端 sqlite-helper 查 SQLite 主存储，pi 走 ~/.pi/sessions
-  const effectiveRemoteTargetId =
-    appId === "claude" ||
-    appId === "grokbuild" ||
-    appId === "codex" ||
-    appId === "gemini" ||
-    appId === "openclaw" ||
-    appId === "hermes" ||
-    appId === "opencode" ||
-    appId === "pi"
-      ? remoteTargetId
-      : undefined;
+  // 远程会话：一次拉取所有 app 的全量数据（对齐本机 sessionsApi.list()），
+  // providerFilter 客户端过滤
   const { data, isLoading, isFetching, refetch } = useSessionsQuery(
-    effectiveRemoteTargetId,
+    remoteTargetId,
     remoteContainerId,
-    appId,
   );
   const sessions = data ?? [];
   const piSessionDiscovery = useQuery({
@@ -364,7 +352,7 @@ export function SessionManagerPage({
       selectedSession?.providerId,
       selectedSession?.sourcePath,
       selectedSession?.sessionId,
-      effectiveRemoteTargetId,
+      remoteTargetId,
       remoteContainerId,
       appId,
     );
@@ -495,14 +483,14 @@ export function SessionManagerPage({
     }
 
     // 远端目标：逐个删除（走 FileOps 远端实现），再刷新远端会话缓存
-    if (effectiveRemoteTargetId) {
+    if (remoteTargetId) {
       setIsBatchDeleting(true);
       try {
         let deletedCount = 0;
         for (const target of targets) {
           try {
             await deleteRemoteSession(
-              effectiveRemoteTargetId,
+              remoteTargetId,
               target.sourcePath!,
               target.sessionId,
               remoteContainerId,
@@ -513,7 +501,7 @@ export function SessionManagerPage({
               queryKey: [
                 "sessionMessages",
                 "remote",
-                effectiveRemoteTargetId,
+                remoteTargetId,
                 remoteContainerId ?? "__host__",
                 target.sourcePath,
               ],

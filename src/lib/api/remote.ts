@@ -452,6 +452,17 @@ export async function listRemoteSessionsDetailed(
   });
 }
 
+/** 列出远端所有 app 的会话（对齐本机 sessionsApi.list()，全量返回） */
+export async function listRemoteSessionsAll(
+  hostId: string,
+  container?: string,
+): Promise<SessionMeta[]> {
+  return invoke<SessionMeta[]>("list_remote_sessions_all", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
 /** 读取远端会话消息（复用本机解析逻辑） */
 export async function getRemoteSessionMessages(
   hostId: string,
