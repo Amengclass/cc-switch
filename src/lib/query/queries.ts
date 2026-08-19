@@ -103,6 +103,10 @@ export const useSettingsQuery = (): UseQueryResult<Settings> => {
 export interface UseUsageQueryOptions {
   enabled?: boolean;
   autoQueryInterval?: number; // 自动查询间隔（分钟），0 表示禁用
+  /** 远端目标：提供 hostId 时余量查询改走远端 SSOT（见 queryRemote） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined） */
+  remoteContainerId?: string;
 }
 
 /** keep-last-good 判定所需的最小结果形状（UsageResult / SubscriptionQuota 都满足）。 */
@@ -251,7 +255,8 @@ export const useUsageQuery = (
   appId: AppId,
   options?: UseUsageQueryOptions,
 ) => {
-  const { enabled = true, autoQueryInterval = 0 } = options || {};
+  const { enabled = true, autoQueryInterval = 0, remoteTargetId, remoteContainerId } =
+    options || {};
 
   // 计算 staleTime：如果有自动刷新间隔，使用该间隔；否则默认 5 分钟
   // 这样可以避免切换 app 页面时重复触发查询
@@ -260,9 +265,22 @@ export const useUsageQuery = (
       ? autoQueryInterval * 60 * 1000 // 与刷新间隔保持一致
       : 5 * 60 * 1000; // 默认 5 分钟
 
+  // 远端目标：provider 来自远端 SSOT（providerId 是远端 SSOT 里的 id）。
+  // usage 缓存按 (remote, hostId, container, app, providerId) 隔离，调
+  // usageApi.queryRemote → query_remote_provider_usage（读远端 SSOT 分派）。
+  // 本机（无 remoteTargetId）保持原 queryKey 与原 queryApi.query，行为不变。
+  const isRemote = Boolean(remoteTargetId);
+  const queryKey = isRemote
+    ? usageKeys.scriptRemote(remoteTargetId!, appId, providerId, remoteContainerId)
+    : usageKeys.script(providerId, appId);
+  const queryFn = () =>
+    isRemote
+      ? usageApi.queryRemote(remoteTargetId!, remoteContainerId, providerId, appId)
+      : usageApi.query(providerId, appId);
+
   const query = useQuery<UsageResult>({
-    queryKey: usageKeys.script(providerId, appId),
-    queryFn: async () => usageApi.query(providerId, appId),
+    queryKey,
+    queryFn,
     enabled: enabled && !!providerId,
     refetchInterval:
       autoQueryInterval > 0

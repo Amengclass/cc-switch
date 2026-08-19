@@ -251,14 +251,22 @@ pub async fn test_remote_provider_connection(
 ) -> Result<RemoteProviderTestResult, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
 
-    let providers = state
-        .db
-        .get_all_providers(&app)
-        .map_err(|e| e.to_string())?;
-    let provider = providers
-        .get(&provider_id)
-        .ok_or_else(|| "供应商不存在，可能已被删除".to_string())?;
+    // provider 来自该远端目标自己的 SSOT（本机 DB 不参与）——与供应商面板
+    // 数据源一致；否则远端场景下 provider 只存在于 SSOT，本机 DB 查不到。
+    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
+    let provider = ssot
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
 
     let app_type =
         crate::app_config::AppType::from_str(&app).map_err(|_| format!("未知应用类型: {app}"))?;
@@ -267,15 +275,15 @@ pub async fn test_remote_provider_connection(
         crate::services::stream_check::StreamCheckService::resolve_base_url(&app_type, provider)
             .map_err(|e| e.to_string())?;
 
-    let session = connection::connect(&host, Some(&password)).await?;
-
-    // 在远端执行 curl（curl 缺失/无网络时报错由 exec 输出带出）
+    // 在远端执行 curl（curl 缺失/无网络时报错由 exec 输出带出）。
+    // 容器名空串/空白（前端宿主机目标可能传 ""）归一化走宿主机路径，与
+    // RemoteTarget::new 的空容器处理一致，避免 DockerExecFileOps 的容器名校验报错。
     let curl = format!(
         "curl -s -o /dev/null -w '%{{http_code}}' -m 10 {}",
         connection::shell_quote(&base_url)
     );
-    let cmd = match container.as_deref() {
-        None => format!("sh -c {}", connection::shell_quote(&curl)),
+    let cmd = match container.as_deref().map(str::trim) {
+        None | Some("") => format!("sh -c {}", connection::shell_quote(&curl)),
         Some(c) => {
             let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
             format!(
@@ -288,6 +296,9 @@ pub async fn test_remote_provider_connection(
     let out = connection::exec_command(&session.channel, &cmd).await?;
     let http_code = out.trim().to_string();
     let reachable = http_code.starts_with('2') || http_code.starts_with('3');
+    log::info!(
+        "[remote] test_remote_provider_connection host={host_id} app={app} provider={provider_id} base_url={base_url} http_code={http_code:?} reachable={reachable}"
+    );
 
     Ok(RemoteProviderTestResult {
         base_url,
@@ -3913,4 +3924,97 @@ fn resolve_password(host: &RemoteHost) -> Result<String, String> {
             Err("未找到该主机的密码，请在编辑界面重新填写".to_string())
         }
     }
+}
+
+/// 远端供应商余量查询：读目标机器（宿主机 / 容器）自己的 SSOT 拿到该 provider
+/// 的 usage_script 配置，再走与本机完全一致的分派逻辑执行查询。
+///
+/// 本机路径 `queryProviderUsage` 从本机 SQLite 读 provider；远端路径这里从
+/// 远端 SSOT 读 provider，然后共用 `commands::provider::query_usage_for_provider`
+/// 这一份分派逻辑，保证远端与本地行为一致（远端向本机看齐，见 AGENTS.md）。
+#[allow(non_snake_case)]
+#[tauri::command]
+pub async fn query_remote_provider_usage(
+    state: State<'_, AppState>,
+    copilot_state: State<'_, crate::CopilotAuthState>,
+    xai_state: State<'_, crate::XaiOAuthState>,
+    host_id: String,
+    container: Option<String>,
+    app: String,
+    provider_id: String,
+) -> Result<crate::provider::UsageResult, String> {
+    log::info!(
+        "[remote] query_remote_provider_usage 调用 host={host_id} app={app} provider={provider_id}"
+    );
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
+    let provider = ssot
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
+
+    let app_type = crate::app_config::AppType::from_str(&app)
+        .map_err(|e| format!("未知应用类型: {e}"))?;
+    crate::query_usage_for_provider(
+        Some(provider),
+        &copilot_state,
+        &xai_state,
+        app_type,
+    )
+    .await
+}
+
+/// 远端目标下检测 Provider 连通性：provider 定义从该远端 SSOT 读取，但连通性
+/// 检查在本机执行（测的是本机到 API 的网络，与本机场景一致）。
+/// 用户关心的是本机能否连上该 API，而非远端机器的网络。
+#[tauri::command]
+pub async fn stream_check_remote_provider(
+    state: State<'_, AppState>,
+    copilot_state: State<'_, crate::CopilotAuthState>,
+    host_id: String,
+    container: Option<String>,
+    app: String,
+    provider_id: String,
+) -> Result<crate::services::stream_check::StreamCheckResult, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
+    let provider = ssot
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
+
+    let app_type = crate::app_config::AppType::from_str(&app)
+        .map_err(|e| format!("未知应用类型: {e}"))?;
+    let config = state
+        .db
+        .get_stream_check_config()
+        .map_err(|e| format!("读取连通性检查配置失败: {e}"))?;
+    crate::commands::stream_check::check_provider_connectivity(
+        &app_type,
+        provider,
+        &config,
+        copilot_state.inner(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }

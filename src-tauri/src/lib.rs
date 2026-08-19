@@ -1704,6 +1704,8 @@ pub fn run() {
             remote::commands::get_remote_session_messages,
             remote::commands::delete_remote_session,
             remote::commands::get_remote_providers,
+            remote::commands::query_remote_provider_usage,
+            remote::commands::stream_check_remote_provider,
             remote::commands::add_remote_provider,
             remote::commands::update_remote_provider,
             remote::commands::delete_remote_provider,

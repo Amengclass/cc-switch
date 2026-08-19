@@ -111,14 +111,21 @@ export function useDragSort(
           });
         } else {
           await providersApi.updateSortOrder(updates, appId);
-          // 乐观更新：直接修改缓存
+          // 乐观更新：直接修改缓存。本机缓存结构是 { providers, currentProviderId }
+          //（见 useProvidersQuery），providers 是 Record；与远端分支同构。
           const localKey = ["providers", appId];
           queryClient.setQueryData(localKey, (old: any) => {
             if (!old) return old;
             const sortMap = new Map(updates.map((u) => [u.id, u.sortIndex]));
-            return old.map((p: any) =>
-              sortMap.has(p.id) ? { ...p, sortIndex: sortMap.get(p.id) } : p,
-            );
+            return {
+              ...old,
+              providers: Object.fromEntries(
+                Object.entries(old.providers).map(([id, p]: [string, any]) => [
+                  id,
+                  sortMap.has(id) ? { ...p, sortIndex: sortMap.get(id) } : p,
+                ]),
+              ),
+            };
           });
         }
 

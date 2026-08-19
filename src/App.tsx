@@ -2737,6 +2737,8 @@ function App() {
               void saveUsageScript(usageProvider, script);
             }
           }}
+          remoteTargetId={remoteTargetId || undefined}
+          remoteContainerId={remoteContainerId || undefined}
         />
       )}
 

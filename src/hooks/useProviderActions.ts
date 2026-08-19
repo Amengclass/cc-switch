@@ -402,9 +402,17 @@ export function useProviderActions(
             queryKey: ["providers", activeApp],
           });
         }
-        // 保存用量脚本后，失效该 provider 的用量查询缓存
+        // 保存用量脚本后，失效该 provider 的用量查询缓存：
+        // 远端目标失效远端隔离 key（与 useUsageQuery 一致），本机失效本机 key
         await queryClient.invalidateQueries({
-          queryKey: usageKeys.script(provider.id, activeApp),
+          queryKey: remoteTargetId
+            ? usageKeys.scriptRemote(
+                remoteTargetId,
+                activeApp,
+                provider.id,
+                remoteContainerId,
+              )
+            : usageKeys.script(provider.id, activeApp),
         });
         await queryClient.invalidateQueries({
           queryKey: ["subscription", "quota", activeApp],

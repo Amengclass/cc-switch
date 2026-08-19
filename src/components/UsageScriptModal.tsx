@@ -7,6 +7,7 @@ import { Provider, UsageScript, UsageData, createUsageScript } from "@/types";
 import { usageApi, settingsApi, type AppId } from "@/lib/api";
 import { copilotGetUsage, copilotGetUsageForAccount } from "@/lib/api/copilot";
 import { useSettingsQuery } from "@/lib/query";
+import { usageKeys } from "@/lib/query/usage";
 import { resolveManagedAccountId } from "@/lib/authBinding";
 import { resolveCodexOfficialIdentity } from "@/utils/providerCapabilities";
 import { extractErrorMessage } from "@/utils/errorUtils";
@@ -90,6 +91,10 @@ interface UsageScriptModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (script: UsageScript) => void;
+  /** 远端目标：提供时测试成功写入的用量缓存 key 按远端隔离（对齐 useUsageQuery） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined/空串） */
+  remoteContainerId?: string;
 }
 
 // 生成预设模板的函数（支持国际化）
@@ -251,12 +256,20 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
   isOpen,
   onClose,
   onSave,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const { data: settingsData } = useSettingsQuery();
   const [showUsageConfirm, setShowUsageConfirm] = useState(false);
   const isDarkMode = useDarkMode();
+
+  // 用量查询缓存 key：远端目标写远端隔离 key（与 useUsageQuery 一致），
+  // 否则写本机 key。测试成功后写入，让供应商卡片立即读到最新余量。
+  const usageCacheKey = remoteTargetId
+    ? usageKeys.scriptRemote(remoteTargetId, appId, provider.id, remoteContainerId)
+    : usageKeys.script(provider.id, appId);
 
   // 生成带国际化的预设模板
   const PRESET_TEMPLATES = generatePresetTemplates(t);
@@ -624,7 +637,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             duration: 3000,
             closeButton: true,
           });
-          queryClient.setQueryData(["usage", provider.id, appId], result);
+          queryClient.setQueryData(usageCacheKey, result);
         } else {
           toast.error(
             `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,
@@ -680,7 +693,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
             used: tier.utilization,
             unit: "%",
           }));
-          queryClient.setQueryData(["usage", provider.id, appId], {
+          queryClient.setQueryData(usageCacheKey, {
             success: true,
             data: usageData,
           });
@@ -710,7 +723,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
           closeButton: true,
         });
         // 更新缓存
-        queryClient.setQueryData(["usage", provider.id, appId], {
+        queryClient.setQueryData(usageCacheKey, {
           success: true,
           data: [
             {
@@ -752,7 +765,7 @@ const UsageScriptModal: React.FC<UsageScriptModalProps> = ({
         });
 
         // 🔧 测试成功后，更新主界面列表的用量查询缓存
-        queryClient.setQueryData(["usage", provider.id, appId], result);
+        queryClient.setQueryData(usageCacheKey, result);
       } else {
         toast.error(
           `${t("usageScript.testFailed")}: ${result.error || t("endpointTest.noResult")}`,

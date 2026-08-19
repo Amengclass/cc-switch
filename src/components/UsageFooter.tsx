@@ -19,6 +19,10 @@ interface UsageFooterProps {
   isCurrent: boolean; // 是否为当前激活的供应商
   isInConfig?: boolean; // OpenCode: 是否已添加到配置
   inline?: boolean; // 是否内联显示（在按钮左侧）
+  /** 远端目标：提供时余量查询改走远端 SSOT（见 useUsageQuery） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined） */
+  remoteContainerId?: string;
 }
 
 /** UsageData → QuotaTier 转换（Token Plan 使用） */
@@ -54,6 +58,8 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   isCurrent,
   isInConfig = false,
   inline = false,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   // 检查是否为 plan 类型（token_plan 或 OpenCode Go）
@@ -77,6 +83,8 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   } = useUsageQuery(providerId, appId, {
     enabled: usageEnabled,
     autoQueryInterval,
+    remoteTargetId,
+    remoteContainerId,
   });
 
   // 🆕 定期更新当前时间，用于刷新相对时间显示

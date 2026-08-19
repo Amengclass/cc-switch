@@ -147,6 +147,21 @@ export const usageKeys = {
     [...usageKeys.all, "limits", providerId, appType] as const,
   script: (providerId: string, appType: string) =>
     [...usageKeys.all, providerId, appType] as const,
+  /** 远端目标下的用量查询缓存 key（与 useUsageQuery 保持一致，按 (remote, hostId, container, app, provider) 隔离） */
+  scriptRemote: (
+    hostId: string,
+    appType: string,
+    providerId: string,
+    container?: string,
+  ) =>
+    [
+      ...usageKeys.all,
+      "remote",
+      hostId,
+      container || "__host__",
+      appType,
+      providerId,
+    ] as const,
 };
 
 /** 把 UI 侧的 "all" 哨兵归一成 undefined（后端语义：不过滤）。 */

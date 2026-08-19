@@ -53,6 +53,10 @@ interface ProviderCardProps {
   provider: Provider;
   isCurrent: boolean;
   appId: AppId;
+  /** 远端目标：提供时余量查询改走远端 SSOT（见 useUsageQuery） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined） */
+  remoteContainerId?: string;
   isInConfig?: boolean; // OpenCode: 是否已添加到 opencode.json
   isOmo?: boolean;
   isOmoSlim?: boolean;
@@ -172,6 +176,8 @@ export function ProviderCard({
   provider,
   isCurrent,
   appId,
+  remoteTargetId,
+  remoteContainerId,
   isInConfig = true,
   isOmo = false,
   isOmoSlim = false,
@@ -324,6 +330,8 @@ export function ProviderCard({
   const { data: usage } = useUsageQuery(provider.id, appId, {
     enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage,
     autoQueryInterval,
+    remoteTargetId,
+    remoteContainerId,
   });
 
   const isTokenPlan =
@@ -664,6 +672,8 @@ export function ProviderCard({
                   isCurrent={isCurrent}
                   isInConfig={isInConfig}
                   inline={quotaInline}
+                  remoteTargetId={remoteTargetId}
+                  remoteContainerId={remoteContainerId}
                 />
               )}
               {/* 展开按钮：仅展开模式显示，紧凑模式完全隐藏 */}
@@ -759,6 +769,8 @@ export function ProviderCard({
             isCurrent={isCurrent}
             isInConfig={isInConfig}
             inline={quotaInline}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
           />
         </div>
       )}

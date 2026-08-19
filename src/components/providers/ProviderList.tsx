@@ -26,8 +26,8 @@ import { useDragSort } from "@/hooks/useDragSort";
 import { useOpenClawDefaultModel } from "@/hooks/useOpenClaw";
 import { useHermesModelConfig } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { streamCheckRemoteProvider } from "@/lib/api/connectivity-check";
 import {
-  testRemoteProviderConnection,
   getRemoteOpenClawDefaultModel,
   getRemoteHermesModelConfig,
 } from "@/lib/api/remote";
@@ -314,35 +314,51 @@ export function ProviderList({
   );
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
-  // 远程目标下改为经 SSH 在远端 curl base_url（真实反映远端到 API 的网络）。
+  // 远端目标下 provider 定义从远端 SSOT 读取，但连通性检查仍在本机执行
+  // （测本机到 API 的网络，与本机场景一致）——用户关心的是本机能否连上该 API。
   const handleTest = useCallback(
     (provider: Provider) => {
       if (remoteTargetId) {
         void (async () => {
           try {
-            const result = await testRemoteProviderConnection(
+            const result = await streamCheckRemoteProvider(
               remoteTargetId,
-              provider.id,
-              appId,
               remoteContainerId,
+              appId,
+              provider.id,
             );
-            if (result.reachable) {
+            if (result.status === "operational") {
               toast.success(
-                t("remote.testOk", {
-                  defaultValue: "远端可达（HTTP {{code}}）",
-                  code: result.httpCode,
+                t("streamCheck.reachable", {
+                  providerName: provider.name,
+                  responseTimeMs: result.responseTimeMs,
+                  defaultValue: `${provider.name} 连通正常 (${result.responseTimeMs}ms)`,
                 }),
                 { closeButton: true },
               );
+            } else if (result.status === "degraded") {
+              toast.warning(
+                t("streamCheck.reachableSlow", {
+                  providerName: provider.name,
+                  responseTimeMs: result.responseTimeMs,
+                  defaultValue: `${provider.name} 连通但较慢 (${result.responseTimeMs}ms)`,
+                }),
+              );
             } else {
               toast.error(
-                t("remote.testFail", {
-                  defaultValue: "远端不可达（HTTP {{code}}）",
-                  code:
-                    result.httpCode ||
-                    t("remote.noResponse", { defaultValue: "无响应" }),
+                t("streamCheck.unreachable", {
+                  providerName: provider.name,
+                  message: result.message,
+                  defaultValue: `${provider.name} 无法连通: ${result.message}`,
                 }),
-                { description: result.baseUrl, closeButton: true },
+                {
+                  description: t("streamCheck.unreachableHint", {
+                    defaultValue:
+                      "无法建立连接（DNS / 连接 / TLS / 超时）。请检查 base_url 与网络。",
+                  }),
+                  duration: 8000,
+                  closeButton: true,
+                },
               );
             }
           } catch (error) {
@@ -622,6 +638,8 @@ export function ProviderList({
                 provider={provider}
                 isCurrent={isCurrent}
                 appId={appId}
+                remoteTargetId={remoteTargetId}
+                remoteContainerId={remoteContainerId}
                 isInConfig={
                   appId === "pi" && !remoteTargetId
                     ? isPiProviderInConfig(provider)
@@ -784,6 +802,8 @@ interface SortableProviderCardProps {
   provider: Provider;
   isCurrent: boolean;
   appId: AppId;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   isInConfig: boolean;
   isOmo: boolean;
   isOmoSlim: boolean;
@@ -818,6 +838,8 @@ function SortableProviderCard({
   provider,
   isCurrent,
   appId,
+  remoteTargetId,
+  remoteContainerId,
   isInConfig,
   isOmo,
   isOmoSlim,
@@ -866,6 +888,8 @@ function SortableProviderCard({
         provider={provider}
         isCurrent={isCurrent}
         appId={appId}
+        remoteTargetId={remoteTargetId}
+        remoteContainerId={remoteContainerId}
         isInConfig={isInConfig}
         isOmo={isOmo}
         isOmoSlim={isOmoSlim}

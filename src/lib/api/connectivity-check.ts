@@ -38,6 +38,24 @@ export async function streamCheckProvider(
 }
 
 /**
+ * 远端目标下的连通性检查（单个供应商）：provider 定义从远端 SSOT 读取，
+ * 但连通性检查在本机执行（测本机到 API 的网络，与本机场景一致）。
+ */
+export async function streamCheckRemoteProvider(
+  hostId: string,
+  container: string | undefined,
+  appType: AppId,
+  providerId: string,
+): Promise<StreamCheckResult> {
+  return invoke("stream_check_remote_provider", {
+    hostId,
+    container: container ?? null,
+    app: appType,
+    providerId,
+  });
+}
+
+/**
  * 批量连通性检查
  */
 export async function streamCheckAllProviders(

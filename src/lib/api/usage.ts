@@ -25,6 +25,22 @@ export const usageApi = {
     return invoke("queryProviderUsage", { providerId, app: appId });
   },
 
+  queryRemote: async (
+    hostId: string,
+    container: string | undefined,
+    providerId: string,
+    appId: AppId,
+  ): Promise<UsageResult> => {
+    // 命令名必须与后端函数名一致（tauri invoke 用函数名，不做大小写转换）：
+    // 后端是 query_remote_provider_usage（snake_case），此处必须用 snake_case
+    return invoke("query_remote_provider_usage", {
+      hostId,
+      container: container ?? null,
+      app: appId,
+      providerId,
+    });
+  },
+
   testScript: async (
     providerId: string,
     appId: AppId,
