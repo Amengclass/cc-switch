@@ -195,8 +195,8 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
           // usePromptActions owns the error toast.
         }
         setDeletingPrompt(null);
-      } catch {
-        // usePromptActions owns the error toast.
+      } catch (error) {
+        toast.error(t("prompts.deleteFailed"), { description: String(error) });
       }
     };
 
@@ -274,8 +274,17 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
                       remoteContainerId || undefined,
                       "pi",
                     );
+                    toast.success(
+                      enabled
+                        ? t("prompts.enableSuccess")
+                        : t("prompts.disableSuccess"),
+                      { closeButton: true },
+                    );
                   } catch {
                     setRemotePrompts(prev); // 回滚
+                    toast.error(
+                      enabled ? t("prompts.enableFailed") : t("prompts.disableFailed"),
+                    );
                   }
                   return;
                 }
@@ -353,6 +362,7 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
                 const map: Record<string, RemotePrompt> = {};
                 list.forEach((p) => { map[p.id] = p; });
                 setRemotePrompts(map);
+                toast.success(t("prompts.saveSuccess"), { closeButton: true });
                 return true;
               }
               return savePrompt(id, prompt);
