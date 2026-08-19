@@ -211,7 +211,7 @@ export function SessionManagerPage({
   const piSessionDiscovery = useQuery({
     queryKey: piKeys.sessionDiscovery,
     queryFn: () => piApi.getSessionDiscovery(),
-    enabled: appId === "pi",
+    enabled: appId === "pi" && !remoteTargetId,
     staleTime: 30 * 1000,
   });
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -354,7 +354,7 @@ export function SessionManagerPage({
       selectedSession?.sessionId,
       remoteTargetId,
       remoteContainerId,
-      appId,
+      selectedSession?.providerId,
     );
   const deleteSessionMutation = useDeleteSessionMutation();
   const isDeleting = deleteSessionMutation.isPending || isBatchDeleting;
@@ -494,7 +494,7 @@ export function SessionManagerPage({
               target.sourcePath!,
               target.sessionId,
               remoteContainerId,
-              appId,
+              target.providerId,
             );
             deletedCount += 1;
             queryClient.removeQueries({
