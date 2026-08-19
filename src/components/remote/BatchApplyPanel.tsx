@@ -5,7 +5,6 @@ import {
   ChevronRight,
   Container,
   Loader2,
-  Search,
   Send,
   Server,
   XCircle,
@@ -13,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
+import { ManagementListSearch } from "@/components/common/ManagementListSearch";
 import { ProviderIcon } from "@/components/ProviderIcon";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
@@ -453,15 +453,13 @@ export function BatchApplyPanel({
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center gap-2 rounded-md border border-border/60 bg-background px-2.5 py-1.5 focus-within:ring-1 focus-within:ring-primary/40">
-            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder={t("batchApply.searchPlaceholder")}
-              className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-            />
-          </div>
+          <ManagementListSearch
+            value={search}
+            onValueChange={setSearch}
+            placeholder={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址…" })}
+            ariaLabel={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址…" })}
+            clearLabel={t("common.clear", { defaultValue: "清除" })}
+          />
         </div>
 
         <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border">

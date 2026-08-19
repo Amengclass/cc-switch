@@ -458,7 +458,7 @@ export const RemoteHostsPanel = React.forwardRef<
               {/* SelectValue 会自动显示选中项的文本，不要再额外放同名 span，否则文本重复 */}
               <SelectValue placeholder="状态" />
             </SelectTrigger>
-            <SelectContent align="end">
+            <SelectContent align="end" className="min-w-0 w-auto">
               <SelectItem value="all">
                 {t("remote.filterAll", { defaultValue: "全部" })}
               </SelectItem>
