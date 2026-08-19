@@ -471,7 +471,6 @@
 2. **中**:openclaw 工作区(文件读写,工作量较大)
 3. **低**:hermes WebUI(远端无浏览器概念,建议远端下禁用/隐藏按钮)
 4. **低**:Skills 备份/恢复(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
-5. **低**:Pi system/templates tab 的远端原生资源编辑(PiSystemPromptFiles/PiPromptTemplates 组件调用 promptsApi，需重构为支持 remoteTargetId 的版本)
 
 ---
 
