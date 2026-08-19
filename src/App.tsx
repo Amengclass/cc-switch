@@ -704,6 +704,8 @@ function App() {
     activeApp,
     currentAppUsesProxy && isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
   );
 
   // 远程切换 mutation：与本机 useSwitchProviderMutation 同构（onSuccess 回写高亮 +

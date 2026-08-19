@@ -9,6 +9,7 @@ import {
   openclawApi,
   type AppId,
 } from "@/lib/api";
+import { updateRemoteProviderMeta } from "@/lib/api/remote";
 import type {
   Provider,
   UsageScript,
@@ -45,6 +46,8 @@ export function useProviderActions(
   activeApp: AppId,
   isProxyRunning?: boolean,
   isProxyTakeover?: boolean,
+  remoteTargetId?: string,
+  remoteContainerId?: string,
 ) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -362,24 +365,44 @@ export function useProviderActions(
   const saveUsageScript = useCallback(
     async (provider: Provider, script: UsageScript) => {
       try {
-        const updatedProvider: Provider = {
-          ...provider,
-          meta: {
-            ...provider.meta,
-            usage_script: script,
-          },
+        const updatedMeta = {
+          ...provider.meta,
+          usage_script: script,
         };
 
-        if (activeApp === "pi") {
+        if (remoteTargetId) {
+          // 远端：直接写远端 SSOT，不写本地 DB
+          await updateRemoteProviderMeta(
+            remoteTargetId,
+            activeApp,
+            provider.id,
+            updatedMeta as Record<string, unknown>,
+            remoteContainerId,
+          );
+          await queryClient.invalidateQueries({
+            queryKey: [
+              "remoteProviders",
+              remoteTargetId,
+              remoteContainerId || "__host__",
+              activeApp,
+            ],
+          });
+        } else if (activeApp === "pi") {
           await piApi.updateProviderUsageScript(provider.id, script);
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", activeApp],
+          });
         } else {
+          const updatedProvider: Provider = {
+            ...provider,
+            meta: updatedMeta,
+          };
           await providersApi.update(updatedProvider, activeApp);
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", activeApp],
+          });
         }
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", activeApp],
-        });
-        // 🔧 保存用量脚本后，也应该失效该 provider 的用量查询缓存
-        // 这样主页列表会使用新配置重新查询，而不是使用测试时的缓存
+        // 保存用量脚本后，失效该 provider 的用量查询缓存
         await queryClient.invalidateQueries({
           queryKey: usageKeys.script(provider.id, activeApp),
         });
@@ -401,7 +424,7 @@ export function useProviderActions(
         toast.error(detail);
       }
     },
-    [activeApp, queryClient, t],
+    [activeApp, queryClient, t, remoteTargetId, remoteContainerId],
   );
 
   // Set provider as default model (OpenClaw only)
