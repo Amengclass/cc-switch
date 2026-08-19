@@ -82,6 +82,40 @@ pub async fn write_remote_providers_ssot<F: FileOps>(
         .await
 }
 
+/// 更新远端 SSOT 中供应商的排序索引（对齐本机 update_providers_sort_order）。
+pub async fn update_remote_provider_sort_order<F: FileOps>(
+    fs: &F,
+    root: &str,
+    app: &str,
+    updates: Vec<crate::services::ProviderSortUpdate>,
+) -> Result<(), String> {
+    let mut ssot = read_remote_providers_ssot(fs, root, app).await?;
+    for update in &updates {
+        if let Some(provider) = ssot.providers.iter_mut().find(|p| p.id == update.id) {
+            provider.sort_index = Some(update.sort_index);
+        }
+    }
+    write_remote_providers_ssot(fs, root, app, &ssot).await
+}
+
+/// 更新远端 SSOT 中供应商的元数据（用量查询配置、备注等）。
+pub async fn update_remote_provider_meta<F: FileOps>(
+    fs: &F,
+    root: &str,
+    app: &str,
+    provider_id: &str,
+    meta: crate::provider::ProviderMeta,
+) -> Result<(), String> {
+    let mut ssot = read_remote_providers_ssot(fs, root, app).await?;
+    let provider = ssot
+        .providers
+        .iter_mut()
+        .find(|p| p.id == provider_id)
+        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
+    provider.meta = Some(meta);
+    write_remote_providers_ssot(fs, root, app, &ssot).await
+}
+
 /// upsert：按 id 更新或追加，返回是否新增。
 pub fn upsert_provider(providers: &mut Vec<Provider>, provider: Provider) -> bool {
     match providers.iter_mut().find(|p| p.id == provider.id) {
@@ -157,14 +191,10 @@ pub async fn sync_remote_live_into_ssot<F: FileOps>(
         if !auto_import_default && !ssot.providers.is_empty() {
             return Ok((0, Vec::new()));
         }
-        // live 当前生效配置已被 SSOT 里**任意一条**完全代表（含用户添加的
-        // 供应商，而非仅 id="default"）→ 幂等跳过，避免把「刚应用过的配置」
-        // 又重复导入出一条 default。
-        let already_fresh = ssot
-            .providers
-            .iter()
-            .any(|p| p.settings_config == default.settings_config);
-        if already_fresh {
+        // 已有候选池（含用户手动添加的供应商）→ 不再从 live 导入 default，
+        // 避免切换供应商后 live 配置变化触发重复导入。
+        // 只有空库首次导入时才从 live 拉取 default。
+        if !ssot.providers.is_empty() {
             return Ok((0, Vec::new()));
         }
         // 空库首导时把 default 设为 current；已有候选池时保留用户切换的记录

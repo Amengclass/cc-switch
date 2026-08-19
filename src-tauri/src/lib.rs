@@ -1701,6 +1701,8 @@ pub fn run() {
             remote::commands::add_remote_provider,
             remote::commands::update_remote_provider,
             remote::commands::delete_remote_provider,
+            remote::commands::update_remote_provider_sort_order,
+            remote::commands::update_remote_provider_meta,
             remote::commands::get_remote_current_provider,
             remote::commands::check_remote_cli_installed,
             remote::commands::check_local_cli_installed,

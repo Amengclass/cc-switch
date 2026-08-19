@@ -7,6 +7,9 @@ import type {
   SessionMeta,
 } from "@/types";
 import type {
+  ProviderSortUpdate,
+} from "./providers";
+import type {
   EffectReport,
   RemoteConnectionInfo,
   RemoteEnvConflict,
@@ -768,6 +771,42 @@ export async function deleteRemotePiPromptTemplate(
     container: container ?? null,
     slug,
     expectedRevision,
+  });
+}
+
+// ========================================================================
+// 远端供应商排序 + 元数据
+// ========================================================================
+
+/** 更新远端 SSOT 中供应商的排序索引 */
+export async function updateRemoteProviderSortOrder(
+  hostId: string,
+  app: string,
+  updates: ProviderSortUpdate[],
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("update_remote_provider_sort_order", {
+    hostId,
+    container: container ?? null,
+    app,
+    updates,
+  });
+}
+
+/** 更新远端 SSOT 中供应商的元数据（用量查询配置、备注等） */
+export async function updateRemoteProviderMeta(
+  hostId: string,
+  app: string,
+  providerId: string,
+  meta: Record<string, unknown>,
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("update_remote_provider_meta", {
+    hostId,
+    container: container ?? null,
+    app,
+    providerId,
+    meta,
   });
 }
 

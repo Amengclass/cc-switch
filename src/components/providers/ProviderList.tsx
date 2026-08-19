@@ -118,6 +118,8 @@ export function ProviderList({
   const { sortedProviders, sensors, handleDragEnd } = useDragSort(
     providers,
     appId,
+    remoteTargetId,
+    remoteContainerId,
   );
 
   const { data: opencodeLiveIds } = useQuery<string[]>({

@@ -1640,6 +1640,63 @@ pub async fn scan_remote_env_conflicts(
 /// 3. 兜底：读远端 live 按 base_url 匹配 SSOT 供应商（从未经本应用切换的老配置）。
 ///
 /// 用于目标选择器：选中服务器后，主界面供应商列表的当前高亮取自远端。
+
+/// 更新远端 SSOT 中供应商的排序索引。
+#[tauri::command]
+pub async fn update_remote_provider_sort_order(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    app: String,
+    updates: Vec<crate::services::ProviderSortUpdate>,
+) -> Result<bool, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::providers::update_remote_provider_sort_order(
+        &target,
+        &host.default_home(),
+        &app,
+        updates,
+    )
+    .await?;
+    Ok(true)
+}
+
+/// 更新远端 SSOT 中供应商的元数据（用量查询配置、备注等）。
+#[tauri::command]
+pub async fn update_remote_provider_meta(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    app: String,
+    provider_id: String,
+    meta: crate::provider::ProviderMeta,
+) -> Result<bool, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::providers::update_remote_provider_meta(
+        &target,
+        &host.default_home(),
+        &app,
+        &provider_id,
+        meta,
+    )
+    .await?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn get_remote_current_provider(
     state: State<'_, AppState>,

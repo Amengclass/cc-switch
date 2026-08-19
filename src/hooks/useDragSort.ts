@@ -12,9 +12,15 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { updateRemoteProviderSortOrder } from "@/lib/api/remote";
 import { isProxyAppId } from "@/config/appConfig";
 
-export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
+export function useDragSort(
+  providers: Record<string, Provider>,
+  appId: AppId,
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
@@ -76,10 +82,27 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
       }));
 
       try {
-        await providersApi.updateSortOrder(updates, appId);
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", appId],
-        });
+        if (remoteTargetId) {
+          await updateRemoteProviderSortOrder(
+            remoteTargetId,
+            appId,
+            updates,
+            remoteContainerId,
+          );
+          await queryClient.invalidateQueries({
+            queryKey: [
+              "remoteProviders",
+              remoteTargetId,
+              remoteContainerId || "__host__",
+              appId,
+            ],
+          });
+        } else {
+          await providersApi.updateSortOrder(updates, appId);
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", appId],
+          });
+        }
 
         // Routing apps derive failover order from sort_index.
         if (isProxyAppId(appId)) {
