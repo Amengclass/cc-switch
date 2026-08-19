@@ -1255,7 +1255,25 @@ export function SessionManagerPage({
                               variant="ghost"
                               size="icon"
                               className="size-7"
-                              onClick={() => void refetch()}
+                              onClick={() => {
+                                void refetch();
+                                // 同时刷新当前选中会话的消息内容（本机 + 远端通用）
+                                if (selectedSession?.sourcePath) {
+                                  void queryClient.invalidateQueries({
+                                    queryKey: [
+                                      "sessionMessages",
+                                      ...(remoteTargetId
+                                        ? [
+                                            "remote",
+                                            remoteTargetId,
+                                            remoteContainerId ?? "__host__",
+                                          ]
+                                        : [selectedSession.providerId]),
+                                      selectedSession.sourcePath,
+                                    ],
+                                  });
+                                }
+                              }}
                             >
                               <RefreshCw
                                 className={`size-3.5 ${isFetching ? "animate-spin" : ""}`}
