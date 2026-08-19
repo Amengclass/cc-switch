@@ -431,6 +431,19 @@
 - 根因:用量查询配置等元数据保存在本地 DB，不写远端 SSOT
 - 修复:新增 `update_remote_provider_meta` 远端命令；`useProviderActions.saveUsageScript` 远端模式调 `updateRemoteProviderMeta` 写远端 SSOT，不写本地 DB
 
+### i18n 与 UI 修复(2026-08-19)
+
+> 修复硬编码中文文案，优化 UI 细节。
+
+**i18n 补全:**
+- 远程主机状态徽章：`"已禁用"/"启用中"` → `t("remote.statusDisabled/statusEnabled")`（zh/en/ja/zh-TW 四语）
+- 设置面板套餐用量显示：修正 i18n key 路径为 `settings.advanced.quotaDisplay.*`（title/description/expanded/expandedDescription）
+- 四语 locale 文件全部更新（zh.json、en.json、zh-TW.json、ja.json）
+
+**UI 优化:**
+- 远程主机筛选下拉框：添加 `className="min-w-0 w-auto"` 去除右侧空白
+- 批量应用搜索框：替换 raw `<input>` 为 `ManagementListSearch` 组件，对齐远程主机风格
+
 ### ⏳ 远程·待完成(优先级从高到低)
 
 | 优先级 | 事项 |
