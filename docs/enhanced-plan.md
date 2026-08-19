@@ -355,6 +355,81 @@
 | 远端 Skills「导入已有」绿点对齐目标(2026-08-16) | 「导入」按钮绿点远端下改为**反映当前所选目标(宿主机/容器)可导入技能数**,而非本机。新增 `useRemoteUnmanagedSkillsQuery(host,container)`,query key 精确到目标互不干扰;UnifiedSkillsPanel 挂载(enabled:true)自动扫当前目标,重进 Skill 页即重扫(对齐本机 `useScanUnmanagedSkills`);点开导入 refetch 取最新;导入成功 invalidate 当前目标 key → 圆点立即消失。提交 c5fcb48a |
 | 远端 Skill「更新」+「检查更新」(2026-08-16) | 对齐本机:远端下「检查更新」不再禁用(原 `远端→()=>undefined`),`check_remote_skill_updates` 读远端 skills.json→逐 skill 本机下载 repo→比对 hash→返回可更新列表;更新按钮放开(有 repoOwner 且 hasUpdate 才显示),`update_remote_skill` 从该 repo 重新下载最新版→替换远端 SSOT→写回 skills.json(hash/元数据)→同步各 app 链接。方案:**本机下载 + 本机算 hash**(远端无需访问 GitHub)。后端 impl 在 remote/skill.rs + commands.rs;前端 useCheckSkillUpdates 支持远端分流 + useUpdateRemoteSkill。提交 3f93934a |
 | 远端导入合并对齐本机(2026-08-16) | UnifiedSkillsPanel 远端「导入已有」成功后更新 installed 缓存，从 `[...old, ...installed]` 简单拼接改为 `mergeImportedSkills(old, installed)`（按 id 去重、新记录覆盖旧），与本机 `useImportSkillsFromApps.onSuccess` 完全一致。提交 23b49ff5 |
+| **Pi 远端全面支持(2026-08-19)** | Pi 的远程主机控制面全面补齐，涉及 SKILL / Prompts / Sessions / 供应商四个面板。详见下方「Pi 远端支持(2026-08-19)」小节。提交序列:8ed34c9a → 154eb26b → b19e255a → 35d5432d → bdd4a980 → 8c589461 → 102a6fc8 → e3e4f217 → 1cfb7eae |
+| **远端供应商面板修复(2026-08-19)** | 远端供应商排序/重复导入/配置持久化三个问题修复。详见下方「远端供应商面板修复(2026-08-19)」小节。提交序列:cd2b1a25 → f477ec87 → 97de9a53 |
+
+### Pi 远端支持(2026-08-19)
+
+> Pi CLI 的远程主机控制面全面补齐，涉及 SKILL / Prompts / Sessions 三个面板 + 后端基础修复。
+
+**SKILL 管理面板：**
+
+| 功能 | 本机 | 远端 | 说明 |
+|---|---|---|---|
+| 列出已装技能 | ✅ | ✅ | `list_remote_skills` 读远端 skills.json |
+| 启用/停用(按 app) | ✅ | ✅ | `bulk_toggle_remote_skill_app` + `app_skills_rel` 补 pi |
+| 从 ZIP 安装 | ✅ | ✅ | `install_remote_skills_from_zip` 已支持 pi |
+| 导入已有 | ✅ | ✅ | 导入对话框远端显示 Pi 徽章；本机导入勾选 Pi 也生效(`sync_to_app_dir`) |
+| 发现技能安装 | ✅ | ✅ | `install_remote_skill_from_discoverable` 已支持 pi |
+| 更新 | ✅ | ✅ | `update_remote_skill_impl` + `sync_remote_skill_links` |
+| 卸载/删除 | ✅ | ✅ | `delete_remote_skill` + `remove_remote_skill_links`(补 pi) |
+| 检查更新 | ✅ | ✅ | `check_remote_skill_updates` 已支持 pi |
+
+**后端修复（`remote/skill.rs`）：**
+- `app_skills_rel` 补 `"pi" => Some(".pi/agent/skills")` — 修复"未知应用: pi"错误
+- `APP_SKILLS_DIRS` 补 `.pi/agent/skills` — 远端删除技能时清理 pi 目录
+
+**本机导入 Pi 支持（`services/skill.rs`）：**
+- `import_from_apps` 勾选 Pi 时调 `sync_to_app_dir(&dir_name, &AppType::Pi)` 部署到 Pi 目录
+- Pi 的启用状态由 `skill_exists_in_app` 推导(exists=active)，不走 DB 列
+
+**Prompts 管理面板：**
+
+| 功能 | 本机 | 远端 | 说明 |
+|---|---|---|---|
+| Global tab(提示词列表) | ✅ | ✅ | `listRemotePrompts` / `saveRemotePrompts` + 全操作 toast |
+| System tab(SYSTEM.md/APPEND_SYSTEM.md) | ✅ | ✅ | `getRemotePiPromptFile` / `replaceRemotePiPromptFile` / `deleteRemotePiPromptFile` |
+| Templates tab(~/.pi/agent/prompts/*.md) | ✅ | ✅ | `listRemotePiPromptTemplates` / `upsertRemotePiPromptTemplate` / `deleteRemotePiPromptTemplate` |
+| Pi 原生资源 tab(system/templates) | 仅本机 | 远端可用 | 后端新增 6 个远端命令(`remote/commands.rs`) + 6 个辅助函数(`remote/prompt.rs`) |
+
+**会话管理面板：**
+
+| 功能 | 本机 | 远端 | 说明 |
+|---|---|---|---|
+| 会话列表 | ✅ | ✅ | `scan_sessions_fs`(Flat + ProjectDirectories 布局) |
+| 查看消息 | ✅ | ✅ | `parse_messages_from_content`(JSONL 树结构解析) |
+| 删除会话 | ✅ | ✅ | 校验 session_id 后删除文件 |
+| 刷新按钮 | ✅ | ✅ | 同时刷新列表 + 当前会话消息 |
+
+**后端修复（`remote/commands.rs`）：**
+- 会话路径修正: `~/.pi/sessions` → `~/.pi/agent/sessions`（与本地 `get_pi_agent_dir()` 一致）
+- `list_remote_sessions_all`:一次连接扫描所有 8 个 app(6 文件源 + 2 SQLite)，返回全量会话列表
+- `pi.rs` 重构:抽出 `read_tree_from_lines` / `read_active_messages_from_lines`，新增 `parse_messages_from_content` / `parse_session_from_content` / `scan_sessions_fs`
+
+**前端改动：**
+- `PiPromptPanel` 新增 `remoteTargetId`/`remoteContainerId` props，三个 tab 全部支持远端
+- `PiNativePromptResources` 各组件根据 `remoteTargetId` 选用本地/远端 API
+- `SessionManagerPage` `effectiveRemoteTargetId` 包含 pi，providerFilter 全量拉取对齐本机
+- 会话消息查询/删除改用 `selectedSession.providerId`（非页面级 appId）
+
+---
+
+### 远端供应商面板修复(2026-08-19)
+
+> 修复远端供应商管理的三个问题，使远端行为与本机对称。
+
+**问题 1：远端排序不生效**
+- 根因: `updateSortOrder` 只写本地 DB，远端重新拉取时 SSOT 没有新排序
+- 修复:新增 `update_remote_provider_sort_order` 远端命令，写入 SSOT `sort_index`；`useDragSort` 支持远端模式
+- 优化:排序成功后用 `setQueryData` 乐观更新缓存，消除 UI 闪回
+
+**问题 2：切换 app 供应商重复导入**
+- 根因: `sync_remote_live_into_ssot` 在 `autoImportDefault=true` 时，每次从 live 重新读 → 和 SSOT 里用户已有的重复
+- 修复:SSOT 已有供应商时直接跳过 live 导入（空库才首次导入 default）
+
+**问题 3：远端供应商配置（用量查询等）不持久**
+- 根因:用量查询配置等元数据保存在本地 DB，不写远端 SSOT
+- 修复:新增 `update_remote_provider_meta` 远端命令；`useProviderActions.saveUsageScript` 远端模式调 `updateRemoteProviderMeta` 写远端 SSOT，不写本地 DB
 
 ### ⏳ 远程·待完成(优先级从高到低)
 
@@ -376,10 +451,10 @@
 
 | 功能 | 状态 | 说明 |
 |---|---|---|
-| Prompts(📖) | ✅ 完全适配 | 读/增/删/改/开关全走 `remote_*` 命令(App.tsx 传 remote props) |
-| MCP(Ⓜ️) | ✅ 完全适配 | 读/增删改/开关/导入全走远端(hooks 均带远端分支) |
-| Sessions(🕘) | ✅ 适配(1 处残留) | 读/删走远端;**resume 仍走本机 launchTerminal**(SessionManagerPage.tsx:447-469) |
-| Skills(🔧) | ⚠️ 部分适配 | 列表/toggle/卸载/导入/ZIP 走远端;备份/恢复/检查更新在远端下被禁用为 no-op(UnifiedSkillsPanel.tsx:770-773、918-929),无远端替代 |
+| Prompts(📖) | ✅ 完全适配 | 读/增/删/改/开关全走 `remote_*` 命令(App.tsx 传 remote props)；**Pi 提示词三个 tab(global/system/templates)远端全支持(2026-08-19)** |
+| MCP(Ⓜ️) | ✅ 完全适配 | 读/增删改/开关/导入全走远端(hooks 均带远端分支)；**Pi 已移除 MCP 入口** |
+| Sessions(🕘) | ✅ 适配(1 处残留) | 读/删走远端;**resume 仍走本机 launchTerminal**(SessionManagerPage.tsx:447-469)；**Pi 会话远端全支持(2026-08-19)** |
+| Skills(🔧) | ✅ 远端全适配(2026-08-19) | 列表/toggle/卸载/导入/ZIP/发现安装/更新全走远端；**Pi 远端全支持** |
 | openclaw 工作区(📁) | ❌ 未适配 | 纯本机 workspaceApi,App.tsx 未传 remote props(1502) |
 | openclaw 环境变量(🔑) | ❌ 未适配 | 纯本机 openclawApi(1504) |
 | openclaw 工具(🛡) | ❌ 未适配 | 纯本机 openclawApi(1506) |
@@ -395,7 +470,8 @@
 1. **高**:openclaw 环境变量/工具/Agents + hermes 记忆 —— 远端下操作的是**本机**(静默错误:用户以为改了远端,实际改本机)
 2. **中**:openclaw 工作区(文件读写,工作量较大)
 3. **低**:hermes WebUI(远端无浏览器概念,建议远端下禁用/隐藏按钮)
-4. **低**:Skills 备份/恢复/更新(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
+4. **低**:Skills 备份/恢复(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
+5. **低**:Pi system/templates tab 的远端原生资源编辑(PiSystemPromptFiles/PiPromptTemplates 组件调用 promptsApi，需重构为支持 remoteTargetId 的版本)
 
 ---
 
