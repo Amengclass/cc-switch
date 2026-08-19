@@ -463,6 +463,8 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         <PiPromptPanel
           ref={ref}
           open={props.open}
+          remoteTargetId={props.remoteTargetId}
+          remoteContainerId={props.remoteContainerId}
           onInteractionBlockedChange={props.onInteractionBlockedChange}
           onNavigationBlockedChange={props.onNavigationBlockedChange}
           onPrimaryActionChange={props.onPrimaryActionChange}
