@@ -37,6 +37,14 @@ import {
   type PiPromptFileSnapshot,
   type PiPromptTemplate,
 } from "@/lib/api/prompts";
+import {
+  getRemotePiPromptFile,
+  replaceRemotePiPromptFile,
+  deleteRemotePiPromptFile,
+  listRemotePiPromptTemplates,
+  upsertRemotePiPromptTemplate,
+  deleteRemotePiPromptTemplate,
+} from "@/lib/api/remote";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import {
   getPiPromptTemplateDescription,
@@ -85,10 +93,14 @@ function PiInstructionFileEditor({
   file,
   snapshot,
   onClose,
+  remoteTargetId,
+  remoteContainerId,
 }: {
   file: (typeof EDITABLE_FILES)[number];
   snapshot: PiPromptFileSnapshot;
   onClose: () => void;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }) {
   const { t } = useTranslation();
   const darkMode = useDarkMode();
@@ -97,11 +109,16 @@ function PiInstructionFileEditor({
   const [draft, setDraft] = useState(baseSnapshot.content);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const queryKey = promptFileKey(file.kind);
+  const isRemote = Boolean(remoteTargetId);
+  const queryKey = isRemote
+    ? ["remote", "pi", "promptFile", file.kind, remoteTargetId, remoteContainerId ?? "__host__"]
+    : promptFileKey(file.kind);
 
   const save = useMutation({
     mutationFn: () =>
-      promptsApi.replacePiPromptFile(file.kind, baseSnapshot.revision, draft),
+      isRemote
+        ? replaceRemotePiPromptFile(remoteTargetId!, file.kind, baseSnapshot.revision, draft, remoteContainerId)
+        : promptsApi.replacePiPromptFile(file.kind, baseSnapshot.revision, draft),
     onSuccess: (nextSnapshot) => {
       queryClient.setQueryData<PiPromptFileSnapshot>(queryKey, nextSnapshot);
       toast.success(t("pi.prompts.fileSaved", { filename: file.filename }), {
@@ -118,7 +135,9 @@ function PiInstructionFileEditor({
 
   const remove = useMutation({
     mutationFn: () =>
-      promptsApi.deletePiPromptFile(file.kind, baseSnapshot.revision),
+      isRemote
+        ? deleteRemotePiPromptFile(remoteTargetId!, file.kind, baseSnapshot.revision, remoteContainerId)
+        : promptsApi.deletePiPromptFile(file.kind, baseSnapshot.revision),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey });
       toast.success(t("pi.prompts.fileRemoved", { filename: file.filename }), {
@@ -247,14 +266,24 @@ function PiInstructionFileEditor({
 
 function PiInstructionFileCard({
   file,
+  remoteTargetId,
+  remoteContainerId,
 }: {
   file: (typeof EDITABLE_FILES)[number];
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }) {
   const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
+  const isRemote = Boolean(remoteTargetId);
   const query = useQuery({
-    queryKey: promptFileKey(file.kind),
-    queryFn: () => promptsApi.getPiPromptFile(file.kind),
+    queryKey: isRemote
+      ? ["remote", "pi", "promptFile", file.kind, remoteTargetId, remoteContainerId ?? "__host__"]
+      : promptFileKey(file.kind),
+    queryFn: () =>
+      isRemote
+        ? getRemotePiPromptFile(remoteTargetId!, file.kind, remoteContainerId)
+        : promptsApi.getPiPromptFile(file.kind),
   });
 
   const status = (() => {
@@ -354,13 +383,21 @@ function PiInstructionFileCard({
           file={file}
           snapshot={query.data}
           onClose={() => setEditing(false)}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
         />
       )}
     </>
   );
 }
 
-export function PiSystemPromptFiles() {
+export function PiSystemPromptFiles({
+  remoteTargetId,
+  remoteContainerId,
+}: {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+} = {}) {
   const { t } = useTranslation();
 
   return (
@@ -371,7 +408,12 @@ export function PiSystemPromptFiles() {
 
       <div className="grid grid-cols-1 gap-3">
         {EDITABLE_FILES.map((file) => (
-          <PiInstructionFileCard key={file.kind} file={file} />
+          <PiInstructionFileCard
+            key={file.kind}
+            file={file}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
+          />
         ))}
       </div>
     </section>
@@ -383,6 +425,8 @@ interface PiPromptTemplateEditorProps {
   existingSlugs: Set<string>;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 function PiPromptTemplateEditor({
@@ -390,6 +434,8 @@ function PiPromptTemplateEditor({
   existingSlugs,
   onClose,
   onChanged,
+  remoteTargetId,
+  remoteContainerId,
 }: PiPromptTemplateEditorProps) {
   const { t } = useTranslation();
   const darkMode = useDarkMode();
@@ -418,14 +464,24 @@ function PiPromptTemplateEditor({
     ? setPiPromptTemplateDescription(content, description)
     : (template?.content ?? content);
 
+  const isRemote = Boolean(remoteTargetId);
   const save = useMutation({
     mutationFn: () =>
-      promptsApi.upsertPiPromptTemplate(
-        normalizedSlug,
-        template?.revision ?? "missing",
-        serializedContent,
-        template?.slug,
-      ),
+      isRemote
+        ? upsertRemotePiPromptTemplate(
+            remoteTargetId!,
+            normalizedSlug,
+            template?.revision ?? "missing",
+            serializedContent,
+            template?.slug,
+            remoteContainerId,
+          )
+        : promptsApi.upsertPiPromptTemplate(
+            normalizedSlug,
+            template?.revision ?? "missing",
+            serializedContent,
+            template?.slug,
+          ),
     onSuccess: async (saved) => {
       await onChanged();
       toast.success(
@@ -575,8 +631,11 @@ export interface PiPromptTemplatesHandle {
   openCreate: () => void;
 }
 
-export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle>(
-  function PiPromptTemplates(_props, ref) {
+export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle, {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}>(
+  function PiPromptTemplates({ remoteTargetId, remoteContainerId }, ref) {
     const { t } = useTranslation();
     const queryClient = useQueryClient();
     const [search, setSearch] = useState("");
@@ -586,10 +645,17 @@ export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle>(
     const [pendingDelete, setPendingDelete] = useState<PiPromptTemplate | null>(
       null,
     );
+    const isRemote = Boolean(remoteTargetId);
+    const templatesQueryKey = isRemote
+      ? ["remote", "pi", "promptTemplates", remoteTargetId, remoteContainerId ?? "__host__"]
+      : promptTemplatesKey;
 
     const templates = useQuery({
-      queryKey: promptTemplatesKey,
-      queryFn: () => promptsApi.listPiPromptTemplates(),
+      queryKey: templatesQueryKey,
+      queryFn: () =>
+        isRemote
+          ? listRemotePiPromptTemplates(remoteTargetId!, remoteContainerId)
+          : promptsApi.listPiPromptTemplates(),
     });
 
     useImperativeHandle(ref, () => ({
@@ -597,12 +663,14 @@ export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle>(
     }));
 
     const refresh = async () => {
-      await queryClient.invalidateQueries({ queryKey: promptTemplatesKey });
+      await queryClient.invalidateQueries({ queryKey: templatesQueryKey });
     };
 
     const remove = useMutation({
       mutationFn: (template: PiPromptTemplate) =>
-        promptsApi.deletePiPromptTemplate(template.slug, template.revision),
+        isRemote
+          ? deleteRemotePiPromptTemplate(remoteTargetId!, template.slug, template.revision, remoteContainerId)
+          : promptsApi.deletePiPromptTemplate(template.slug, template.revision),
       onSuccess: async (_removed, template) => {
         await refresh();
         toast.success(
@@ -765,6 +833,8 @@ export const PiPromptTemplates = forwardRef<PiPromptTemplatesHandle>(
             existingSlugs={existingSlugs}
             onClose={() => setEditor(null)}
             onChanged={refresh}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
           />
         )}
 

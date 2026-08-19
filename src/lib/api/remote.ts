@@ -652,6 +652,114 @@ export async function saveRemotePrompts(
   });
 }
 
+// ========================================================================
+// Pi 原生指令文件 + 模板（远端）
+// ========================================================================
+
+type PiPromptFileKind = "system_override" | "system_append";
+
+interface PiPromptFileSnapshot {
+  exists: boolean;
+  revision: string;
+  content: string;
+}
+
+interface RemotePiPromptTemplate {
+  slug: string;
+  content: string;
+  revision: string;
+}
+
+/** 读远端 Pi 系统指令文件 */
+export async function getRemotePiPromptFile(
+  hostId: string,
+  kind: PiPromptFileKind,
+  container?: string,
+): Promise<PiPromptFileSnapshot> {
+  return invoke<PiPromptFileSnapshot>("get_remote_pi_prompt_file", {
+    hostId,
+    container: container ?? null,
+    kind,
+  });
+}
+
+/** 写远端 Pi 系统指令文件（带 revision 冲突检测） */
+export async function replaceRemotePiPromptFile(
+  hostId: string,
+  kind: PiPromptFileKind,
+  expectedRevision: string,
+  content: string,
+  container?: string,
+): Promise<PiPromptFileSnapshot> {
+  return invoke<PiPromptFileSnapshot>("replace_remote_pi_prompt_file", {
+    hostId,
+    container: container ?? null,
+    kind,
+    expectedRevision,
+    content,
+  });
+}
+
+/** 删除远端 Pi 系统指令文件 */
+export async function deleteRemotePiPromptFile(
+  hostId: string,
+  kind: PiPromptFileKind,
+  expectedRevision: string,
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("delete_remote_pi_prompt_file", {
+    hostId,
+    container: container ?? null,
+    kind,
+    expectedRevision,
+  });
+}
+
+/** 列出远端 Pi 模板 */
+export async function listRemotePiPromptTemplates(
+  hostId: string,
+  container?: string,
+): Promise<RemotePiPromptTemplate[]> {
+  return invoke<RemotePiPromptTemplate[]>("list_remote_pi_prompt_templates", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 创建/更新远端 Pi 模板 */
+export async function upsertRemotePiPromptTemplate(
+  hostId: string,
+  slug: string,
+  expectedRevision: string,
+  content: string,
+  originalSlug?: string,
+  container?: string,
+): Promise<RemotePiPromptTemplate> {
+  return invoke<RemotePiPromptTemplate>("upsert_remote_pi_prompt_template", {
+    hostId,
+    container: container ?? null,
+    slug,
+    originalSlug: originalSlug ?? null,
+    expectedRevision,
+    content,
+  });
+}
+
+/** 删除远端 Pi 模板 */
+export async function deleteRemotePiPromptTemplate(
+  hostId: string,
+  slug: string,
+  expectedRevision: string,
+  container?: string,
+): Promise<boolean> {
+  return invoke<boolean>("delete_remote_pi_prompt_template", {
+    hostId,
+    container: container ?? null,
+    slug,
+    expectedRevision,
+  });
+}
+
 /** 远端 ~/.cc-switch/skills 下的技能目录项 */
 export interface RemoteSkillEntry {
   id: string;

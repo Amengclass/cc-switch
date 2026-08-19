@@ -2564,6 +2564,157 @@ pub async fn save_remote_prompts(
     Ok(true)
 }
 
+// ========================================================================
+// Pi 原生指令文件 + 模板（远端）
+// ========================================================================
+
+/// 读远端 Pi 系统指令文件（SYSTEM.md / APPEND_SYSTEM.md）。
+#[tauri::command]
+pub async fn get_remote_pi_prompt_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    kind: crate::services::pi_prompt_files::PiPromptFileKind,
+) -> Result<crate::services::pi_prompt_files::PiPromptFileSnapshot, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::read_remote_pi_file(&target, &host.default_home(), kind).await
+}
+
+/// 写远端 Pi 系统指令文件（带 revision 冲突检测）。
+#[tauri::command]
+pub async fn replace_remote_pi_prompt_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    kind: crate::services::pi_prompt_files::PiPromptFileKind,
+    #[allow(non_snake_case)] expectedRevision: String,
+    content: String,
+) -> Result<crate::services::pi_prompt_files::PiPromptFileSnapshot, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::write_remote_pi_file(
+        &target,
+        &host.default_home(),
+        kind,
+        &expectedRevision,
+        &content,
+    )
+    .await
+}
+
+/// 删除远端 Pi 系统指令文件。
+#[tauri::command]
+pub async fn delete_remote_pi_prompt_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    kind: crate::services::pi_prompt_files::PiPromptFileKind,
+    #[allow(non_snake_case)] expectedRevision: String,
+) -> Result<bool, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::delete_remote_pi_file(
+        &target,
+        &host.default_home(),
+        kind,
+        &expectedRevision,
+    )
+    .await
+}
+
+/// 列出远端 Pi 模板。
+#[tauri::command]
+pub async fn list_remote_pi_prompt_templates(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Vec<crate::services::pi_prompt_files::PiPromptTemplate>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::list_remote_pi_templates(&target, &host.default_home()).await
+}
+
+/// 创建/更新远端 Pi 模板。
+#[tauri::command]
+pub async fn upsert_remote_pi_prompt_template(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    slug: String,
+    #[allow(non_snake_case)] originalSlug: Option<String>,
+    #[allow(non_snake_case)] expectedRevision: String,
+    content: String,
+) -> Result<crate::services::pi_prompt_files::PiPromptTemplate, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::upsert_remote_pi_template(
+        &target,
+        &host.default_home(),
+        &slug,
+        originalSlug.as_deref(),
+        &expectedRevision,
+        &content,
+    )
+    .await
+}
+
+/// 删除远端 Pi 模板。
+#[tauri::command]
+pub async fn delete_remote_pi_prompt_template(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    slug: String,
+    #[allow(non_snake_case)] expectedRevision: String,
+) -> Result<bool, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::prompt::delete_remote_pi_template(
+        &target,
+        &host.default_home(),
+        &slug,
+        &expectedRevision,
+    )
+    .await
+}
+
 /// 列出远端 `~/.claude/skills/` 下的已安装技能目录。
 #[tauri::command]
 pub async fn list_remote_skills(

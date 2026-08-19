@@ -1508,6 +1508,13 @@ pub fn run() {
             commands::list_pi_prompt_templates,
             commands::upsert_pi_prompt_template,
             commands::delete_pi_prompt_template,
+            // Pi remote prompt file + template commands
+            remote::commands::get_remote_pi_prompt_file,
+            remote::commands::replace_remote_pi_prompt_file,
+            remote::commands::delete_remote_pi_prompt_file,
+            remote::commands::list_remote_pi_prompt_templates,
+            remote::commands::upsert_remote_pi_prompt_template,
+            remote::commands::delete_remote_pi_prompt_template,
             // Pi native provider and session views
             commands::get_pi_current_state,
             commands::update_pi_provider_usage_script,

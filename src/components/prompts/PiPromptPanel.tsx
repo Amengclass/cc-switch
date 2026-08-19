@@ -212,16 +212,12 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
               <TabsTrigger value="global">
                 {t("pi.prompts.globalTab")}
               </TabsTrigger>
-              {!isRemote && (
-                <TabsTrigger value="system">
-                  {t("pi.prompts.systemTab")}
-                </TabsTrigger>
-              )}
-              {!isRemote && (
-                <TabsTrigger value="templates">
-                  {t("pi.prompts.templatesTab")}
-                </TabsTrigger>
-              )}
+              <TabsTrigger value="system">
+                {t("pi.prompts.systemTab")}
+              </TabsTrigger>
+              <TabsTrigger value="templates">
+                {t("pi.prompts.templatesTab")}
+              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -299,24 +295,27 @@ const PiPromptPanel = React.forwardRef<PiPromptPanelHandle, PiPromptPanelProps>(
             />
           </TabsContent>
 
-          {!isRemote && (
-            <TabsContent
-              value="system"
-              className="m-0 min-h-0 flex-1 overflow-hidden"
-            >
-              <ScrollArea className="-mr-3 h-full" type="auto">
-                <div className="pb-16 pr-3">
-                  <PiSystemPromptFiles />
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          )}
+          <TabsContent
+            value="system"
+            className="m-0 min-h-0 flex-1 overflow-hidden"
+          >
+            <ScrollArea className="-mr-3 h-full" type="auto">
+              <div className="pb-16 pr-3">
+                <PiSystemPromptFiles
+                  remoteTargetId={remoteTargetId}
+                  remoteContainerId={remoteContainerId}
+                />
+              </div>
+            </ScrollArea>
+          </TabsContent>
 
-          {!isRemote && (
-            <TabsContent value="templates" className="m-0 min-h-0 min-w-0 flex-1">
-              <PiPromptTemplates ref={templatesRef} />
-            </TabsContent>
-          )}
+          <TabsContent value="templates" className="m-0 min-h-0 min-w-0 flex-1">
+            <PiPromptTemplates
+              ref={templatesRef}
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId}
+            />
+          </TabsContent>
         </Tabs>
 
         {isFormOpen && (
