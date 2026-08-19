@@ -987,6 +987,60 @@ export function AboutSection({ isPortable }: AboutSectionProps) {
         )}
       </motion.div>
 
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, delay: 0.15 }}
+        className="rounded-xl border border-border bg-gradient-to-br from-card/80 to-card/40 p-6 space-y-5 shadow-sm"
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-8">
+            <div className="flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
+                <img src={appIcon} alt="CC Switch" className="h-5 w-5" />
+                <h4 className="text-lg font-semibold text-foreground">
+                  {t("settings.modifiedAppTitle")}
+                </h4>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="gap-1.5 bg-background/80"
+                >
+                  <span className="text-muted-foreground">
+                    {t("common.version")}
+                  </span>
+                  {isLoadingVersion ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <span className="font-medium">{`v${displayVersion}-${t(
+                      "settings.modifiedVersionSuffix",
+                    )}`}</span>
+                  )}
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                settingsApi.openExternal(
+                  "https://github.com/Amengclass/cc-switch",
+                )
+              }
+              className="h-8 gap-1.5 text-xs"
+            >
+              <Github className="h-3.5 w-3.5" />
+              {t("settings.modifiedGithub")}
+            </Button>
+          </div>
+        </div>
+      </motion.div>
+
       <div className="space-y-3">
         <div className="flex flex-col gap-2 px-1 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="text-sm font-medium">{t("settings.localEnvCheck")}</h3>
