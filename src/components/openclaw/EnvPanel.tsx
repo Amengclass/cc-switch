@@ -8,10 +8,15 @@ import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 import { parseOpenClawEnvEditorValue } from "./utils";
 
-const EnvPanel: React.FC = () => {
+interface EnvPanelProps {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}
+
+const EnvPanel: React.FC<EnvPanelProps> = ({ remoteTargetId, remoteContainerId }) => {
   const { t } = useTranslation();
-  const { data: envData, isLoading } = useOpenClawEnv();
-  const saveEnvMutation = useSaveOpenClawEnv();
+  const { data: envData, isLoading } = useOpenClawEnv(remoteTargetId, remoteContainerId);
+  const saveEnvMutation = useSaveOpenClawEnv(remoteTargetId, remoteContainerId);
   const [editorValue, setEditorValue] = useState("{}");
   const [isDarkMode, setIsDarkMode] = useState(false);
 

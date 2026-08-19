@@ -3671,6 +3671,191 @@ pub async fn get_remote_openclaw_default_model(
     Ok(default_model)
 }
 
+// ============================================================================
+// 远端 OpenClaw 配置管理（env / tools / agents.defaults）
+// ============================================================================
+
+/// 获取远端 OpenClaw 的 env 配置（对齐本机 `openclawApi.getEnv`）。
+#[tauri::command]
+pub async fn get_remote_openclaw_env(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<crate::openclaw_config::OpenClawEnvConfig, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let merged: serde_json::Value = match session
+        .read_remote_text(&config_path, container.as_deref())
+        .await?
+    {
+        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
+        None => json!({}),
+    };
+
+    let env_value = merged.get("env").cloned().unwrap_or_else(|| json!({}));
+    serde_json::from_value(env_value)
+        .map_err(|e| format!("解析远端 OpenClaw env 配置失败: {e}"))
+}
+
+/// 设置远端 OpenClaw 的 env 配置（对齐本机 `openclawApi.setEnv`）。
+#[tauri::command]
+pub async fn set_remote_openclaw_env(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    env: crate::openclaw_config::OpenClawEnvConfig,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
+    let source = read.as_deref();
+
+    let env_value = serde_json::to_value(&env)
+        .map_err(|e| format!("序列化 env 配置失败: {e}"))?;
+    let new_text =
+        crate::openclaw_config::set_section_preserve_format(source, "env", &env_value)
+            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
+
+    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
+    session
+        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
+        .await?;
+    Ok(())
+}
+
+/// 获取远端 OpenClaw 的 tools 配置（对齐本机 `openclawApi.getTools`）。
+#[tauri::command]
+pub async fn get_remote_openclaw_tools(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<crate::openclaw_config::OpenClawToolsConfig, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let merged: serde_json::Value = match session
+        .read_remote_text(&config_path, container.as_deref())
+        .await?
+    {
+        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
+        None => json!({}),
+    };
+
+    let tools_value = merged.get("tools").cloned().unwrap_or_else(|| json!({}));
+    serde_json::from_value(tools_value)
+        .map_err(|e| format!("解析远端 OpenClaw tools 配置失败: {e}"))
+}
+
+/// 设置远端 OpenClaw 的 tools 配置（对齐本机 `openclawApi.setTools`）。
+#[tauri::command]
+pub async fn set_remote_openclaw_tools(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    tools: crate::openclaw_config::OpenClawToolsConfig,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
+    let source = read.as_deref();
+
+    let tools_value = serde_json::to_value(&tools)
+        .map_err(|e| format!("序列化 tools 配置失败: {e}"))?;
+    let new_text =
+        crate::openclaw_config::set_section_preserve_format(source, "tools", &tools_value)
+            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
+
+    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
+    session
+        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
+        .await?;
+    Ok(())
+}
+
+/// 获取远端 OpenClaw 的 agents.defaults 配置（对齐本机 `openclawApi.getAgentsDefaults`）。
+#[tauri::command]
+pub async fn get_remote_openclaw_agents_defaults(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Option<crate::openclaw_config::OpenClawAgentsDefaults>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let merged: serde_json::Value = match session
+        .read_remote_text(&config_path, container.as_deref())
+        .await?
+    {
+        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
+        None => json!({}),
+    };
+
+    let defaults_value = merged
+        .get("agents")
+        .and_then(|a| a.get("defaults"))
+        .cloned();
+
+    match defaults_value {
+        Some(v) => {
+            let defaults: crate::openclaw_config::OpenClawAgentsDefaults =
+                serde_json::from_value(v)
+                    .map_err(|e| format!("解析远端 OpenClaw agents.defaults 失败: {e}"))?;
+            Ok(Some(defaults))
+        }
+        None => Ok(None),
+    }
+}
+
+/// 设置远端 OpenClaw 的 agents.defaults 配置（对齐本机 `openclawApi.setAgentsDefaults`）。
+#[tauri::command]
+pub async fn set_remote_openclaw_agents_defaults(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+    defaults: crate::openclaw_config::OpenClawAgentsDefaults,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let config_path = format!("{home}/.openclaw/openclaw.json");
+
+    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
+    let source = read.as_deref();
+
+    // 构建 agents.defaults JSON
+    let defaults_value = serde_json::to_value(&defaults)
+        .map_err(|e| format!("序列化 agents.defaults 失败: {e}"))?;
+
+    let new_text =
+        crate::openclaw_config::set_nested_section_preserve_format(source, "agents", "defaults", &defaults_value)
+            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
+
+    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
+    session
+        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
+        .await?;
+    Ok(())
+}
+
 /// 获取远端 Hermes 的 `model` 段（对齐本机 `get_hermes_model_config`）。
 /// 远端「设为默认 / 切换」写远端 config.yaml 的 model.provider，前端按钮态必须读
 /// 同一文件才能正确高亮「当前激活」；本机命令读本机文件，远端目标下会读到错误数据。

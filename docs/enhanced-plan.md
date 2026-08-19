@@ -357,6 +357,7 @@
 | 远端导入合并对齐本机(2026-08-16) | UnifiedSkillsPanel 远端「导入已有」成功后更新 installed 缓存，从 `[...old, ...installed]` 简单拼接改为 `mergeImportedSkills(old, installed)`（按 id 去重、新记录覆盖旧），与本机 `useImportSkillsFromApps.onSuccess` 完全一致。提交 23b49ff5 |
 | **Pi 远端全面支持(2026-08-19)** | Pi 的远程主机控制面全面补齐，涉及 SKILL / Prompts / Sessions / 供应商四个面板。详见下方「Pi 远端支持(2026-08-19)」小节。提交序列:8ed34c9a → 154eb26b → b19e255a → 35d5432d → bdd4a980 → 8c589461 → 102a6fc8 → e3e4f217 → 1cfb7eae |
 | **远端供应商面板修复(2026-08-19)** | 远端供应商排序/重复导入/配置持久化三个问题修复。详见下方「远端供应商面板修复(2026-08-19)」小节。提交序列:cd2b1a25 → f477ec87 → 97de9a53 |
+| **OpenClaw 远端配置支持(2026-08-19)** | OpenClaw 的环境变量/工具/代理默认设置三个面板支持远程主机操作。详见下方「OpenClaw 远端配置支持(2026-08-19)」小节。 |
 
 ### Pi 远端支持(2026-08-19)
 
@@ -431,6 +432,25 @@
 - 根因:用量查询配置等元数据保存在本地 DB，不写远端 SSOT
 - 修复:新增 `update_remote_provider_meta` 远端命令；`useProviderActions.saveUsageScript` 远端模式调 `updateRemoteProviderMeta` 写远端 SSOT，不写本地 DB
 
+### OpenClaw 远端配置支持(2026-08-19)
+
+> OpenClaw 的环境变量/工具/代理默认设置三个面板支持远程主机操作，修复远端下操作实际修改本机的静默错误。
+
+**新增后端命令(src-tauri/src/remote/commands.rs):**
+- `get_remote_openclaw_env` / `set_remote_openclaw_env` - 读写远端 `~/.openclaw/openclaw.json` 的 env 段
+- `get_remote_openclaw_tools` / `set_remote_openclaw_tools` - 读写远端 `~/.openclaw/openclaw.json` 的 tools 段
+- `get_remote_openclaw_agents_defaults` / `set_remote_openclaw_agents_defaults` - 读写远端 `~/.openclaw/openclaw.json` 的 agents.defaults 段
+
+**辅助函数(src-tauri/src/openclaw_config.rs):**
+- `set_section_preserve_format` - 保形设置顶层 section（供远端命令使用）
+- `set_nested_section_preserve_format` - 保形设置嵌套 section（如 agents.defaults）
+
+**前端改动:**
+- `src/lib/api/remote.ts` - 新增 6 个远端 API 函数
+- `src/hooks/useOpenClaw.ts` - 所有 query/mutation hooks 支持 `remoteTargetId`/`remoteContainerId` 参数
+- `EnvPanel.tsx` / `ToolsPanel.tsx` / `AgentsDefaultsPanel.tsx` - 组件接受远端 props
+- `App.tsx` - 传递 `remoteTargetId`/`remoteContainerId` 到 openclaw 面板
+
 ### i18n 与 UI 修复(2026-08-19)
 
 > 修复硬编码中文文案，优化 UI 细节。
@@ -443,6 +463,31 @@
 **UI 优化:**
 - 远程主机筛选下拉框：添加 `className="min-w-0 w-auto"` 去除右侧空白
 - 批量应用搜索框：替换 raw `<input>` 为 `ManagementListSearch` 组件，对齐远程主机风格
+
+### 远端 Provider 使用统计显示名称(2026-08-19)
+
+> 使用统计中，远端 Provider 显示为 UUID（如 `9547eea1-f0c8-4d3a-a422-27be1885053c`），不够友好。
+
+**问题原因：**
+- 远端 Provider ID 是 UUID 格式，存储在 `~/.cc-switch/providers-{app}.json`
+- 使用统计记录时，使用远端 Provider 的 UUID 作为 `provider_id`
+- 查询统计时，在本地 `providers` 表找不到这个 UUID，所以显示原始 ID
+
+**解决方案（长期）：**
+- **扩展日志表**：在 `proxy_request_logs` 表增加 `remote_host_id` 和 `remote_container` 字段
+- **记录时存储**：使用统计记录时，同时存储主机信息
+- **查询时拼接**：SQL 查询时直接拼接显示名称
+- **显示格式**：`{主机IP}({目标类型}) → {Provider名称}`
+  - 示例：`192.168.1.100(宿主机) → Claude Opus`
+  - 示例：`192.168.1.100(容器:redis) → GPT-4`
+- **优势**：
+  - 数据自包含，查询快
+  - 可按主机/容器筛选
+  - 不依赖实时远端连接
+- **改动点**：
+  - 数据库迁移：增加字段
+  - 使用统计记录逻辑：记录远端请求时存储主机信息
+  - 查询逻辑：SQL 中拼接显示名称
 
 ### ⏳ 远程·待完成(优先级从高到低)
 
@@ -469,21 +514,23 @@
 | Sessions(🕘) | ✅ 适配(1 处残留) | 读/删走远端;**resume 仍走本机 launchTerminal**(SessionManagerPage.tsx:447-469)；**Pi 会话远端全支持(2026-08-19)** |
 | Skills(🔧) | ✅ 远端全适配(2026-08-19) | 列表/toggle/卸载/导入/ZIP/发现安装/更新全走远端；**Pi 远端全支持** |
 | openclaw 工作区(📁) | ❌ 未适配 | 纯本机 workspaceApi,App.tsx 未传 remote props(1502) |
-| openclaw 环境变量(🔑) | ❌ 未适配 | 纯本机 openclawApi(1504) |
-| openclaw 工具(🛡) | ❌ 未适配 | 纯本机 openclawApi(1506) |
-| openclaw Agents(⚙️) | ❌ 未适配 | 纯本机 openclawApi(1508) |
+| openclaw 环境变量(🔑) | ✅ 已适配(2026-08-19) | `get_remote_openclaw_env` / `set_remote_openclaw_env`，hooks 支持远端模式 |
+| openclaw 工具(🛡) | ✅ 已适配(2026-08-19) | `get_remote_openclaw_tools` / `set_remote_openclaw_tools`，hooks 支持远端模式 |
+| openclaw Agents(⚙️) | ✅ 已适配(2026-08-19) | `get_remote_openclaw_agents_defaults` / `set_remote_openclaw_agents_defaults`，hooks 支持远端模式 |
 | hermes 记忆(🧠) | ❌ 未适配 | 纯本机 hermesApi(App.tsx:1445 无 remote props) |
 | hermes WebUI(📊) | ❌ 未适配 | 纯本机 open_hermes_web_ui(App.tsx:2088) |
 
 **后端命令覆盖核对(src-tauri/src/remote/commands.rs):**
 - 已有远端命令:providers 全 CRUD/切换、sessions、MCP、prompts、skills、env 冲突扫描/清理、settings 读取、docker 容器列表、openclaw 默认模型、主机管理
-- **完全没有**:workspace 文件读写、hermes memory、openclaw env/tools/agents 配置的远端命令(`remote_workspace|remote_hermes|remote_openclaw_env|remote_openclaw_tools|remote_openclaw_agents` 全 src-tauri/src 无匹配)
+- **openclaw 配置命令(2026-08-19 已完成)**:openclaw env/tools/agents.defaults 的读写命令已实现
+- **未完成**:workspace 文件读写、hermes memory 的远端命令
 
 **缺口清单(按优先级):**
-1. **高**:openclaw 环境变量/工具/Agents + hermes 记忆 —— 远端下操作的是**本机**(静默错误:用户以为改了远端,实际改本机)
-2. **中**:openclaw 工作区(文件读写,工作量较大)
-3. **低**:hermes WebUI(远端无浏览器概念,建议远端下禁用/隐藏按钮)
-4. **低**:Skills 备份/恢复(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
+1. ~~**高**:openclaw 环境变量/工具/Agents~~ ✅ **已修复(2026-08-19)**:新增 6 个远端命令，前端 hooks 支持远端模式
+2. **高**:hermes 记忆 —— 远端下操作的是**本机**(静默错误:用户以为改了远端,实际改本机)
+3. **中**:openclaw 工作区(文件读写,工作量较大)
+4. **低**:hermes WebUI(远端无浏览器概念,建议远端下禁用/隐藏按钮)
+5. **低**:Skills 备份/恢复(远端下禁用,建议提示或补远端备份)+ Sessions resume(本机终端执行)
 
 ---
 

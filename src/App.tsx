@@ -1712,11 +1712,26 @@ function App() {
         case "workspace":
           return <WorkspaceFilesPanel />;
         case "openclawEnv":
-          return <EnvPanel />;
+          return (
+            <EnvPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         case "openclawTools":
-          return <ToolsPanel />;
+          return (
+            <ToolsPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         case "openclawAgents":
-          return <AgentsDefaultsPanel />;
+          return (
+            <AgentsDefaultsPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         default:
           return (
             <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">

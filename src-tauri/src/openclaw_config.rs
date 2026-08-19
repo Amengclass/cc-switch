@@ -706,7 +706,8 @@ pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOut
 /// 保形重写任意顶层段（供远端复用的纯变换，不落盘）。
 /// 解析 `source`（JSON5，严格；None/空白 → 默认骨架），将 `value` 替换到
 /// `section` 键，返回保形新文本；其余顶层段注释/排版原样保留。
-fn set_section_preserve_format(
+/// 保形设置顶层 section（供远端命令使用）。
+pub fn set_section_preserve_format(
     source: Option<&str>,
     section: &str,
     value: &Value,
@@ -720,6 +721,34 @@ fn set_section_preserve_format(
         OpenClawConfigDocument::from_source(Some(effective_source.to_string()), PathBuf::new())?;
     doc.set_root_section(section, value)?;
     Ok(doc.text.to_string())
+}
+
+/// 保形设置嵌套 section（如 agents.defaults，供远端命令使用）。
+pub fn set_nested_section_preserve_format(
+    source: Option<&str>,
+    parent_section: &str,
+    child_section: &str,
+    value: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+
+    let mut full_config = json5::from_str::<Value>(effective_source).map_err(|e| {
+        AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+    })?;
+    let root = ensure_object(&mut full_config);
+    let parent = root
+        .entry(parent_section.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    ensure_object(parent).insert(child_section.to_string(), value.clone());
+
+    let parent_value = root
+        .get(parent_section)
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    set_section_preserve_format(Some(effective_source), parent_section, &parent_value)
 }
 
 pub(crate) fn upsert_provider_preserve_format(

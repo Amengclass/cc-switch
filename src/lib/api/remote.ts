@@ -1033,3 +1033,85 @@ export async function importRemoteSkill(
 export async function listDockerContainers(hostId: string): Promise<string[]> {
   return invoke<string[]>("list_docker_containers", { hostId });
 }
+
+// ============================================================================
+// 远端 OpenClaw 配置管理（env / tools / agents.defaults）
+// ============================================================================
+
+import type {
+  OpenClawEnvConfig,
+  OpenClawToolsConfig,
+  OpenClawAgentsDefaults,
+} from "@/types";
+
+/** 获取远端 OpenClaw 的 env 配置 */
+export async function getRemoteOpenClawEnv(
+  hostId: string,
+  container?: string,
+): Promise<OpenClawEnvConfig> {
+  return invoke<OpenClawEnvConfig>("get_remote_openclaw_env", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 设置远端 OpenClaw 的 env 配置 */
+export async function setRemoteOpenClawEnv(
+  hostId: string,
+  env: OpenClawEnvConfig,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("set_remote_openclaw_env", {
+    hostId,
+    container: container ?? null,
+    env,
+  });
+}
+
+/** 获取远端 OpenClaw 的 tools 配置 */
+export async function getRemoteOpenClawTools(
+  hostId: string,
+  container?: string,
+): Promise<OpenClawToolsConfig> {
+  return invoke<OpenClawToolsConfig>("get_remote_openclaw_tools", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 设置远端 OpenClaw 的 tools 配置 */
+export async function setRemoteOpenClawTools(
+  hostId: string,
+  tools: OpenClawToolsConfig,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("set_remote_openclaw_tools", {
+    hostId,
+    container: container ?? null,
+    tools,
+  });
+}
+
+/** 获取远端 OpenClaw 的 agents.defaults 配置 */
+export async function getRemoteOpenClawAgentsDefaults(
+  hostId: string,
+  container?: string,
+): Promise<OpenClawAgentsDefaults | null> {
+  return invoke<OpenClawAgentsDefaults | null>("get_remote_openclaw_agents_defaults", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 设置远端 OpenClaw 的 agents.defaults 配置 */
+export async function setRemoteOpenClawAgentsDefaults(
+  hostId: string,
+  defaults: OpenClawAgentsDefaults,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("set_remote_openclaw_agents_defaults", {
+    hostId,
+    container: container ?? null,
+    defaults,
+  });
+}
