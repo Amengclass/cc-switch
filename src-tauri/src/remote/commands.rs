@@ -1909,7 +1909,7 @@ pub async fn list_remote_sessions_detailed(
         "codex" => format!("{home}/.codex"),
         "gemini" => format!("{home}/.gemini/tmp"),
         "openclaw" => format!("{home}/.openclaw/agents"),
-        "pi" => format!("{home}/.pi/sessions"),
+        "pi" => format!("{home}/.pi/agent/sessions"),
         "hermes" | "opencode" => home.clone(),
         other => {
             return Err(format!("远程会话管理暂不支持应用 {other}"));
@@ -1990,6 +1990,9 @@ pub async fn list_remote_sessions_detailed(
         }
         "openclaw" => {
             crate::session_manager::providers::openclaw::scan_sessions_fs(&target, &root).await
+        }
+        "pi" => {
+            crate::session_manager::providers::pi::scan_sessions_fs(&target, &root).await
         }
         _ => unreachable!(),
     })
@@ -2134,6 +2137,13 @@ pub async fn get_remote_session_messages(
                     content.lines().map(|s| s.to_string()),
                 ),
             )
+        }
+        "pi" => {
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            crate::session_manager::providers::pi::parse_messages_from_content(&content)
         }
         other => Err(format!("远程会话管理暂不支持应用 {other}")),
     }
@@ -2332,6 +2342,26 @@ pub async fn delete_remote_session(
                 &[session_id.as_str()],
             )
             .await?;
+            Ok(true)
+        }
+        "pi" => {
+            // Pi 会话是单个 JSONL 文件：读内容校验 session_id，然后删除文件
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            let meta = crate::session_manager::providers::pi::parse_session_from_content(
+                &source_path,
+                &content,
+            )
+            .map_err(|e| format!("无法解析远端 Pi 会话: {e}"))?;
+            if meta.session_id != session_id {
+                return Err(format!(
+                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
+                    meta.session_id
+                ));
+            }
+            target.remove_file(&source_path).await?;
             Ok(true)
         }
         other => Err(format!("远程会话管理暂不支持应用 {other}")),

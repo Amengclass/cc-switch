@@ -201,8 +201,8 @@ export function SessionManagerPage({
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  // 远程会话支持全部 7 个 app：claude/grokbuild/codex/gemini/openclaw 为纯文件源，
-  // hermes/opencode 经远端 sqlite-helper 查 SQLite 主存储
+  // 远程会话支持全部 8 个 app：claude/grokbuild/codex/gemini/openclaw 为纯文件源，
+  // hermes/opencode 经远端 sqlite-helper 查 SQLite 主存储，pi 走 ~/.pi/sessions
   const effectiveRemoteTargetId =
     appId === "claude" ||
     appId === "grokbuild" ||
@@ -210,7 +210,8 @@ export function SessionManagerPage({
     appId === "gemini" ||
     appId === "openclaw" ||
     appId === "hermes" ||
-    appId === "opencode"
+    appId === "opencode" ||
+    appId === "pi"
       ? remoteTargetId
       : undefined;
   const { data, isLoading, isFetching, refetch } = useSessionsQuery(
