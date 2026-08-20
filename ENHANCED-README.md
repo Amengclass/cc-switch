@@ -1,4 +1,4 @@
-# CC Switch 增强版（魔改版）
+# CC Switch Magic（增强版）
 
 > 基于 [farion1231/cc-switch](https://github.com/farion1231/cc-switch) 的 **Fork 增强版**：保持上游全部功能**零裁剪**（纯 `git merge` 即可同步上游），在之上新增 **SSH 远程主机统一控制面**。
 >

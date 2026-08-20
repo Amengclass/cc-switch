@@ -14,7 +14,7 @@ interface RemoteProviderSettingsProps {
 /**
  * 「远端设置」分组：存放远端宿主机/容器的供应商面板个性化选项。
  *
- * 第一项是「远端功能总开关」：关掉即整体隐藏本 fork 魔改的远程入口，
+ * 第一项是「远端功能总开关」：关掉即整体隐藏本 fork Magic 的远程入口，
  * 还原成原生 cc-switch 行为（目标选择器、工具栏、导航均无远端项）。
  *
  * 第二项：非 additive app（claude/codex/gemini/grokbuild）的 default 卡
