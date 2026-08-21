@@ -38,16 +38,16 @@ export function statusColor(pct: number | null): string {
 }
 
 /**
- * 与主窗口 UsageFooter 同款的分级规则：
- * 已过期（isValid=false）→ 红；剩余 < (total||remaining)*10% → 橙；否则绿。
+ * 与主窗口供应商面板 UsageFooter 同款的分级规则（按已使用量 utilization 分档）：
+ * 已过期（isValid=false）→ 红；used >= 90 → 红；used >= 70 → 橙；否则绿。
  * 返回 CSS 类名，深浅色主题由 floating.css 内的 .dark 覆盖。
  */
 export function usageValueClass(d: FloatingUsageData): string {
   if (d.isValid === false) return "usage-value-danger";
-  const remaining = d.remaining;
-  if (remaining != null && isFinite(remaining)) {
-    const threshold = (d.total || remaining) * 0.1;
-    return remaining < threshold ? "usage-value-warn" : "usage-value-good";
+  const used = d.used;
+  if (used != null && isFinite(used)) {
+    if (used >= 90) return "usage-value-danger";
+    if (used >= 70) return "usage-value-warn";
   }
   return "usage-value-good";
 }
