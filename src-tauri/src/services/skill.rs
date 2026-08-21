@@ -2035,9 +2035,19 @@ impl SkillService {
 
             // 其他应用保存用户选择；Pi 的 exists=active 必须直接来自原生目录。
             let mut apps = selection.apps;
-            // 若用户勾选 Pi：把技能真正部署到 ~/.pi/agent/skills/（与其他 app 的
-            // "勾选 = 启用"一致）。sync_to_app_dir 内含同名冲突保护，若 Pi 目录已存在
-            // 同名但内容不同的外部技能会报错，此时让该技能导入失败，避免静默"勾了没生效"。
+
+            // 勾选 = 同步落盘到对应 app 的 skills 目录；全灭则只进 SSOT 托管。
+            // Pi 保留原逻辑单独处理（含同名冲突保护）。
+            for app in AppType::all() {
+                if matches!(app, AppType::Pi) {
+                    continue;
+                }
+                if apps.is_enabled_for(&app) {
+                    Self::sync_to_app_dir(&dir_name, &app)?;
+                }
+            }
+
+            // Pi 的 exists=active 必须直接来自原生目录。
             if apps.pi {
                 Self::sync_to_app_dir(&dir_name, &AppType::Pi)?;
             }
