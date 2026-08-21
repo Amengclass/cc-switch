@@ -63,7 +63,7 @@ function UsageDetail({
 }: {
   d: FloatingUsageData;
   showPlan?: boolean;
-  /** 主用量的维度前缀（如 "h"），渲染成「剩余：h 100%」 */
+  /** 主用量的维度前缀（如 "h"），渲染成「已使用：h 100%」 */
   dimPrefix?: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
@@ -248,7 +248,7 @@ export function FloatingPanel() {
                       {extraItems.length > 0 && (
                         <span className="usage-chips">
                           {extraItems.map((d, i) => {
-                            const r = d.remaining;
+                            const r = d.used;
                             const hasVal = r != null && isFinite(r);
                             return (
                               <span className="usage-chip" key={i}>
