@@ -49,27 +49,40 @@ interface Summary {
   usageUnit: string;
   /** 多套餐订阅：每行一个套餐缩写（如 h5% / d20% / m30%），右半区三行显示 */
   usageLines: string[] | null;
+  /** 多套餐时每行独立颜色等级（与 usageLines 一一对应） */
+  usageLineLevels: UsageLevel[] | null;
   /** 悬浮窗不透明度（0.2~1.0，设置页滑块调节） */
   opacity: number;
 }
 
 type UsageLevel = "danger" | "warn" | "good" | "none";
 
+/** 单个用量条目的颜色等级（与供应商面板 usageValueClass 阈值一致） */
+function usageLevel(d: FloatingUsageData): UsageLevel {
+  if (d.isValid === false) return "danger";
+  const used = d.used;
+  if (used != null && isFinite(used)) {
+    if (used >= 90) return "danger";
+    if (used >= 70) return "warn";
+  }
+  return "good";
+}
+
 /**
- * 镜像主窗口 UsageFooter 规则（与托盘/卡片/面板一致）：
- * `isValid === false` → danger；`remaining < (total || remaining) * 0.1` → warn；否则 good。
- * 多套餐时取所有套餐里最差的一个（任一过期→danger，任一低于阈值→warn）。
- * 副作用与主窗口一致：0 余额无过期标记 → good；负余额 → warn。
+ * 悬浮球状态色分级（与主窗口 UsageFooter 语义一致）：
+ * `isValid === false` → danger（红）；`used >= 90` → warn（橙）；否则 good（绿）。
+ * 多套餐时取所有套餐里最差的一个。
+ * 注：悬浮球只做 3 级（红/橙/绿），>=90 是 warn 不是 danger，
+ * 与供应商面板的 3 级（>=90 红、>=70 橙）不同——球体小，不需要那么细。
  */
 function worstUsageLevel(usage: FloatingUsageData[] | null): UsageLevel {
   if (!usage || usage.length === 0) return "none";
   let warn = false;
   for (const d of usage) {
     if (d.isValid === false) return "danger";
-    const remaining = d.remaining;
-    if (remaining != null && isFinite(remaining)) {
-      const threshold = (d.total || remaining) * 0.1;
-      if (remaining < threshold) warn = true;
+    const used = d.used;
+    if (used != null && isFinite(used)) {
+      if (used >= 90) warn = true;
     }
   }
   return warn ? "warn" : "good";
@@ -145,16 +158,18 @@ async function loadSummary(
   let usageValue: string;
   let usageUnit = "";
   let usageLines: string[] | null = null;
+  let usageLineLevels: UsageLevel[] | null = null;
   if (entry.usage && entry.usage.length > 1) {
     usageLines = entry.usage.map((u) => {
-      const r = u.remaining ?? 0;
+      const r = u.used ?? 0;
       return `${planAbbr(u.planName)}${Math.round(r)}%`;
     });
+    usageLineLevels = entry.usage.map((u) => usageLevel(u));
     usageValue = "";
   } else {
     const d = entry.usage?.[0];
-    if (d && d.remaining != null && isFinite(d.remaining)) {
-      usageValue = d.remaining.toFixed(2);
+    if (d && d.used != null && isFinite(d.used)) {
+      usageValue = d.used.toFixed(2);
       usageUnit = d.unit ?? "";
     } else {
       usageValue = entry.usageSummary ?? t("floating.notSet");
@@ -174,6 +189,7 @@ async function loadSummary(
     usageValue,
     usageUnit,
     usageLines,
+    usageLineLevels,
     opacity,
   };
 }
@@ -198,6 +214,7 @@ export function FloatingBall() {
     usageValue: "—",
     usageUnit: "",
     usageLines: null,
+    usageLineLevels: null,
     opacity: 0.97,
   });
 
@@ -299,18 +316,21 @@ export function FloatingBall() {
         }
       >
         {summary.usageLines ? (
-          summary.usageLines.map((line, i) => (
-            <span
-              key={i}
-              className={
-                summary.level === "none"
-                  ? undefined
-                  : `usage-value-${summary.level}`
-              }
-            >
-              {line}
-            </span>
-          ))
+          summary.usageLines.map((line, i) => {
+            const lineLevel = summary.usageLineLevels?.[i] ?? summary.level;
+            return (
+              <span
+                key={i}
+                className={
+                  lineLevel === "none"
+                    ? undefined
+                    : `usage-value-${lineLevel}`
+                }
+              >
+                {line}
+              </span>
+            );
+          })
         ) : (
           <>
             <span
