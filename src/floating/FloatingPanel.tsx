@@ -67,7 +67,6 @@ function UsageDetail({
   dimPrefix?: string;
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
-  const hasRemaining = d.remaining != null && isFinite(d.remaining);
   const hasUsed = d.used != null && isFinite(d.used);
   const nodes: ReactNode[] = [];
 
@@ -82,17 +81,9 @@ function UsageDetail({
     nodes.push(
       <span key="used" className="usage-item">
         <span className="usage-label">{t("floating.used")}</span>
-        <span className="usage-value">{d.used!.toFixed(2)}</span>
-      </span>,
-    );
-  }
-  if (hasRemaining) {
-    nodes.push(
-      <span key="rem" className="usage-item">
-        <span className="usage-label">{t("floating.remaining")}</span>
         <span className={`usage-value ${usageValueClass(d)}`}>
           {dimPrefix ? `${dimPrefix} ` : ""}
-          {d.remaining!.toFixed(2)}
+          {d.used!.toFixed(2)}
         </span>
         {d.unit && <span className="usage-unit">{d.unit}</span>}
       </span>,
