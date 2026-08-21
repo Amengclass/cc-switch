@@ -565,10 +565,10 @@ body {
 .dark .usage-value-danger {
   color: #f87171; /* red-400 */
 }
-/* 多套餐 chips 容器：在余量列内横向换行、右对齐（和主用量同一右基准） */
+/* 多套餐 chips 容器：在余量列内横向同行、右对齐（和主用量同一右基准） */
 .usage-chips {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 3px;
   max-width: 100%;
