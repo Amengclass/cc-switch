@@ -217,8 +217,6 @@ export function FloatingBall() {
     usageLineLevels: null,
     opacity: 0.97,
   });
-  const [collapsed, setCollapsed] = useState(false);
-  const [collapseEdge, setCollapseEdge] = useState<string>("left");
   const [previewEdge, setPreviewEdge] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -251,21 +249,9 @@ export function FloatingBall() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
-    // 边缘收起/展开事件
-    void listen<{ edge?: string }>("floating-collapse", (ev) => {
-      setCollapsed(true);
-      setPreviewEdge(null);
-      setCollapseEdge(ev.payload?.edge ?? "left");
-    }).then((u) => unlisteners.push(u));
-    void listen("floating-expand", () => {
-      setCollapsed(false);
-      setPreviewEdge(null);
-    }).then((u) => unlisteners.push(u));
-    // 拖拽预览事件
+    // 拖拽收起预览事件
     void listen<{ edge?: string }>("floating-collapse-preview", (ev) => {
-      if (!collapsed) {
-        setPreviewEdge(ev.payload?.edge ?? "left");
-      }
+      setPreviewEdge(ev.payload?.edge ?? "left");
     }).then((u) => unlisteners.push(u));
     void listen("floating-collapse-preview-cancel", () => {
       setPreviewEdge(null);
@@ -286,41 +272,6 @@ export function FloatingBall() {
       console.error("[Floating] 拖动开始失败", err),
     );
   };
-
-  // 收起状态：白色抽屉条 + 用量颜色小圆点指示器
-  if (collapsed) {
-    const isVertical = collapseEdge === "left" || collapseEdge === "right";
-    return (
-      <div
-        className="ball-collapsed"
-        style={{
-          width: isVertical ? 8 : "100%",
-          height: isVertical ? "100%" : 8,
-          background: "rgba(255,255,255,0.92)",
-          borderRadius: isVertical ? "0 4px 4px 0" : "0 0 4px 4px",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
-          position: "relative",
-        }}
-        onPointerDown={onPointerDown}
-        onPointerUp={() => void invoke("floating_drag_end")}
-        onPointerCancel={() => void invoke("floating_drag_end")}
-      >
-        {/* 用量颜色小圆点 */}
-        <div
-          style={{
-            width: isVertical ? 4 : 20,
-            height: isVertical ? 20 : 4,
-            background: summary.color,
-            borderRadius: 2,
-          }}
-        />
-      </div>
-    );
-  }
 
   // 拖拽预览：靠近边缘时在球上方叠加一条半透明色条预览
   const showPreview = !!previewEdge;

@@ -1795,6 +1795,7 @@ pub fn run() {
             floating::disable_floating_window,
             floating::floating_drag_begin,
             floating::floating_drag_end,
+            floating::floating_expand_from_strip,
             floating::show_floating_context_menu,
             floating::hide_floating_menu,
             floating::floating_open_settings,

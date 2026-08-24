@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -97,6 +97,87 @@ function FloatingHoverLayer({
   );
 }
 
+/**
+ * 收起后的色条：白色半透明条 + 用量颜色指示器。
+ * 窗口尺寸由 Rust collapse_ball 按边缘方向设置（左/右=窄竖条，上/下=宽横条），
+ * React 只需填满窗口并显示颜色指示。
+ */
+function FloatingStrip() {
+  const [color, setColor] = useState("#94a3b8");
+  const [opacity, setOpacity] = useState(0.92);
+
+  useEffect(() => {
+    let alive = true;
+    // 从后端读取当前用量颜色
+    void invoke("get_floating_ball_detail").then((entry: any) => {
+      if (!alive || !entry) return;
+      // 复用球的颜色等级逻辑
+      let level = "good";
+      if (entry.usage && entry.usage.length > 0) {
+        for (const u of entry.usage) {
+          if (u.isValid === false) { level = "danger"; break; }
+          if (u.used != null && u.used >= 90) { level = "warn"; }
+        }
+      }
+      const colorMap: Record<string, string> = {
+        danger: "#ef4444", warn: "#f97316", good: "#16a3b8",
+      };
+      setColor(colorMap[level] ?? "#94a3b8");
+    }).catch(() => {});
+    void invoke("get_settings").then((s: any) => {
+      if (alive && s?.floatingOpacity != null) setOpacity(s.floatingOpacity);
+    }).catch(() => {});
+    // 定时刷新颜色
+    const timer = setInterval(() => {
+      void invoke("get_floating_ball_detail").then((entry: any) => {
+        if (!alive || !entry) return;
+        let level = "good";
+        if (entry.usage && entry.usage.length > 0) {
+          for (const u of entry.usage) {
+            if (u.isValid === false) { level = "danger"; break; }
+            if (u.used != null && u.used >= 90) { level = "warn"; }
+          }
+        }
+        const colorMap: Record<string, string> = {
+          danger: "#ef4444", warn: "#f97316", good: "#16a34a",
+        };
+        setColor(colorMap[level] ?? "#94a3b8");
+      }).catch(() => {});
+    }, 2000);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        background: `rgba(255,255,255,${opacity})`,
+        borderRadius: 4,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+        cursor: "pointer",
+      }}
+      onClick={() => void invoke("floating_expand_from_strip")}
+    >
+      <div
+        style={{
+          width: "60%",
+          height: "40%",
+          minWidth: 3,
+          minHeight: 3,
+          maxWidth: 20,
+          maxHeight: 20,
+          background: color,
+          borderRadius: 2,
+        }}
+      />
+    </div>
+  );
+}
+
 function FloatingApp() {
   const label = getCurrentWindow().label;
   return (
@@ -115,6 +196,8 @@ function FloatingApp() {
         </FloatingHoverLayer>
       ) : label === "floating-menu" ? (
         <FloatingContextMenu />
+      ) : label === "floating-strip" ? (
+        <FloatingStrip />
       ) : (
         <div style={{ color: "#fff", padding: 8 }}>unknown window: {label}</div>
       )}
