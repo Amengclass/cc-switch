@@ -792,6 +792,10 @@ pub(crate) fn expand_ball(app: &tauri::AppHandle) {
         return;
     }
 
+    // 先重置状态（避免球显示后第一次拖拽被 is_ball_collapsed 拒绝）
+    *COLLAPSED_EDGE.lock().unwrap() = None;
+    COLLAPSED.store(false, Ordering::Release);
+
     // 取消可能正在进行的拖动
     FLOATING_DRAGGING.store(false, Ordering::Release);
 
@@ -808,9 +812,6 @@ pub(crate) fn expand_ball(app: &tauri::AppHandle) {
         }
         let _ = ball.show();
     }
-
-    *COLLAPSED_EDGE.lock().unwrap() = None;
-    COLLAPSED.store(false, Ordering::Release);
 
     log::info!("[Floating] 悬浮球已展开");
 }
