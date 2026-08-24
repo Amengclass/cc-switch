@@ -99,9 +99,8 @@ function FloatingHoverLayer({
 }
 
 /**
- * 边缘指示 tab：类似 360 悬浮球/联想电脑管家收起态。
- * 从屏幕边缘微微探出的圆角小标签，用量色渐变 + 微光效果。
- * 窗口尺寸由 Rust 设置（6px 厚 × 40px 长），React 填满并渲染 tab 形状。
+ * 边缘指示条：纯色圆角胶囊，从屏幕边缘微微探出。
+ * 颜色 = 当前用量等级（绿/橙/红），点击展开。
  */
 function FloatingStrip() {
   const [color, setColor] = useState("#94a3b8");
@@ -129,35 +128,17 @@ function FloatingStrip() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
 
-  // 360 风格：渐变色 + 圆角胶囊 + 微光
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
-        background: `linear-gradient(180deg, ${color}dd 0%, ${color} 40%, ${color}bb 100%)`,
-        borderRadius: "0 3px 3px 0",
+        background: color,
+        borderRadius: 3,
         cursor: "pointer",
-        boxShadow: `0 0 6px ${color}88, inset 0 1px 1px rgba(255,255,255,0.3)`,
-        position: "relative",
-        overflow: "hidden",
       }}
       onClick={() => void invoke("floating_expand_from_strip")}
-    >
-      {/* 顶部高光条 */}
-      <div
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          height: "40%",
-          background: "linear-gradient(180deg, rgba(255,255,255,0.25) 0%, transparent 100%)",
-          borderRadius: "0 3px 0 0",
-          pointerEvents: "none" as const,
-        }}
-      />
-    </div>
+    />
   );
 }
 

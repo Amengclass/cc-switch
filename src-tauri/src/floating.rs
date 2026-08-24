@@ -760,14 +760,15 @@ fn collapse_ball(app: &tauri::AppHandle) {
     .visible(false)
     .build()
     {
+        // 色条窗口无 FLOATING_MARGIN，直接用物理像素定位
         let _ = strip.set_position(tauri::PhysicalPosition::new(
-            (sx - margin_px).round() as i32,
-            (sy - margin_px).round() as i32,
+            sx.round() as i32,
+            sy.round() as i32,
         ));
         let _ = strip.show();
         log::info!(
-            "[Floating] 色条窗口已创建: edge={:?} size=({:.0},{:.0}) pos=({:.0},{:.0})",
-            edge, strip_logic_w, strip_logic_h, sx - margin_px, sy - margin_px
+            "[Floating] 色条窗口: edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
+            edge, strip_logic_w, strip_logic_h, sx, sy
         );
     }
 
