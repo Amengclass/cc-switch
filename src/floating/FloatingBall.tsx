@@ -287,24 +287,38 @@ export function FloatingBall() {
     );
   };
 
-  // 收起状态：显示为一条颜色色条（左右=竖条，上下=横条）
+  // 收起状态：白色抽屉条 + 用量颜色小圆点指示器
   if (collapsed) {
     const isVertical = collapseEdge === "left" || collapseEdge === "right";
     return (
       <div
         className="ball-collapsed"
         style={{
-          width: isVertical ? 6 : "100%",
-          height: isVertical ? "100%" : 6,
-          background: summary.color,
-          borderRadius: 3,
+          width: isVertical ? 8 : "100%",
+          height: isVertical ? "100%" : 8,
+          background: "rgba(255,255,255,0.92)",
+          borderRadius: isVertical ? "0 4px 4px 0" : "0 0 4px 4px",
           cursor: "pointer",
-          opacity: summary.opacity,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+          position: "relative",
         }}
         onPointerDown={onPointerDown}
         onPointerUp={() => void invoke("floating_drag_end")}
         onPointerCancel={() => void invoke("floating_drag_end")}
-      />
+      >
+        {/* 用量颜色小圆点 */}
+        <div
+          style={{
+            width: isVertical ? 4 : 20,
+            height: isVertical ? 20 : 4,
+            background: summary.color,
+            borderRadius: 2,
+          }}
+        />
+      </div>
     );
   }
 

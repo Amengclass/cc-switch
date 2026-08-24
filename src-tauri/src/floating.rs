@@ -375,6 +375,8 @@ fn snap_and_save_ball_position(app: &tauri::AppHandle) {
         if let Ok(pos) = ball.outer_position() {
             save_ball_logical_position(app, pos.x as f64, pos.y as f64);
         }
+        // 即使不吸附也要检查边缘收起
+        collapse_ball(app);
         return;
     }
     let Some((tx, ty)) = compute_snap_target(&ball) else {
