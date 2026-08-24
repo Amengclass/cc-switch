@@ -140,9 +140,11 @@ static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mut
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 收起色条厚度（逻辑像素）：边缘指示 tab
-const COLLAPSE_STRIP_THICKNESS: f64 = 6.0;
-/// 收起色条长度（逻辑像素）
-const COLLAPSE_STRIP_LENGTH: f64 = 40.0;
+const COLLAPSE_STRIP_THICKNESS: f64 = 5.0;
+/// 左右竖条长度（逻辑像素）
+const COLLAPSE_STRIP_LEN_V: f64 = 28.0;
+/// 上下横条长度（逻辑像素）
+const COLLAPSE_STRIP_LEN_H: f64 = 48.0;
 /// 收起状态热区：鼠标离色条多少像素内触发展开
 const COLLAPSE_EXPAND_HOTZONE: f64 = 24.0;
 
@@ -717,25 +719,26 @@ fn collapse_ball(app: &tauri::AppHandle) {
     let wh = work.size.height as f64;
     let gap = EDGE_GAP * scale;
     let strip_thick = COLLAPSE_STRIP_THICKNESS * scale;
-    let strip_len = COLLAPSE_STRIP_LENGTH * scale;
+    let strip_len_v = COLLAPSE_STRIP_LEN_V * scale; // 左右竖条高度
+    let strip_len_h = COLLAPSE_STRIP_LEN_H * scale; // 上下横条宽度
 
-    // 色条尺寸和位置（物理像素）：短小抽屉条
+    // 色条尺寸和位置（物理像素）
     let (sw, sh, sx, sy) = match edge {
         CollapseEdge::Left => {
-            let y = (ball_cy - strip_len / 2.0).max(wt + gap).min(wt + wh - strip_len - gap);
-            (strip_thick, strip_len, wl + gap, y)
+            let y = (ball_cy - strip_len_v / 2.0).max(wt + gap).min(wt + wh - strip_len_v - gap);
+            (strip_thick, strip_len_v, wl + gap, y)
         }
         CollapseEdge::Right => {
-            let y = (ball_cy - strip_len / 2.0).max(wt + gap).min(wt + wh - strip_len - gap);
-            (strip_thick, strip_len, wl + ww - strip_thick - gap, y)
+            let y = (ball_cy - strip_len_v / 2.0).max(wt + gap).min(wt + wh - strip_len_v - gap);
+            (strip_thick, strip_len_v, wl + ww - strip_thick - gap, y)
         }
         CollapseEdge::Top => {
-            let x = (ball_cx - strip_len / 2.0).max(wl + gap).min(wl + ww - strip_len - gap);
-            (strip_len, strip_thick, x, wt + gap)
+            let x = (ball_cx - strip_len_h / 2.0).max(wl + gap).min(wl + ww - strip_len_h - gap);
+            (strip_len_h, strip_thick, x, wt + gap)
         }
         CollapseEdge::Bottom => {
-            let x = (ball_cx - strip_len / 2.0).max(wl + gap).min(wl + ww - strip_len - gap);
-            (strip_len, strip_thick, x, wt + wh - strip_thick - gap)
+            let x = (ball_cx - strip_len_h / 2.0).max(wl + gap).min(wl + ww - strip_len_h - gap);
+            (strip_len_h, strip_thick, x, wt + wh - strip_thick - gap)
         }
     };
 
