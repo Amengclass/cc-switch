@@ -139,10 +139,10 @@ static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mut
 /// 拖拽预览状态：当前是否在显示收起预览
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 收起色条厚度（逻辑像素）：极细抽屉条
-const COLLAPSE_STRIP_THICKNESS: f64 = 4.0;
-/// 收起色条长度（逻辑像素）：左右竖条的高度，上下横条的宽度
-const COLLAPSE_STRIP_LENGTH: f64 = 32.0;
+/// 收起色条厚度（逻辑像素）：边缘指示 tab
+const COLLAPSE_STRIP_THICKNESS: f64 = 6.0;
+/// 收起色条长度（逻辑像素）
+const COLLAPSE_STRIP_LENGTH: f64 = 40.0;
 /// 收起状态热区：鼠标离色条多少像素内触发展开
 const COLLAPSE_EXPAND_HOTZONE: f64 = 24.0;
 
