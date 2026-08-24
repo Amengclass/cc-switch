@@ -445,6 +445,9 @@ pub struct AppSettings {
     /// 悬浮球背景/边框不透明度（0.2~1.0；设置页滑块调节）。None = 默认 0.97。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub floating_opacity: Option<f32>,
+    /// 边缘自动收起：拖到屏幕边缘松手后收起为色条，鼠标靠近自动展开
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_auto_collapse: Option<bool>,
 
     // ===== 设备级目录覆盖 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -580,6 +583,7 @@ impl Default for AppSettings {
             floating_last_app: None,
             floating_remote_takeover: None,
             floating_opacity: None,
+            floating_auto_collapse: None,
             claude_config_dir: None,
             codex_config_dir: None,
             gemini_config_dir: None,

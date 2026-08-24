@@ -115,6 +115,31 @@ static FLOATING_DRAG_MOVED: std::sync::atomic::AtomicBool =
 static SNAP_ANIMATION_CANCEL: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+// ============================================================
+// 边缘自动收起
+// ============================================================
+
+/// 收起方向
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollapseEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// 球是否处于收起状态
+static COLLAPSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 收起方向
+static COLLAPSED_EDGE: std::sync::Mutex<Option<CollapseEdge>> = std::sync::Mutex::new(None);
+/// 收起前的球位置（逻辑坐标），展开时恢复
+static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+
+/// 收起时色条尺寸常量（逻辑像素）
+const COLLAPSE_STRIP_THICKNESS: f64 = 6.0;
+/// 收起状态热区：鼠标离色条多少像素内触发展开
+const COLLAPSE_EXPAND_HOTZONE: f64 = 24.0;
+
 const DRAG_POLL_MS: u64 = 8;
 /// 边缘吸附阈值（逻辑像素）
 const SNAP_THRESHOLD: f64 = 40.0;
@@ -171,6 +196,11 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
     }
     // 取消可能正在进行的吸附动画（用户又按下了）
     SNAP_ANIMATION_CANCEL.store(true, Ordering::Release);
+
+    // 收起状态下不响应拖动（展开由 expand_polling 处理）
+    if is_ball_collapsed() {
+        return Ok(());
+    }
 
     if FLOATING_DRAGGING.load(Ordering::Acquire) {
         return Ok(());
@@ -391,6 +421,8 @@ fn animate_ball_snap(app: &tauri::AppHandle, target: (f64, f64), duration_ms: u6
             ));
         }
         save_ball_logical_position(&app, tx, ty);
+        // 吸附完成后检查是否需要边缘收起
+        collapse_ball(&app);
     });
 }
 
@@ -469,6 +501,7 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
 
 /// 应用保存的球位置；无保存位置或位置非法时使用主显示器右下角默认位。
 /// 创建后立刻覆盖 window-state 插件可能恢复的旧/坏坐标。
+/// 若保存位置超出当前屏幕工作区，clamp 进边界内（防止切屏/分辨率变化后球消失）。
 fn apply_saved_ball_position(ball: &WebviewWindow) {
     let saved = crate::settings::get_settings()
         .floating_window_position
@@ -476,7 +509,22 @@ fn apply_saved_ball_position(ball: &WebviewWindow) {
         .filter(|(x, y)| x.is_finite() && y.is_finite() && *x > -1000.0 && *y > -1000.0);
 
     let pos = match saved {
-        Some((x, y)) => tauri::LogicalPosition::new(x, y),
+        Some((x, y)) => {
+            // Clamp 到当前显示器工作区内，防止球跑到屏幕外
+            if let Some(monitor) = ball.primary_monitor().ok().flatten() {
+                let scale = monitor.scale_factor();
+                let work = monitor.work_area();
+                let left = work.position.x as f64 / scale;
+                let top = work.position.y as f64 / scale;
+                let right = left + work.size.width as f64 / scale - BALL_WIDTH - FLOATING_MARGIN * 2.0;
+                let bottom = top + work.size.height as f64 / scale - BALL_HEIGHT - FLOATING_MARGIN * 2.0;
+                let cx = x.clamp(left.max(0.0), right.max(left));
+                let cy = y.clamp(top.max(0.0), bottom.max(top));
+                tauri::LogicalPosition::new(cx, cy)
+            } else {
+                tauri::LogicalPosition::new(x, y)
+            }
+        }
         None => default_ball_position(ball),
     };
     let _ = ball.set_position(pos);
@@ -502,6 +550,10 @@ fn default_ball_position(ball: &WebviewWindow) -> tauri::LogicalPosition<f64> {
 pub(crate) fn destroy_floating_window(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     MENU_OPEN.store(false, Ordering::Release);
+    // 清除收起状态
+    COLLAPSED.store(false, Ordering::Release);
+    *COLLAPSED_EDGE.lock().unwrap() = None;
+    *COLLAPSED_PREV_POS.lock().unwrap() = None;
     if let Some(ball) = app.get_webview_window(BALL_LABEL) {
         let _ = ball.destroy();
     }
@@ -525,6 +577,235 @@ pub(crate) fn apply_floating_window_setting(app: &tauri::AppHandle, enabled: boo
     } else {
         destroy_floating_window(app);
     }
+}
+
+// ============================================================
+// 边缘自动收起：拖到边缘松手 → 收起为色条；鼠标靠近 → 展开
+// ============================================================
+
+/// 是否启用边缘自动收起
+fn is_auto_collapse_enabled() -> bool {
+    crate::settings::get_settings()
+        .floating_auto_collapse
+        .unwrap_or(false)
+}
+
+/// 球是否处于收起状态
+pub(crate) fn is_ball_collapsed() -> bool {
+    use std::sync::atomic::Ordering;
+    COLLAPSED.load(Ordering::Acquire)
+}
+
+/// 检测球当前靠近哪个边缘（返回 None = 不在任何边缘阈值内）
+fn detect_edge(ball: &WebviewWindow) -> Option<CollapseEdge> {
+    let scale = ball.scale_factor().ok()?;
+    let pos = ball.outer_position().ok()?;
+    let margin_px = FLOATING_MARGIN * scale;
+    let cx = pos.x as f64 + margin_px;
+    let cy = pos.y as f64 + margin_px;
+    let ball_w = BALL_WIDTH * scale;
+    let ball_h = BALL_HEIGHT * scale;
+    let thresh_px = SNAP_THRESHOLD * scale;
+
+    let monitor = ball.current_monitor().ok().flatten()?;
+    let work = monitor.work_area();
+    let left = work.position.x as f64;
+    let top = work.position.y as f64;
+    let right = left + work.size.width as f64;
+    let bottom = top + work.size.height as f64;
+
+    // 检查四边，优先选距离最近的
+    let dist_left = cx - left;
+    let dist_right = right - (cx + ball_w);
+    let dist_top = cy - top;
+    let dist_bottom = bottom - (cy + ball_h);
+
+    let min_dist = dist_left.min(dist_right).min(dist_top).min(dist_bottom);
+    if min_dist > thresh_px {
+        return None;
+    }
+
+    if min_dist == dist_left {
+        Some(CollapseEdge::Left)
+    } else if min_dist == dist_right {
+        Some(CollapseEdge::Right)
+    } else if min_dist == dist_top {
+        Some(CollapseEdge::Top)
+    } else {
+        Some(CollapseEdge::Bottom)
+    }
+}
+
+/// 收起悬浮球为色条
+fn collapse_ball(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    if !is_auto_collapse_enabled() {
+        return;
+    }
+    if COLLAPSED.load(Ordering::Acquire) {
+        return;
+    }
+
+    let Some(ball) = app.get_webview_window(BALL_LABEL) else {
+        return;
+    };
+
+    let Some(edge) = detect_edge(&ball) else {
+        return;
+    };
+
+    // 保存当前位置供展开恢复
+    if let Ok(pos) = ball.outer_position() {
+        let scale = ball.scale_factor().unwrap_or(1.0);
+        let lx = pos.x as f64 / scale;
+        let ly = pos.y as f64 / scale;
+        *COLLAPSED_PREV_POS.lock().unwrap() = Some((lx, ly));
+    }
+
+    // 计算色条尺寸和位置
+    let scale = ball.scale_factor().unwrap_or(1.0);
+    let monitor = match ball.current_monitor().ok().flatten() {
+        Some(m) => m,
+        None => return,
+    };
+    let work = monitor.work_area();
+    let work_left = work.position.x as f64 / scale;
+    let work_top = work.position.y as f64 / scale;
+    let work_w = work.size.width as f64 / scale;
+    let work_h = work.size.height as f64 / scale;
+
+    let (strip_w, strip_h, strip_x, strip_y) = match edge {
+        CollapseEdge::Left => (
+            COLLAPSE_STRIP_THICKNESS,
+            BALL_HEIGHT,
+            work_left + EDGE_GAP,
+            work_top + work_h / 2.0 - BALL_HEIGHT / 2.0,
+        ),
+        CollapseEdge::Right => (
+            COLLAPSE_STRIP_THICKNESS,
+            BALL_HEIGHT,
+            work_left + work_w - COLLAPSE_STRIP_THICKNESS - EDGE_GAP,
+            work_top + work_h / 2.0 - BALL_HEIGHT / 2.0,
+        ),
+        CollapseEdge::Top => (
+            BALL_WIDTH,
+            COLLAPSE_STRIP_THICKNESS,
+            work_left + work_w / 2.0 - BALL_WIDTH / 2.0,
+            work_top + EDGE_GAP,
+        ),
+        CollapseEdge::Bottom => (
+            BALL_WIDTH,
+            COLLAPSE_STRIP_THICKNESS,
+            work_left + work_w / 2.0 - BALL_WIDTH / 2.0,
+            work_top + work_h - COLLAPSE_STRIP_THICKNESS - EDGE_GAP,
+        ),
+    };
+
+    // 通知 React 前端渲染为色条模式
+    let _ = app.emit(
+        "floating-collapse",
+        serde_json::json!({
+            "edge": format!("{:?}", edge).to_lowercase(),
+        }),
+    );
+
+    // 缩小窗口为色条并移动到边缘
+    let _ = ball.set_size(tauri::LogicalSize::new(
+        strip_w + FLOATING_MARGIN * 2.0,
+        strip_h + FLOATING_MARGIN * 2.0,
+    ));
+    let _ = ball.set_position(tauri::LogicalPosition::new(
+        strip_x - FLOATING_MARGIN,
+        strip_y - FLOATING_MARGIN,
+    ));
+
+    *COLLAPSED_EDGE.lock().unwrap() = Some(edge);
+    COLLAPSED.store(true, Ordering::Release);
+
+    // 启动展开轮询
+    start_expand_polling(app.clone());
+
+    log::info!("[Floating] 悬浮球已收起: edge={:?}", edge);
+}
+
+/// 展开悬浮球（从色条恢复为完整球）
+pub(crate) fn expand_ball(app: &tauri::AppHandle) {
+    use std::sync::atomic::Ordering;
+
+    if !COLLAPSED.load(Ordering::Acquire) {
+        return;
+    }
+
+    let Some(ball) = app.get_webview_window(BALL_LABEL) else {
+        return;
+    };
+
+    // 取消可能正在进行的拖动（展开时不触发吸附）
+    FLOATING_DRAGGING.store(false, Ordering::Release);
+
+    // 通知 React 前端恢复完整渲染
+    let _ = app.emit("floating-expand", ());
+
+    // 恢复完整尺寸
+    let (bw, bh) = ball_window_size();
+    let _ = ball.set_size(tauri::LogicalSize::new(bw, bh));
+
+    // 恢复之前保存的位置
+    let prev_pos = COLLAPSED_PREV_POS.lock().unwrap().take();
+    if let Some((x, y)) = prev_pos {
+        let _ = ball.set_position(tauri::LogicalPosition::new(x, y));
+    }
+
+    *COLLAPSED_EDGE.lock().unwrap() = None;
+    COLLAPSED.store(false, Ordering::Release);
+
+    log::info!("[Floating] 悬浮球已展开");
+}
+
+/// 收起状态下轮询鼠标位置，靠近色条时自动展开
+fn start_expand_polling(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+            if !COLLAPSED.load(std::sync::atomic::Ordering::Acquire) {
+                break; // 已被展开，停止轮询
+            }
+
+            let Some(ball) = app.get_webview_window(BALL_LABEL) else {
+                break;
+            };
+
+            let Some((cursor_x, cursor_y)) = global_cursor_physical() else {
+                continue;
+            };
+
+            let scale = ball.scale_factor().unwrap_or(1.0);
+            let pos = match ball.outer_position() {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            // 色条位置（物理像素）
+            let strip_x = pos.x as f64;
+            let strip_y = pos.y as f64;
+            let strip_w = (COLLAPSE_STRIP_THICKNESS + FLOATING_MARGIN * 2.0) * scale;
+            let strip_h = (BALL_HEIGHT + FLOATING_MARGIN * 2.0) * scale;
+
+            // 判断鼠标是否在热区内（色条周围 COLLAPSE_EXPAND_HOTZONE 像素）
+            let hotzone = COLLAPSE_EXPAND_HOTZONE * scale;
+            let in_hotzone = (cursor_x as f64 >= strip_x - hotzone)
+                && (cursor_x as f64 <= strip_x + strip_w + hotzone)
+                && (cursor_y as f64 >= strip_y - hotzone)
+                && (cursor_y as f64 <= strip_y + strip_h + hotzone);
+
+            if in_hotzone {
+                expand_ball(&app);
+                break;
+            }
+        }
+    });
 }
 
 /// 小球窗口拖动后的位置落盘（防抖）

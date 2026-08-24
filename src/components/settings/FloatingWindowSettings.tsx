@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { SettingsFormState } from "@/hooks/useSettings";
-import { AppWindow, CircleDot, Eye, Gauge, Lock, Pin } from "lucide-react";
+import { AppWindow, ArrowDownToLine, CircleDot, Eye, Gauge, Lock, Pin } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { AnimatePresence, motion } from "framer-motion";
@@ -202,6 +202,26 @@ export function FloatingWindowSettings({
                       {Math.round((settings.floatingOpacity ?? 0.97) * 100)}%
                     </span>
                   </div>
+                </div>
+                {/* 边缘自动收起 */}
+                <div className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium leading-none">
+                        {t("settings.floatingAutoCollapseTitle")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {t("settings.floatingAutoCollapseDesc")}
+                      </div>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={!!settings.floatingAutoCollapse}
+                    onCheckedChange={(value) =>
+                      onChange({ floatingAutoCollapse: value })
+                    }
+                  />
                 </div>
               </div>
             </motion.div>

@@ -57,6 +57,10 @@ fn merge_settings_for_save(
     if incoming.floating_opacity.is_none() {
         incoming.floating_opacity = existing.floating_opacity;
     }
+    // floating_auto_collapse：边缘自动收起开关
+    if incoming.floating_auto_collapse.is_none() {
+        incoming.floating_auto_collapse = existing.floating_auto_collapse;
+    }
     incoming
 }
 
@@ -80,11 +84,20 @@ pub async fn save_settings(
     let unify_codex_enabled = merged.unify_codex_session_history;
     let floating_changed = merged.enable_floating_window != existing.enable_floating_window;
     let floating_enabled = merged.enable_floating_window;
+    let auto_collapse_changed =
+        merged.floating_auto_collapse != existing.floating_auto_collapse;
+    let auto_collapse_disabled = !merged.floating_auto_collapse.unwrap_or(false);
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
 
     // 悬浮窗开关变更时创建/销毁悬浮球窗口（仅当用户显式切换才动作）
     if floating_changed {
         crate::floating::apply_floating_window_setting(&app, floating_enabled);
+    }
+    // 边缘收起开关关闭时，若球处于收起状态则立即展开
+    if auto_collapse_changed && auto_collapse_disabled {
+        if crate::floating::is_ball_collapsed() {
+            crate::floating::expand_ball(&app);
+        }
     }
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，

@@ -738,6 +738,8 @@
     "floatingPinFollow": "跟隨目前應用",
     "floatingOpacityTitle": "懸浮窗透明度",
     "floatingOpacityDesc": "調整懸浮窗背景與邊框的不透明度（20% ~ 100%）",
+    "floatingAutoCollapseTitle": "邊緣自動收起",
+    "floatingAutoCollapseDesc": "拖到螢幕邊緣鬆手後收起為色條，滑鼠靠近自動展開",
     "skipClaudeOnboarding": "跳過 Claude Code 初次安裝確認",
     "skipClaudeOnboardingDescription": "開啟後跳過 Claude Code 初次安裝確認",
     "codexAuth": "Codex 應用增強",

@@ -738,6 +738,8 @@
     "floatingPinFollow": "Follow current app",
     "floatingOpacityTitle": "Floating window opacity",
     "floatingOpacityDesc": "Adjust the opacity of the floating window background and border (20% ~ 100%)",
+    "floatingAutoCollapseTitle": "Edge auto-collapse",
+    "floatingAutoCollapseDesc": "Collapse to a color strip when dropped near screen edge; auto-expand on mouse hover",
     "skipClaudeOnboarding": "Skip Claude Code first-run confirmation",
     "skipClaudeOnboardingDescription": "When enabled, Claude Code will skip the first-run confirmation",
     "codexAuth": "Codex App Enhancements",

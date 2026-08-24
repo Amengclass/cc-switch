@@ -738,6 +738,8 @@
     "floatingPinFollow": "現在のアプリに追従",
     "floatingOpacityTitle": "フローティングウィンドウの透明度",
     "floatingOpacityDesc": "フローティングウィンドウの背景と枠の不透明度を調整します（20%〜100%）",
+    "floatingAutoCollapseTitle": "エッジ自動収納",
+    "floatingAutoCollapseDesc": "画面端にドロップすると色条に収納、マウス靠近で自動展開",
     "skipClaudeOnboarding": "Claude Code の初回確認をスキップ",
     "skipClaudeOnboardingDescription": "オンにすると Claude Code の初回インストール確認をスキップします",
     "codexAuth": "Codex アプリ拡張",

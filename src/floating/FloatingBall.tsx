@@ -217,6 +217,8 @@ export function FloatingBall() {
     usageLineLevels: null,
     opacity: 0.97,
   });
+  const [collapsed, setCollapsed] = useState(false);
+  const [collapseEdge, setCollapseEdge] = useState<string>("left");
 
   const refresh = useCallback(() => {
     loadSummary(t)
@@ -248,6 +250,14 @@ export function FloatingBall() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
+    // 边缘收起/展开事件
+    void listen<{ edge?: string }>("floating-collapse", (ev) => {
+      setCollapsed(true);
+      setCollapseEdge(ev.payload?.edge ?? "left");
+    }).then((u) => unlisteners.push(u));
+    void listen("floating-expand", () => {
+      setCollapsed(false);
+    }).then((u) => unlisteners.push(u));
     // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮窗 webview 不可靠，球常只按
     // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
     // 保证置顶/跟随任何变化 ≤1s 生效。
@@ -264,6 +274,27 @@ export function FloatingBall() {
       console.error("[Floating] 拖动开始失败", err),
     );
   };
+
+  // 收起状态：显示为一条颜色色条
+  if (collapsed) {
+    const isVertical = collapseEdge === "left" || collapseEdge === "right";
+    return (
+      <div
+        className="ball-collapsed"
+        style={{
+          width: isVertical ? 6 : "100%",
+          height: isVertical ? "100%" : 6,
+          background: summary.color,
+          borderRadius: 3,
+          cursor: "pointer",
+          opacity: summary.opacity,
+        }}
+        onPointerDown={onPointerDown}
+        onPointerUp={() => void invoke("floating_drag_end")}
+        onPointerCancel={() => void invoke("floating_drag_end")}
+      />
+    );
+  }
 
   return (
     <div

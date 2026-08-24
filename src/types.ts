@@ -382,6 +382,8 @@ export interface Settings {
   floatingLastApp?: string;
   // 悬浮窗背景/边框不透明度（0.2~1.0；设置页滑块）
   floatingOpacity?: number;
+  // 边缘自动收起：拖到屏幕边缘松手后收起为色条
+  floatingAutoCollapse?: boolean;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）
