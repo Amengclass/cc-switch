@@ -134,6 +134,8 @@ static COLLAPSED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 static COLLAPSED_EDGE: std::sync::Mutex<Option<CollapseEdge>> = std::sync::Mutex::new(None);
 /// 收起前的球位置（逻辑坐标），展开时恢复
 static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
+/// 拖拽预览状态：当前是否在显示收起预览
+static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 收起时色条尺寸常量（逻辑像素）
 const COLLAPSE_STRIP_THICKNESS: f64 = 6.0;
@@ -255,6 +257,23 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
                             nx.round() as i32,
                             ny.round() as i32,
                         ));
+                        // 边缘收起预览：拖拽时靠近边缘显示色条预览
+                        if is_auto_collapse_enabled() {
+                            if let Some(edge) = detect_edge(&ball) {
+                                if !PREVIEW_SHOWING.load(Ordering::Acquire) {
+                                    PREVIEW_SHOWING.store(true, Ordering::Release);
+                                    let _ = app2.emit(
+                                        "floating-collapse-preview",
+                                        serde_json::json!({
+                                            "edge": format!("{:?}", edge).to_lowercase(),
+                                        }),
+                                    );
+                                }
+                            } else if PREVIEW_SHOWING.load(Ordering::Acquire) {
+                                PREVIEW_SHOWING.store(false, Ordering::Release);
+                                let _ = app2.emit("floating-collapse-preview-cancel", ());
+                            }
+                        }
                     }
                 }
             }
@@ -278,6 +297,7 @@ pub async fn floating_drag_end(app: tauri::AppHandle) -> Result<(), String> {
 /// 若右键菜单刚收起（点击球关菜单），本次单击只关菜单、不打开主窗口。
 fn finish_drag(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
+    PREVIEW_SHOWING.store(false, Ordering::Release);
     let menu_just_closed = MENU_CLOSED_AT
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -636,7 +656,7 @@ fn detect_edge(ball: &WebviewWindow) -> Option<CollapseEdge> {
     }
 }
 
-/// 收起悬浮球为色条
+/// 收起悬浮球为色条（左右=竖条，上下=横条；位置跟随球在边缘的位置）
 fn collapse_ball(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
 
@@ -663,44 +683,56 @@ fn collapse_ball(app: &tauri::AppHandle) {
         *COLLAPSED_PREV_POS.lock().unwrap() = Some((lx, ly));
     }
 
-    // 计算色条尺寸和位置
+    // 全部用物理像素计算，避免 scale 换算误差
     let scale = ball.scale_factor().unwrap_or(1.0);
+    let pos = ball.outer_position().ok().unwrap_or(tauri::PhysicalPosition::new(0, 0));
+    let margin_px = FLOATING_MARGIN * scale;
+    // 球内容中心（物理像素）
+    let ball_cx = pos.x as f64 + margin_px + BALL_WIDTH * scale / 2.0;
+    let ball_cy = pos.y as f64 + margin_px + BALL_HEIGHT * scale / 2.0;
+
     let monitor = match ball.current_monitor().ok().flatten() {
         Some(m) => m,
         None => return,
     };
     let work = monitor.work_area();
-    let work_left = work.position.x as f64 / scale;
-    let work_top = work.position.y as f64 / scale;
-    let work_w = work.size.width as f64 / scale;
-    let work_h = work.size.height as f64 / scale;
+    let wl = work.position.x as f64;
+    let wt = work.position.y as f64;
+    let ww = work.size.width as f64;
+    let wh = work.size.height as f64;
+    let gap = EDGE_GAP * scale;
+    let strip_thick = COLLAPSE_STRIP_THICKNESS * scale;
+    let ball_w = BALL_WIDTH * scale;
+    let ball_h = BALL_HEIGHT * scale;
 
-    let (strip_w, strip_h, strip_x, strip_y) = match edge {
-        CollapseEdge::Left => (
-            COLLAPSE_STRIP_THICKNESS,
-            BALL_HEIGHT,
-            work_left + EDGE_GAP,
-            work_top + work_h / 2.0 - BALL_HEIGHT / 2.0,
-        ),
-        CollapseEdge::Right => (
-            COLLAPSE_STRIP_THICKNESS,
-            BALL_HEIGHT,
-            work_left + work_w - COLLAPSE_STRIP_THICKNESS - EDGE_GAP,
-            work_top + work_h / 2.0 - BALL_HEIGHT / 2.0,
-        ),
-        CollapseEdge::Top => (
-            BALL_WIDTH,
-            COLLAPSE_STRIP_THICKNESS,
-            work_left + work_w / 2.0 - BALL_WIDTH / 2.0,
-            work_top + EDGE_GAP,
-        ),
-        CollapseEdge::Bottom => (
-            BALL_WIDTH,
-            COLLAPSE_STRIP_THICKNESS,
-            work_left + work_w / 2.0 - BALL_WIDTH / 2.0,
-            work_top + work_h - COLLAPSE_STRIP_THICKNESS - EDGE_GAP,
-        ),
+    // 色条尺寸和位置（物理像素）：沿球当前位置贴边
+    let (sw, sh, sx, sy) = match edge {
+        CollapseEdge::Left => {
+            // 竖条：贴左边缘，Y 跟随球当前位置
+            let y = (ball_cy - ball_h / 2.0).max(wt + gap).min(wt + wh - ball_h - gap);
+            (strip_thick, ball_h, wl + gap, y)
+        }
+        CollapseEdge::Right => {
+            // 竖条：贴右边缘，Y 跟随球当前位置
+            let y = (ball_cy - ball_h / 2.0).max(wt + gap).min(wt + wh - ball_h - gap);
+            (strip_thick, ball_h, wl + ww - strip_thick - gap, y)
+        }
+        CollapseEdge::Top => {
+            // 横条：贴顶部边缘，X 跟随球当前位置
+            let x = (ball_cx - ball_w / 2.0).max(wl + gap).min(wl + ww - ball_w - gap);
+            (ball_w, strip_thick, x, wt + gap)
+        }
+        CollapseEdge::Bottom => {
+            // 横条：贴底部边缘，X 跟随球当前位置
+            let x = (ball_cx - ball_w / 2.0).max(wl + gap).min(wl + ww - ball_w - gap);
+            (ball_w, strip_thick, x, wt + wh - strip_thick - gap)
+        }
     };
+
+    log::info!(
+        "[Floating] 收起色条: edge={:?} phys=({:.0},{:.0},{:.0},{:.0}) scale={}",
+        edge, sw, sh, sx, sy, scale
+    );
 
     // 通知 React 前端渲染为色条模式
     let _ = app.emit(
@@ -710,14 +742,14 @@ fn collapse_ball(app: &tauri::AppHandle) {
         }),
     );
 
-    // 缩小窗口为色条并移动到边缘
+    // 缩小窗口为色条并移动到边缘（物理像素 → set_position 接受物理像素）
     let _ = ball.set_size(tauri::LogicalSize::new(
-        strip_w + FLOATING_MARGIN * 2.0,
-        strip_h + FLOATING_MARGIN * 2.0,
+        sw / scale + FLOATING_MARGIN * 2.0,
+        sh / scale + FLOATING_MARGIN * 2.0,
     ));
-    let _ = ball.set_position(tauri::LogicalPosition::new(
-        strip_x - FLOATING_MARGIN,
-        strip_y - FLOATING_MARGIN,
+    let _ = ball.set_position(tauri::PhysicalPosition::new(
+        (sx - margin_px).round() as i32,
+        (sy - margin_px).round() as i32,
     ));
 
     *COLLAPSED_EDGE.lock().unwrap() = Some(edge);

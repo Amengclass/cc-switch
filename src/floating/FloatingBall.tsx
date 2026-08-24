@@ -219,6 +219,7 @@ export function FloatingBall() {
   });
   const [collapsed, setCollapsed] = useState(false);
   const [collapseEdge, setCollapseEdge] = useState<string>("left");
+  const [previewEdge, setPreviewEdge] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     loadSummary(t)
@@ -253,10 +254,21 @@ export function FloatingBall() {
     // 边缘收起/展开事件
     void listen<{ edge?: string }>("floating-collapse", (ev) => {
       setCollapsed(true);
+      setPreviewEdge(null);
       setCollapseEdge(ev.payload?.edge ?? "left");
     }).then((u) => unlisteners.push(u));
     void listen("floating-expand", () => {
       setCollapsed(false);
+      setPreviewEdge(null);
+    }).then((u) => unlisteners.push(u));
+    // 拖拽预览事件
+    void listen<{ edge?: string }>("floating-collapse-preview", (ev) => {
+      if (!collapsed) {
+        setPreviewEdge(ev.payload?.edge ?? "left");
+      }
+    }).then((u) => unlisteners.push(u));
+    void listen("floating-collapse-preview-cancel", () => {
+      setPreviewEdge(null);
     }).then((u) => unlisteners.push(u));
     // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮窗 webview 不可靠，球常只按
     // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
@@ -275,7 +287,7 @@ export function FloatingBall() {
     );
   };
 
-  // 收起状态：显示为一条颜色色条
+  // 收起状态：显示为一条颜色色条（左右=竖条，上下=横条）
   if (collapsed) {
     const isVertical = collapseEdge === "left" || collapseEdge === "right";
     return (
@@ -296,11 +308,15 @@ export function FloatingBall() {
     );
   }
 
+  // 拖拽预览：靠近边缘时在球上方叠加一条半透明色条预览
+  const showPreview = !!previewEdge;
+  const previewIsVertical = previewEdge === "left" || previewEdge === "right";
+
   return (
     <div
       className={`ball${summary.takeoverActive ? " route-service-live" : ""}`}
       title={summary.takeoverActive ? t("floating.takeoverActive") : undefined}
-      style={{ "--ball-alpha": summary.opacity } as CSSProperties}
+      style={{ "--ball-alpha": summary.opacity, position: "relative" } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
       onPointerCancel={() => void invoke("floating_drag_end")}
@@ -379,6 +395,31 @@ export function FloatingBall() {
           </>
         )}
       </span>
+      {/* 拖拽收起预览：靠近边缘时显示色条预览 */}
+      {showPreview && (
+        <div
+          style={{
+            position: "absolute",
+            background: summary.color,
+            opacity: 0.7,
+            borderRadius: 2,
+            pointerEvents: "none" as const,
+            ...(previewIsVertical
+              ? {
+                  width: 6,
+                  height: "120%",
+                  top: "-10%",
+                  ...(previewEdge === "left" ? { left: -10 } : { right: -10 }),
+                }
+              : {
+                  height: 6,
+                  width: "120%",
+                  left: "-10%",
+                  ...(previewEdge === "top" ? { top: -10 } : { bottom: -10 }),
+                }),
+          }}
+        />
+      )}
     </div>
   );
 }
