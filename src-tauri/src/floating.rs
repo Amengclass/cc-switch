@@ -139,8 +139,10 @@ static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mut
 /// 拖拽预览状态：当前是否在显示收起预览
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 收起时色条尺寸常量（逻辑像素）
-const COLLAPSE_STRIP_THICKNESS: f64 = 6.0;
+/// 收起色条厚度（逻辑像素）：极细抽屉条
+const COLLAPSE_STRIP_THICKNESS: f64 = 4.0;
+/// 收起色条长度（逻辑像素）：左右竖条的高度，上下横条的宽度
+const COLLAPSE_STRIP_LENGTH: f64 = 32.0;
 /// 收起状态热区：鼠标离色条多少像素内触发展开
 const COLLAPSE_EXPAND_HOTZONE: f64 = 24.0;
 
@@ -715,26 +717,25 @@ fn collapse_ball(app: &tauri::AppHandle) {
     let wh = work.size.height as f64;
     let gap = EDGE_GAP * scale;
     let strip_thick = COLLAPSE_STRIP_THICKNESS * scale;
-    let ball_w = BALL_WIDTH * scale;
-    let ball_h = BALL_HEIGHT * scale;
+    let strip_len = COLLAPSE_STRIP_LENGTH * scale;
 
-    // 色条尺寸和位置（物理像素）
+    // 色条尺寸和位置（物理像素）：短小抽屉条
     let (sw, sh, sx, sy) = match edge {
         CollapseEdge::Left => {
-            let y = (ball_cy - ball_h / 2.0).max(wt + gap).min(wt + wh - ball_h - gap);
-            (strip_thick, ball_h, wl + gap, y)
+            let y = (ball_cy - strip_len / 2.0).max(wt + gap).min(wt + wh - strip_len - gap);
+            (strip_thick, strip_len, wl + gap, y)
         }
         CollapseEdge::Right => {
-            let y = (ball_cy - ball_h / 2.0).max(wt + gap).min(wt + wh - ball_h - gap);
-            (strip_thick, ball_h, wl + ww - strip_thick - gap, y)
+            let y = (ball_cy - strip_len / 2.0).max(wt + gap).min(wt + wh - strip_len - gap);
+            (strip_thick, strip_len, wl + ww - strip_thick - gap, y)
         }
         CollapseEdge::Top => {
-            let x = (ball_cx - ball_w / 2.0).max(wl + gap).min(wl + ww - ball_w - gap);
-            (ball_w, strip_thick, x, wt + gap)
+            let x = (ball_cx - strip_len / 2.0).max(wl + gap).min(wl + ww - strip_len - gap);
+            (strip_len, strip_thick, x, wt + gap)
         }
         CollapseEdge::Bottom => {
-            let x = (ball_cx - ball_w / 2.0).max(wl + gap).min(wl + ww - ball_w - gap);
-            (ball_w, strip_thick, x, wt + wh - strip_thick - gap)
+            let x = (ball_cx - strip_len / 2.0).max(wl + gap).min(wl + ww - strip_len - gap);
+            (strip_len, strip_thick, x, wt + wh - strip_thick - gap)
         }
     };
 
