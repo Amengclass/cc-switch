@@ -113,6 +113,26 @@ export function FloatingWindowSettings({
                     }
                   />
                 </div>
+                {/* 边缘自动收起 */}
+                <div className="flex items-center justify-between gap-3 py-1.5">
+                  <div className="flex items-center gap-2">
+                    <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium leading-none">
+                        {t("settings.floatingAutoCollapseTitle")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {t("settings.floatingAutoCollapseDesc")}
+                      </div>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={!!settings.floatingAutoCollapse}
+                    onCheckedChange={(value) =>
+                      onChange({ floatingAutoCollapse: value })
+                    }
+                  />
+                </div>
                 {/* 悬浮窗内容显示 */}
                 <div className="flex items-center justify-between gap-3 py-1.5">
                   <div className="flex items-center gap-2">
@@ -202,26 +222,6 @@ export function FloatingWindowSettings({
                       {Math.round((settings.floatingOpacity ?? 0.97) * 100)}%
                     </span>
                   </div>
-                </div>
-                {/* 边缘自动收起 */}
-                <div className="flex items-center justify-between gap-3 py-1.5">
-                  <div className="flex items-center gap-2">
-                    <ArrowDownToLine className="h-3.5 w-3.5 shrink-0 text-rose-500" />
-                    <div className="space-y-0.5">
-                      <div className="text-sm font-medium leading-none">
-                        {t("settings.floatingAutoCollapseTitle")}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {t("settings.floatingAutoCollapseDesc")}
-                      </div>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={!!settings.floatingAutoCollapse}
-                    onCheckedChange={(value) =>
-                      onChange({ floatingAutoCollapse: value })
-                    }
-                  />
                 </div>
               </div>
             </motion.div>
