@@ -749,6 +749,11 @@ fn collapse_ball(app: &tauri::AppHandle) {
     // 1. 隐藏球窗口
     let _ = ball.hide();
 
+    // 1.5 销毁旧胶囊窗口（防止残留）
+    if let Some(old) = app.get_webview_window(STRIP_LABEL) {
+        let _ = old.destroy();
+    }
+
     // 2. 创建胶囊窗口
     let capsule_logic_w = cw / scale;
     let capsule_logic_h = ch / scale;
