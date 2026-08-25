@@ -1643,7 +1643,15 @@ pub async fn floating_set_hover(
             state.ball || state.panel
         };
         if !still_hovering {
-            let _ = hide_floating_panel(app).await;
+            let _ = hide_floating_panel(app.clone()).await;
+            // 鼠标离开球区域后，如果开了边缘收起且球在边缘，自动重新收起
+            if is_auto_collapse_enabled() && !is_ball_collapsed() {
+                if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+                    if detect_edge(&ball).is_some() {
+                        collapse_ball(&app);
+                    }
+                }
+            }
         }
     });
     Ok(())
