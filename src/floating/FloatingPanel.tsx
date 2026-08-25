@@ -9,7 +9,7 @@ import type { ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock, Pin } from "lucide-react";
+import { Clock, Pin, RefreshCw } from "lucide-react";
 import { APP_ICON_MAP } from "@/config/appConfig";
 import {
   statusColor,
@@ -68,6 +68,7 @@ function UsageDetail({
   t: (key: string, opts?: Record<string, unknown>) => string;
 }) {
   const hasUsed = d.used != null && isFinite(d.used);
+  const hasRemaining = d.remaining != null && isFinite(d.remaining);
   const nodes: ReactNode[] = [];
 
   if (d.planName && showPlan) {
@@ -77,6 +78,8 @@ function UsageDetail({
       </span>,
     );
   }
+  // 与供应商面板 UsageFooter 同款：tier 风格（有 used）只显示已用；
+  // 纯余额风格（无 used 有 remaining，如 DeepSeek CNY）才显示剩余。二选一，不叠加。
   if (hasUsed) {
     nodes.push(
       <span key="used" className="usage-item">
@@ -84,6 +87,16 @@ function UsageDetail({
         <span className={`usage-value ${usageValueClass(d)}`}>
           {dimPrefix ? `${dimPrefix} ` : ""}
           {d.used!.toFixed(2)}
+        </span>
+        {d.unit && <span className="usage-unit">{d.unit}</span>}
+      </span>,
+    );
+  } else if (hasRemaining) {
+    nodes.push(
+      <span key="remaining" className="usage-item">
+        <span className="usage-label">{t("floating.remaining")}</span>
+        <span className={`usage-value ${usageValueClass(d)}`}>
+          {d.remaining!.toFixed(2)}
         </span>
         {d.unit && <span className="usage-unit">{d.unit}</span>}
       </span>,
@@ -105,6 +118,8 @@ export function FloatingPanel() {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<FloatingEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  /** 正在手动刷新的行（appType；null = 未在刷新）。只刷该行对应 app。 */
+  const [refreshingApp, setRefreshingApp] = useState<string | null>(null);
   /** 当前置顶到悬浮窗的 app（未置顶 = null；每行据此高亮图钉） */
   const [pinnedApp, setPinnedApp] = useState<string | null>(null);
   // 相对时间基准，每 30s 推进一次（与主窗口 UsageFooter 相同节奏）
@@ -132,6 +147,26 @@ export function FloatingPanel() {
       setLoading(false);
     }
   }, [reloadPin]);
+
+  // 行刷新：只刷新该行 app 的当前供应商（floating_refresh_usage 已按 app 精确查询），
+  // 复用主窗口 UsageFooter 刷新同路径（写 UsageCache + emit usage-cache-updated）。
+  // 注意：必须定义在 `refresh` 之后——useCallback 依赖数组立即求值 refresh，
+  // 引用 const 声明前的 refresh 会触发 TDZ ReferenceError 导致面板空白。
+  const handleRefreshRow = useCallback(
+    async (appType: string) => {
+      if (refreshingApp) return;
+      setRefreshingApp(appType);
+      try {
+        await invoke("floating_refresh_usage", { appType });
+        await refresh();
+      } catch (e) {
+        console.error("[Floating] 手动刷新失败", e);
+      } finally {
+        setRefreshingApp(null);
+      }
+    },
+    [refreshingApp, refresh],
+  );
 
   // 逐行置顶/取消置顶悬浮窗显示。乐观更新：先本地置 `pinnedApp` 让按钮立即响应，
   // 再写后端（settings 落盘 + 发事件驱动球/设置页刷新）。
@@ -230,6 +265,22 @@ export function FloatingPanel() {
                       <span className="usage-time">
                         <Clock size={10} />
                         {formatRelativeTime(e.queriedAt, now, t)}
+                        {/* 行刷新按钮：只刷新该行 app（刷新时间旁边） */}
+                        <button
+                          type="button"
+                          className="row-refresh"
+                          onClick={() => void handleRefreshRow(e.appType)}
+                          disabled={refreshingApp === e.appType}
+                          title={t("usage.refreshUsage")}
+                          aria-label={t("usage.refreshUsage")}
+                        >
+                          <RefreshCw
+                            size={10}
+                            className={
+                              refreshingApp === e.appType ? "animate-spin" : ""
+                            }
+                          />
+                        </button>
                       </span>
                       <UsageDetail
                         d={e.usage![0]}

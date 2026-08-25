@@ -64,10 +64,10 @@ fn menu_window_size() -> (f64, f64) {
 }
 /// 面板/菜单与小球之间的间距（逻辑像素）
 const PANEL_GAP: f64 = 8.0;
-/// 吸附后与屏幕边缘（及任务栏边缘）保留的一小段间距（逻辑像素）
-const EDGE_GAP: f64 = 6.0;
+/// 吸附后与屏幕边缘保留的一小段间距（逻辑像素）
+const EDGE_GAP: f64 = 2.0;
 /// 小球→面板跨窗移动时的隐藏宽限期
-const HOVER_GRACE_MS: u64 = 300;
+const HOVER_GRACE_MS: u64 = 500;
 
 /// 悬浮球是否固定当前位置（设置页「固定当前位置」；固定后不可拖动/不吸附）
 fn is_floating_locked() -> bool {
@@ -138,19 +138,33 @@ static COLLAPSED_EDGE: std::sync::Mutex<Option<CollapseEdge>> = std::sync::Mutex
 static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mutex::new(None);
 /// 拖拽预览状态：当前是否在显示收起预览
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 拖拽预览当前边缘（用于检测边缘切换时重建 strip）
+static PREVIEW_EDGE: std::sync::Mutex<Option<CollapseEdge>> = std::sync::Mutex::new(None);
+/// 缓存的显示器工作区（物理像素），只在首次拖拽或跨屏时刷新
+static CACHED_WORK_AREA: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+/// 缓存的 DPI 缩放比
+static CACHED_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10000);
 
-/// 胶囊厚度（逻辑像素）：贴边缘的宽度（侧边栏指示器风格）
-const CAPSULE_THICKNESS: f64 = 5.0;
+/// 胶囊厚度（逻辑像素）：贴边缘的宽度（温度计指示器风格）
+/// 8px 足够显示小字百分比标签，又不会太宽遮挡屏幕内容
+const CAPSULE_THICKNESS: f64 = 8.0;
 /// 胶囊长度（逻辑像素）：左/右竖条高度，上横条宽度
-const CAPSULE_LENGTH: f64 = 40.0;
+const CAPSULE_LENGTH: f64 = 64.0;
 /// 展开触发延迟（毫秒）
-const CAPSULE_EXPAND_DELAY_MS: u64 = 250;
-/// 收起触发延迟（毫秒）
-const CAPSULE_COLLAPSE_DELAY_MS: u64 = 400;
+const CAPSULE_EXPAND_DELAY_MS: u64 = 100;
 
-const DRAG_POLL_MS: u64 = 8;
-/// 边缘吸附阈值（逻辑像素）
-const SNAP_THRESHOLD: f64 = 40.0;
+/// 胶囊命中区域外扩（逻辑像素）：胶囊本身只有5px，太难命中，
+/// 四周扩大20px的隐形热区，鼠标进入即开始展开计时。
+const CAPSULE_HIT_PADDING: f64 = 20.0;
+/// strip 窗口四周留白（逻辑像素）：窗口必须比胶囊内容大一圈，
+/// 让 CSS 圆角在更大的 WebView2 渲染表面上抗锯齿，否则 7.9px 厚的小窗口
+/// 会把 4px 圆角物理渲染切方（"两端不够圆"）。胶囊画在窗口正中央。
+const STRIP_PAD: f64 = 4.0;
+
+const DRAG_POLL_MS: u64 = 16;
+/// 边缘吸附阈值（逻辑像素）：拖到多近才判定「在边缘」触发收起预览/吸附。
+/// 40 偏大——球离屏幕边缘还很远就弹预览了，收窄到 24。
+const SNAP_THRESHOLD: f64 = 24.0;
 /// 判定单击：窗口有任何位移即视为拖动，完全没动才是单击
 const CLICK_MOVE_THRESHOLD_PX: f64 = 0.0;
 /// 吸附动画默认时长（毫秒）；0 = 立即
@@ -231,16 +245,26 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
     // 固定状态在按下瞬间读取一次：拖拽期间不可达设置页，状态不会变。
     // 固定时（locked=true）不移动窗口也不标记「已拖动」，松手按单击处理（仍打开主窗口）。
     let locked = is_floating_locked();
+    // 拖拽开始时刷新一次 monitor 缓存（后续用缓存，不再每帧调 current_monitor）
+    if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+        refresh_monitor_cache(&ball);
+    }
     tauri::async_runtime::spawn(async move {
         loop {
             if !FLOATING_DRAGGING.load(Ordering::Acquire) {
                 break;
             }
-            // 左键已松开（可能没收到前端 pointerup）：自行结束
+            // 左键松开判定（GetAsyncKeyState 是异步状态位，快速拖动时可能瞬时读到 0，
+            // 必须延迟一帧二次确认，否则误判松手 → collision 把球隐藏 → "拖拽中消失"）
             if !is_left_button_down() {
-                FLOATING_DRAGGING.store(false, Ordering::Release);
-                finish_drag(&app2);
-                break;
+                tokio::time::sleep(std::time::Duration::from_millis(24)).await;
+                if !is_left_button_down() {
+                    FLOATING_DRAGGING.store(false, Ordering::Release);
+                    finish_drag(&app2);
+                    break;
+                }
+                // 抖动恢复：左键其实还按着，继续拖
+                continue;
             }
             if locked {
                 continue;
@@ -259,25 +283,54 @@ pub async fn floating_drag_begin(app: tauri::AppHandle) -> Result<(), String> {
                         FLOATING_DRAG_MOVED.store(true, Ordering::Release);
                     }
                     if let Some(ball) = app2.get_webview_window(BALL_LABEL) {
+                        // Clamp 球位置到缓存的工作区内（不再调 current_monitor）
+                        let (cx_clamped, cy_clamped) = if let Some((wl, wt, ww, wh)) = cached_work_area(&ball) {
+                            let scale = cached_scale();
+                            let bw = BALL_WIDTH * scale;
+                            let bh = BALL_HEIGHT * scale;
+                            (
+                                nx.max(wl - 50.0).min(wl + ww - bw + 50.0),
+                                ny.max(wt - 50.0).min(wt + wh - bh + 50.0),
+                            )
+                        } else {
+                            // 缓存为空时硬 clamp 到合理范围（防止球飞到屏幕外）
+                            (nx.max(-200.0).min(4000.0), ny.max(-200.0).min(3000.0))
+                        };
                         let _ = ball.set_position(tauri::PhysicalPosition::new(
-                            nx.round() as i32,
-                            ny.round() as i32,
+                            cx_clamped.round() as i32,
+                            cy_clamped.round() as i32,
                         ));
-                        // 边缘收起预览：拖拽时靠近边缘显示色条预览
-                        if is_auto_collapse_enabled() {
-                            if let Some(edge) = detect_edge(&ball) {
-                                if !PREVIEW_SHOWING.load(Ordering::Acquire) {
-                                    PREVIEW_SHOWING.store(true, Ordering::Release);
-                                    let _ = app2.emit(
-                                        "floating-collapse-preview",
-                                        serde_json::json!({
-                                            "edge": format!("{:?}", edge).to_lowercase(),
-                                        }),
-                                    );
+                        // 边缘收起预览：状态机模式，只在边缘状态翻转时操作窗口
+                        if is_auto_collapse_enabled() && FLOATING_DRAG_MOVED.load(Ordering::Acquire) {
+                            // detect_edge 现在用缓存数据，开销极低，每帧调用没问题
+                            let new_edge = detect_edge(&ball);
+                            let old_edge = *PREVIEW_EDGE.lock().unwrap();
+                            if new_edge != old_edge {
+                                match (old_edge, new_edge) {
+                                    (None, Some(edge)) => {
+                                        // 进入边缘：显示 strip
+                                        show_preview_strip(&app2, &ball, edge);
+                                        PREVIEW_SHOWING.store(true, Ordering::Release);
+                                        *PREVIEW_EDGE.lock().unwrap() = Some(edge);
+                                        let _ = app2.emit("floating-drag-near-edge", true);
+                                    }
+                                    (Some(_), None) => {
+                                        // 离开边缘：隐藏 strip
+                                        hide_preview_strip(&app2);
+                                        PREVIEW_SHOWING.store(false, Ordering::Release);
+                                        *PREVIEW_EDGE.lock().unwrap() = None;
+                                        let _ = app2.emit("floating-drag-near-edge", false);
+                                    }
+                                    (Some(_), Some(new_e)) => {
+                                        // 边缘切换（top→left）：重新定位 + resize
+                                        show_preview_strip(&app2, &ball, new_e);
+                                        *PREVIEW_EDGE.lock().unwrap() = Some(new_e);
+                                    }
+                                    (None, None) => {}
                                 }
-                            } else if PREVIEW_SHOWING.load(Ordering::Acquire) {
-                                PREVIEW_SHOWING.store(false, Ordering::Release);
-                                let _ = app2.emit("floating-collapse-preview-cancel", ());
+                            } else if new_edge.is_some() {
+                                // 同一边缘持续拖拽：仅重新定位（最轻量操作）
+                                reposition_preview_strip(&app2, &ball, new_edge.unwrap());
                             }
                         }
                     }
@@ -306,11 +359,168 @@ pub async fn floating_expand_from_strip(app: tauri::AppHandle) -> Result<(), Str
     Ok(())
 }
 
+/// 计算指定边缘的胶囊预览位置和尺寸（物理像素，全局坐标）。
+/// 与 collapse_ball 中的胶囊定位逻辑一致，供拖拽预览复用。
+fn compute_capsule_preview(
+    ball: &WebviewWindow,
+    edge: CollapseEdge,
+) -> Option<(f64, f64, f64, f64)> {
+    let scale = ball.scale_factor().ok()?;
+    let pos = ball.outer_position().ok()?;
+    let margin_px = FLOATING_MARGIN * scale;
+    let ball_cx = pos.x as f64 + margin_px + BALL_WIDTH * scale / 2.0;
+    let ball_cy = pos.y as f64 + margin_px + BALL_HEIGHT * scale / 2.0;
+
+    let monitor = ball.current_monitor().ok().flatten()?;
+    let work = monitor.work_area();
+    let wl = work.position.x as f64;
+    let wt = work.position.y as f64;
+    let ww = work.size.width as f64;
+    let wh = work.size.height as f64;
+    let gap = EDGE_GAP * scale;
+    let capsule_thick = CAPSULE_THICKNESS * scale;
+    let capsule_len = CAPSULE_LENGTH * scale;
+
+    let (cw, ch, cx, cy) = match edge {
+        CollapseEdge::Left => {
+            let y = (ball_cy - capsule_len / 2.0).max(wt + gap).min(wt + wh - capsule_len - gap);
+            (capsule_thick, capsule_len, wl + gap, y)
+        }
+        CollapseEdge::Right => {
+            let y = (ball_cy - capsule_len / 2.0).max(wt + gap).min(wt + wh - capsule_len - gap);
+            (capsule_thick, capsule_len, wl + ww - capsule_thick - gap, y)
+        }
+        CollapseEdge::Top => {
+            let x = (ball_cx - capsule_len / 2.0).max(wl + gap).min(wl + ww - capsule_len - gap);
+            (capsule_len, capsule_thick, x, wt + gap)
+        }
+        CollapseEdge::Bottom => {
+            let x = (ball_cx - capsule_len / 2.0).max(wl + gap).min(wl + ww - capsule_len - gap);
+            (capsule_len, capsule_thick, x, wt + wh - capsule_thick - gap)
+        }
+    };
+    Some((cx, cy, cw, ch))
+}
+
+/// 重新定位已显示的预览 strip 到新的胶囊位置（不销毁重建，仅移动）
+/// 供拖拽轮询每帧调用，让预览跟随球移动
+fn reposition_preview_strip(app: &tauri::AppHandle, ball: &WebviewWindow, edge: CollapseEdge) {
+    let Some(strip) = app.get_webview_window(STRIP_LABEL) else {
+        return;
+    };
+    let Some((cx, cy, _cw, _ch)) = compute_capsule_preview(ball, edge) else {
+        return;
+    };
+    let pad_px = STRIP_PAD * cached_scale();
+    let _ = strip.set_position(tauri::PhysicalPosition::new(
+        (cx - pad_px).round() as i32,
+        cy.round() as i32,
+    ));
+}
+
+/// 预创建 strip 窗口（启动时调用一次），停在屏幕外等待复用。
+/// 拖拽中只做 set_position + show/hide，绝不 destroy/recreate。
+fn ensure_preview_strip(app: &tauri::AppHandle) {
+    if app.get_webview_window(STRIP_LABEL).is_some() {
+        return; // 已创建
+    }
+    let logic_w = CAPSULE_THICKNESS; // 5px，稍后会被 set_size 覆盖
+    let logic_h = CAPSULE_LENGTH;    // 40px
+    let clw = logic_w;
+    let clh = logic_h;
+    if let Ok(strip) = WebviewWindowBuilder::new(
+        app,
+        STRIP_LABEL,
+        tauri::WebviewUrl::App("floating.html".into()),
+    )
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .shadow(false)
+    .transparent(true)
+    .resizable(false)
+    .inner_size(logic_w, logic_h)
+    .visible(false)
+    .on_page_load(move |window, _| {
+        let _ = window.set_size(tauri::LogicalSize::new(clw, clh));
+        let w = window.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let _ = w.set_size(tauri::LogicalSize::new(clw, clh));
+        });
+    })
+    .build()
+    {
+        // 停在屏幕外，不显示
+        let _ = strip.set_position(tauri::PhysicalPosition::new(-10000, -10000));
+        log::info!("[Floating] strip 窗口已预创建");
+    }
+}
+
+/// WebView2 在窗口 show 后可能把窄窗口撑成内容默认宽度（"刚拖上去一瞬很大"），
+/// 延迟强制设回尺寸（位置由调用方持续维护，这里不动，避免拖拽预览跳变）
+fn stabilize_strip_window(app: &tauri::AppHandle, w: f64, h: f64) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(180)).await;
+        if let Some(strip) = app.get_webview_window(STRIP_LABEL) {
+            let _ = strip.set_size(tauri::LogicalSize::new(w, h));
+        }
+    });
+}
+
+/// 显示预览 strip 到指定边缘位置（预创建的窗口只做 move + show + resize）
+fn show_preview_strip(app: &tauri::AppHandle, ball: &WebviewWindow, edge: CollapseEdge) {
+    let Some(strip) = app.get_webview_window(STRIP_LABEL) else {
+        return;
+    };
+    let Some((cx, cy, cw, ch)) = compute_capsule_preview(ball, edge) else {
+        return;
+    };
+    let scale = cached_scale();
+    let logic_w = cw / scale;
+    let logic_h = ch / scale;
+    // 窗口 = 胶囊 + 四周留白（与 collapse_ball 一致），位置外移留白
+    let window_logic_w = logic_w + STRIP_PAD * 2.0;
+    let window_logic_h = logic_h + STRIP_PAD * 2.0;
+    let pad_px = STRIP_PAD * scale;
+    let _ = strip.set_size(tauri::LogicalSize::new(window_logic_w, window_logic_h));
+    let _ = strip.set_position(tauri::PhysicalPosition::new(
+        (cx - pad_px).round() as i32,
+        (cy - pad_px).round() as i32,
+    ));
+    let _ = strip.show();
+    // 兜底：show 后 WebView2 可能撑开窗口，180ms 后强制设回尺寸
+    stabilize_strip_window(app, window_logic_w, window_logic_h);
+    // 悬浮球变半透明（收起预览提示）。用 eval 直接注入，
+    // 不依赖 floating-drag-near-edge 事件——跨窗口事件到悬浮窗 webview 不可靠（实测）。
+    let _ = ball.eval(
+        "var el=document.querySelector('.ball'); if(el){el.style.setProperty('opacity','0.55');}",
+    );
+}
+
+/// 隐藏拖拽预览 strip（移到屏幕外 + hide，不销毁，保留复用）
+fn hide_preview_strip(app: &tauri::AppHandle) {
+    if let Some(strip) = app.get_webview_window(STRIP_LABEL) {
+        let _ = strip.set_position(tauri::PhysicalPosition::new(-10000, -10000));
+        let _ = strip.hide();
+    }
+    // 恢复悬浮球透明度（eval 注入的预览半透明）
+    if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+        let _ = ball.eval(
+            "var el=document.querySelector('.ball'); if(el){el.style.removeProperty('opacity');}",
+        );
+    }
+}
+
 /// 拖动结束统一收尾：窗口基本没动视为单击（打开主窗口），随后做边缘吸附。
 /// 若右键菜单刚收起（点击球关菜单），本次单击只关菜单、不打开主窗口。
 fn finish_drag(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
     PREVIEW_SHOWING.store(false, Ordering::Release);
+    *PREVIEW_EDGE.lock().unwrap() = None;
+    // 拖拽结束：销毁预览 strip（collapse_ball 会重新创建正式的）
+    hide_preview_strip(app);
     let menu_just_closed = MENU_CLOSED_AT
         .lock()
         .unwrap_or_else(|p| p.into_inner())
@@ -532,6 +742,9 @@ pub(crate) fn ensure_floating_window(app: &tauri::AppHandle) {
             log::info!("[Floating] 右键菜单窗口已创建");
         }
     }
+
+    // 预创建 strip 窗口（拖拽预览用），停在屏幕外等待复用
+    ensure_preview_strip(app);
 }
 
 /// 应用保存的球位置；无保存位置或位置非法时使用主显示器右下角默认位。
@@ -589,6 +802,9 @@ pub(crate) fn destroy_floating_window(app: &tauri::AppHandle) {
     COLLAPSED.store(false, Ordering::Release);
     *COLLAPSED_EDGE.lock().unwrap() = None;
     *COLLAPSED_PREV_POS.lock().unwrap() = None;
+    PREVIEW_SHOWING.store(false, Ordering::Release);
+    *PREVIEW_EDGE.lock().unwrap() = None;
+    *CACHED_WORK_AREA.lock().unwrap() = None;
     if let Some(ball) = app.get_webview_window(BALL_LABEL) {
         let _ = ball.destroy();
     }
@@ -634,9 +850,47 @@ pub(crate) fn is_ball_collapsed() -> bool {
     COLLAPSED.load(Ordering::Acquire)
 }
 
+/// 刷新缓存的显示器工作区和缩放比（只在首次拖拽或跨屏时调用）
+fn refresh_monitor_cache(ball: &WebviewWindow) {
+    use std::sync::atomic::Ordering;
+    // 优先 current_monitor，失败则用 primary_monitor 兜底
+    let monitor = ball.current_monitor().ok().flatten()
+        .or_else(|| ball.primary_monitor().ok().flatten());
+    if let Some(monitor) = monitor {
+        let work = monitor.work_area();
+        let scale = monitor.scale_factor();
+        *CACHED_WORK_AREA.lock().unwrap() = Some((
+            work.position.x as f64,
+            work.position.y as f64,
+            work.size.width as f64,
+            work.size.height as f64,
+        ));
+        CACHED_SCALE.store((scale * 10000.0) as u64, Ordering::Relaxed);
+    }
+}
+
+/// 获取缓存的缩放比
+fn cached_scale() -> f64 {
+    use std::sync::atomic::Ordering;
+    CACHED_SCALE.load(Ordering::Relaxed) as f64 / 10000.0
+}
+
+/// 获取缓存的工作区（wl, wt, ww, wh），如果缓存为空则刷新
+fn cached_work_area(ball: &WebviewWindow) -> Option<(f64, f64, f64, f64)> {
+    {
+        let cached = CACHED_WORK_AREA.lock().unwrap();
+        if let Some(area) = *cached {
+            return Some(area);
+        }
+    }
+    refresh_monitor_cache(ball);
+    *CACHED_WORK_AREA.lock().unwrap()
+}
+
 /// 检测球当前靠近哪个边缘（返回 None = 不在任何边缘阈值内）
+/// 使用缓存的显示器信息，避免每帧调用 current_monitor()
 fn detect_edge(ball: &WebviewWindow) -> Option<CollapseEdge> {
-    let scale = ball.scale_factor().ok()?;
+    let scale = cached_scale();
     let pos = ball.outer_position().ok()?;
     let margin_px = FLOATING_MARGIN * scale;
     let cx = pos.x as f64 + margin_px;
@@ -645,12 +899,9 @@ fn detect_edge(ball: &WebviewWindow) -> Option<CollapseEdge> {
     let ball_h = BALL_HEIGHT * scale;
     let thresh_px = SNAP_THRESHOLD * scale;
 
-    let monitor = ball.current_monitor().ok().flatten()?;
-    let work = monitor.work_area();
-    let left = work.position.x as f64;
-    let top = work.position.y as f64;
-    let right = left + work.size.width as f64;
-    let bottom = top + work.size.height as f64;
+    let (left, top, ww, wh) = cached_work_area(ball)?;
+    let right = left + ww;
+    let bottom = top + wh;
 
     // 检查四边，优先选距离最近的
     let dist_left = cx - left;
@@ -683,6 +934,10 @@ fn collapse_ball(app: &tauri::AppHandle) {
         return;
     }
     if COLLAPSED.load(Ordering::Acquire) {
+        return;
+    }
+    // 拖拽中绝不收起（否则球消失用户还按着左键）
+    if FLOATING_DRAGGING.load(Ordering::Acquire) {
         return;
     }
 
@@ -746,41 +1001,78 @@ fn collapse_ball(app: &tauri::AppHandle) {
         }
     };
 
-    // 1. 隐藏球窗口
+    // 1. 通知前端：球即将收起，执行淡出动画
+    let _ = app.emit("floating-ball-collapse", ());
+    // 1.5 隐藏球窗口（淡出动画由前端 CSS transition 处理，200ms 足够）
     let _ = ball.hide();
 
-    // 1.5 销毁旧胶囊窗口（防止残留）
-    if let Some(old) = app.get_webview_window(STRIP_LABEL) {
-        let _ = old.destroy();
-    }
-
-    // 2. 创建胶囊窗口
+    // 2. 复用预创建的 strip 窗口（绝不 destroy+create —— destroy 是异步的，
+    //    紧跟用相同 label 重建会失败，导致胶囊不可见）
     let capsule_logic_w = cw / scale;
     let capsule_logic_h = ch / scale;
-    if let Ok(capsule) = WebviewWindowBuilder::new(
-        app,
-        STRIP_LABEL,
-        tauri::WebviewUrl::App("floating.html".into()),
-    )
-    .decorations(false)
-    .always_on_top(true)
-    .skip_taskbar(true)
-    .shadow(false)
-    .transparent(true)
-    .resizable(false)
-    .inner_size(capsule_logic_w, capsule_logic_h)
-    .visible(false)
-    .build()
-    {
+    // 窗口 = 胶囊 + 四周留白（STRIP_PAD），位置整体外移留白；胶囊画在窗口中央
+    let window_logic_w = capsule_logic_w + STRIP_PAD * 2.0;
+    let window_logic_h = capsule_logic_h + STRIP_PAD * 2.0;
+    let pad_px = STRIP_PAD * scale;
+    if let Some(capsule) = app.get_webview_window(STRIP_LABEL) {
+        let _ = capsule.set_size(tauri::LogicalSize::new(window_logic_w, window_logic_h));
         let _ = capsule.set_position(tauri::PhysicalPosition::new(
-            cx.round() as i32,
-            cy.round() as i32,
+            (cx - pad_px).round() as i32,
+            (cy - pad_px).round() as i32,
         ));
+        // 诊断：set_size 后读回实际窗口尺寸，确认 WebView2 是否夹克了尺寸
+        if let Ok(actual) = capsule.inner_size() {
+            let scale = capsule.scale_factor().unwrap_or(1.0);
+            log::info!(
+                "[Floating] 胶囊复用后实际窗口: edge={:?} 期望窗口逻辑=({:.1},{:.1}) 实际逻辑≈({:.1},{:.1})",
+                edge, window_logic_w, window_logic_h,
+                actual.width as f64 / scale, actual.height as f64 / scale
+            );
+        }
         let _ = capsule.show();
+        // 兜底：show 后 WebView2 可能撑开窗口，180ms 后强制设回尺寸
+        stabilize_strip_window(app, window_logic_w, window_logic_h);
         log::info!(
-            "[Floating] 胶囊窗口: edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
+            "[Floating] 胶囊窗口复用: edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
             edge, capsule_logic_w, capsule_logic_h, cx, cy
         );
+    } else {
+        // strip 未预创建（极端情况）：原地创建
+        let clw = capsule_logic_w;
+        let clh = capsule_logic_h;
+        if let Ok(capsule) = WebviewWindowBuilder::new(
+            app,
+            STRIP_LABEL,
+            tauri::WebviewUrl::App("floating.html".into()),
+        )
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .transparent(true)
+        .resizable(false)
+        .inner_size(capsule_logic_w, capsule_logic_h)
+        .visible(false)
+        .on_page_load(move |window, _| {
+            let _ = window.set_size(tauri::LogicalSize::new(clw, clh));
+            let w = window.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let _ = w.set_size(tauri::LogicalSize::new(clw, clh));
+            });
+        })
+        .build()
+        {
+            let _ = capsule.set_position(tauri::PhysicalPosition::new(
+                cx.round() as i32,
+                cy.round() as i32,
+            ));
+            let _ = capsule.show();
+            log::info!(
+                "[Floating] 胶囊窗口新建(兜底): edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
+                edge, capsule_logic_w, capsule_logic_h, cx, cy
+            );
+        }
     }
 
     *COLLAPSED_EDGE.lock().unwrap() = Some(edge);
@@ -792,7 +1084,21 @@ fn collapse_ball(app: &tauri::AppHandle) {
     log::info!("[Floating] 悬浮球已收起: edge={:?}", edge);
 }
 
-/// 展开悬浮球：销毁色条窗口 → 显示球窗口
+/// 鼠标是否在窗口矩形内（物理像素判断）
+fn cursor_in_window(win: &tauri::WebviewWindow) -> bool {
+    let Some((cx, cy)) = global_cursor_physical() else {
+        return false;
+    };
+    let (Ok(pos), Ok(size)) = (win.outer_position(), win.inner_size()) else {
+        return false;
+    };
+    (cx as f64 >= pos.x as f64)
+        && (cx as f64 <= pos.x as f64 + size.width as f64)
+        && (cy as f64 >= pos.y as f64)
+        && (cy as f64 <= pos.y as f64 + size.height as f64)
+}
+
+/// 展开悬浮球：隐藏色条窗口 → 球沿吸附方向从屏幕外原位滑出，贴边停靠（带平滑动画）
 pub(crate) fn expand_ball(app: &tauri::AppHandle) {
     use std::sync::atomic::Ordering;
 
@@ -801,27 +1107,121 @@ pub(crate) fn expand_ball(app: &tauri::AppHandle) {
     }
 
     // 先重置状态（避免球显示后第一次拖拽被 is_ball_collapsed 拒绝）
-    *COLLAPSED_EDGE.lock().unwrap() = None;
+    let edge = COLLAPSED_EDGE.lock().unwrap().take();
     COLLAPSED.store(false, Ordering::Release);
 
     // 取消可能正在进行的拖动
     FLOATING_DRAGGING.store(false, Ordering::Release);
 
-    // 1. 销毁色条窗口
+    // 1. 获取胶囊当前位置（物理像素）作为展开方向基准
+    let strip_pos = app.get_webview_window(STRIP_LABEL).and_then(|s| s.outer_position().ok());
+    // 2. 隐藏色条窗口（不销毁，保留复用）
     if let Some(strip) = app.get_webview_window(STRIP_LABEL) {
-        let _ = strip.destroy();
+        let _ = strip.set_position(tauri::PhysicalPosition::new(-10000, -10000));
+        let _ = strip.hide();
     }
 
-    // 2. 恢复球窗口位置并显示
+    // 3. 平滑滑入动画：起点在屏幕外（吸附方向对侧），终点贴吸附边缘（球整体露出）
     if let Some(ball) = app.get_webview_window(BALL_LABEL) {
+        let scale = ball.scale_factor().unwrap_or(1.0);
         let prev_pos = COLLAPSED_PREV_POS.lock().unwrap().take();
-        if let Some((x, y)) = prev_pos {
-            let _ = ball.set_position(tauri::LogicalPosition::new(x, y));
-        }
+
+        // 计算起点/终点（全逻辑坐标）。胶囊中心用于对齐垂直/水平位置。
+        // 注意：窗口左上角已外移 STRIP_PAD，胶囊实际位置 = 窗口左上 + 留白
+        let capsule_center = strip_pos.map(|p| {
+            let (sx, sy) = (p.x as f64 / scale, p.y as f64 / scale);
+            match edge {
+                // 竖排胶囊：中心 y = sy + 留白 + 长/2
+                Some(CollapseEdge::Left) | Some(CollapseEdge::Right) => {
+                    (sx + STRIP_PAD, sy + STRIP_PAD + CAPSULE_LENGTH / 2.0)
+                }
+                // 横排胶囊：中心 x = sx + 留白 + 长/2
+                _ => (sx + STRIP_PAD + CAPSULE_LENGTH / 2.0, sy + STRIP_PAD),
+            }
+        });
+
+        let (start, end) = match (edge, cached_work_area(&ball)) {
+            (Some(CollapseEdge::Left), Some((wl, _wt, _ww, _wh))) => {
+                let wl_l = wl / scale;
+                let end_x = wl_l + EDGE_GAP - FLOATING_MARGIN;
+                let y = capsule_center.map(|c| c.1 - BALL_HEIGHT / 2.0).unwrap_or(200.0);
+                ((end_x - BALL_WIDTH, y), (end_x, y))
+            }
+            (Some(CollapseEdge::Right), Some((wl, _wt, ww, _wh))) => {
+                let right_l = (wl + ww) / scale;
+                let end_x = right_l - EDGE_GAP - BALL_WIDTH - FLOATING_MARGIN;
+                let y = capsule_center.map(|c| c.1 - BALL_HEIGHT / 2.0).unwrap_or(200.0);
+                ((end_x + BALL_WIDTH, y), (end_x, y))
+            }
+            (Some(CollapseEdge::Top), Some((_wl, wt, _ww, _wh))) => {
+                let wt_l = wt / scale;
+                let end_y = wt_l + EDGE_GAP - FLOATING_MARGIN;
+                let x = capsule_center.map(|c| c.0 - BALL_WIDTH / 2.0).unwrap_or(200.0);
+                ((x, end_y - BALL_HEIGHT), (x, end_y))
+            }
+            // 兜底：方向未知或缓存缺失 → 从胶囊位置滑回收起前位置
+            _ => {
+                let p = capsule_center.unwrap_or((0.0, 0.0));
+                let e = prev_pos.unwrap_or(p);
+                (p, e)
+            }
+        };
+
+        // 先设置到起点位置并显示
+        let _ = ball.set_position(tauri::LogicalPosition::new(start.0, start.1));
         let _ = ball.show();
+        let _ = app.emit("floating-ball-expand", ());
+
+        // 异步执行滑入动画（200ms ease-out cubic，20帧）
+        let app_clone = app.clone();
+        SNAP_ANIMATION_CANCEL.store(false, Ordering::Release);
+        tauri::async_runtime::spawn(async move {
+            let steps = 10u32;
+            let duration_ms = 80u64;
+            let interval_ms = (duration_ms / steps as u64).max(1);
+            for i in 1..=steps {
+                if SNAP_ANIMATION_CANCEL.load(Ordering::Acquire) {
+                    return;
+                }
+                let t = i as f64 / steps as f64;
+                let e = 1.0 - (1.0 - t).powi(3); // ease-out cubic
+                let x = start.0 + (end.0 - start.0) * e;
+                let y = start.1 + (end.1 - start.1) * e;
+                if let Some(b) = app_clone.get_webview_window(BALL_LABEL) {
+                    let _ = b.set_position(tauri::LogicalPosition::new(x, y));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(interval_ms)).await;
+            }
+            // 精确落在目标
+            if let Some(b) = app_clone.get_webview_window(BALL_LABEL) {
+                let _ = b.set_position(tauri::LogicalPosition::new(end.0, end.1));
+            }
+            save_ball_logical_position(&app_clone, end.0, end.1);
+
+            // 兜底弹面板：球展开动画完成，若鼠标仍在球窗口内（窗口滑到鼠标下方时
+            // 浏览器不触发 mouseenter，前端那套失效），延迟 200ms 后主动弹面板。
+            let app2 = app_clone.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                if let Some(b) = app2.get_webview_window(BALL_LABEL) {
+                    let vis = b.is_visible().unwrap_or(false);
+                    let in_win = cursor_in_window(&b);
+                    if vis && in_win {
+                        // 鼠标确实在球上：置 hover 状态为 true，
+                        // 否则展开瞬间的 mouseleave 宽限期任务会在 500ms 后把
+                        // 刚弹出的面板立即 hide（面板只闪现 ~300ms，用户看不到）。
+                        HOVER_STATE
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .ball = true;
+                        let _ = show_floating_panel(app2).await;
+                    }
+                }
+            });
+        });
     }
 
-    log::info!("[Floating] 悬浮球已展开");
+    log::info!("[Floating] 悬浮球已展开: edge={:?}", edge);
 }
 
 /// 收起状态下轮询鼠标位置，hover 胶囊时延迟展开
@@ -831,7 +1231,7 @@ fn start_expand_polling(app: tauri::AppHandle) {
         let mut hover_start: Option<std::time::Instant> = None;
 
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
 
             if !COLLAPSED.load(std::sync::atomic::Ordering::Acquire) {
                 break;
@@ -862,10 +1262,12 @@ fn start_expand_polling(app: tauri::AppHandle) {
             let cw = size.width as f64;
             let ch = size.height as f64;
 
-            let now_hovering = (cursor_x as f64 >= cx)
-                && (cursor_x as f64 <= cx + cw)
-                && (cursor_y as f64 >= cy)
-                && (cursor_y as f64 <= cy + ch);
+            // 命中区域外扩：胶囊本身只有5px太难命中，四周扩大 CAPSULE_HIT_PADDING
+            let pad = CAPSULE_HIT_PADDING * scale;
+            let now_hovering = (cursor_x as f64 >= cx - pad)
+                && (cursor_x as f64 <= cx + cw + pad)
+                && (cursor_y as f64 >= cy - pad)
+                && (cursor_y as f64 <= cy + ch + pad);
 
             if now_hovering {
                 if !hovering {
@@ -1610,6 +2012,7 @@ pub async fn show_floating_panel(app: tauri::AppHandle) -> Result<(), String> {
     let _ = panel.set_position(tauri::LogicalPosition::new(px, py));
     // 不 set_focus：面板纯展示，不抢焦点；Windows 下无焦点窗口仍可接收鼠标事件
     let _ = panel.show();
+    log::debug!("[Floating] 悬浮面板已显示 pos=({px:.0},{py:.0})");
 
     let _ = app.emit("floating-data-refresh", ());
 
@@ -1795,4 +2198,46 @@ pub async fn floating_open_settings(app: tauri::AppHandle) -> Result<(), String>
 pub async fn set_floating_ball_position(x: f64, y: f64) -> Result<(), String> {
     crate::settings::set_floating_window_position(Some(FloatingWindowPosition { x, y }))
         .map_err(|e| e.to_string())
+}
+
+/// 悬浮窗手动刷新用量（悬浮面板每行刷新按钮）：只刷新指定 app 的当前供应商。
+/// 复用 queryProviderUsage（写 UsageCache + emit usage-cache-updated →
+/// 悬浮面板/球监听自动刷新）。不遍历其他 app，避免「点一行刷全部」。
+#[tauri::command]
+pub async fn floating_refresh_usage(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    copilot_state: tauri::State<'_, crate::CopilotAuthState>,
+    xai_state: tauri::State<'_, crate::XaiOAuthState>,
+    app_type: String,
+) -> Result<(), String> {
+    let Some(parsed) = parse_app_type(&app_type) else {
+        return Err(format!("未知 app: {app_type}"));
+    };
+    // 只刷该 app（不可见/无当前供应商则跳过，不算错误）
+    let visible_apps = crate::settings::get_settings()
+        .visible_apps
+        .unwrap_or_default();
+    if !visible_apps.is_visible(&parsed) {
+        return Ok(());
+    }
+    let Ok(Some(provider_id)) =
+        crate::settings::get_effective_current_provider(&state.db, &parsed)
+    else {
+        return Ok(());
+    };
+    match crate::commands::queryProviderUsage(
+        app_handle.clone(),
+        state.clone(),
+        copilot_state.clone(),
+        xai_state.clone(),
+        provider_id,
+        parsed.as_str().to_string(),
+    )
+    .await
+    {
+        Ok(_) => log::info!("[Floating] 刷新用量成功: {}", parsed.as_str()),
+        Err(e) => log::warn!("[Floating] 刷新用量失败 {}: {e}", parsed.as_str()),
+    }
+    Ok(())
 }

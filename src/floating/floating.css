@@ -107,7 +107,8 @@ body {
   transition:
     background 0.15s ease,
     border-color 0.15s ease,
-    transform 0.1s ease;
+    transform 0.1s ease,
+    opacity 0.25s ease;
 }
 /* 悬停：边框提为品牌蓝，提示可点 */
 .ball:hover {
@@ -143,16 +144,6 @@ body {
   .dark .ball.route-service-live {
     border-color: #34d399;
   }
-}
-/* 左区：状态圆点单独一列（绿/橙/红表示余量；父 .ball align-items:center 垂直居中，
-   间距由 .ball 的 gap:6px 提供，不再额外 margin） */
-.ball-status-col {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  align-self: center;
-  transition: background 0.3s ease;
 }
 /* 中区（原左半区）：占满剩余宽度且可收缩，避免固定 98px 时 app 名长短不一
    造成留白或图钉被挤出。名称过长省略号截断，置顶图钉固定在右端点。 */
@@ -291,7 +282,7 @@ body {
   padding: 12px 14px 10px;
   border-bottom: 1px solid var(--fb-border);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
@@ -306,6 +297,13 @@ body {
   color: var(--fb-muted);
   margin-top: 0;
   display: block;
+}
+/* 标题 + 副标题 左半区竖排（保留结构类） */
+.panel-header-left {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
 }
 .panel-list {
   flex: 1;
@@ -492,6 +490,33 @@ body {
 .dark .usage-time {
   color: #9ca3af;
 }
+/* 行刷新按钮（刷新时间旁边，与主窗口 UsageFooter 同款：小图标 + hover 底色 + 转圈） */
+.row-refresh {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin-left: auto;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--fb-muted);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+}
+.row-refresh:hover {
+  color: var(--fb-fg);
+  background: var(--fb-hover);
+}
+.row-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 /* 余量结构化渲染（主窗口 UsageFooter 同款配色语言） */
 .usage-line {
   display: inline-flex;
@@ -659,4 +684,20 @@ body {
   height: 1px;
   background: var(--fb-border);
   flex-shrink: 0;
+}
+
+/* ---- 拖拽收起预览：球半透明（0.4，明显透明但仍可辨认） ---- */
+.ball.drag-previewing {
+  opacity: 0.4 !important;
+}
+
+/* ---- strip（胶囊色条）窗口专用覆盖 ----
+ * strip 窗口只有 5×40 或 40×5 逻辑像素，body 的 flex 居中对这么小的窗口
+ * 可能导致内容偏移。strip 内容（FloatingStrip 的 div）需要精确贴满窗口，
+ * 不做任何居中。由 floating-main.tsx 给 strip 窗口的 body 打 strip-window 类。 */
+body.strip-window {
+  display: block;
+}
+body.strip-window #floating-root {
+  display: block;
 }

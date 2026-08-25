@@ -65,6 +65,9 @@ function usageLevel(d: FloatingUsageData): UsageLevel {
     if (used >= 90) return "danger";
     if (used >= 70) return "warn";
   }
+  // 余额型（remaining ≤ 0 = 已透支）按 danger 处理，避免显示灰点
+  const rem = d.remaining;
+  if (rem != null && isFinite(rem) && rem <= 0) return "danger";
   return "good";
 }
 
@@ -82,8 +85,12 @@ function worstUsageLevel(usage: FloatingUsageData[] | null): UsageLevel {
     if (d.isValid === false) return "danger";
     const used = d.used;
     if (used != null && isFinite(used)) {
-      if (used >= 90) warn = true;
+      if (used >= 90) return "danger";
+      if (used >= 70) warn = true;
     }
+    // 余额型透支
+    const rem = d.remaining;
+    if (rem != null && isFinite(rem) && rem <= 0) return "danger";
   }
   return warn ? "warn" : "good";
 }
@@ -168,9 +175,12 @@ async function loadSummary(
     usageValue = "";
   } else {
     const d = entry.usage?.[0];
-    if (d && d.used != null && isFinite(d.used)) {
-      usageValue = d.used.toFixed(2);
-      usageUnit = d.unit ?? "";
+    // 余额型套餐（CNY/GB）只填 remaining，订阅型只填 used；
+    // 取有值者，避免「剩余 -2.97 CNY」被显示成未设置
+    const val = d ? (d.used ?? d.remaining) : null;
+    if (val != null && isFinite(val)) {
+      usageValue = val.toFixed(2);
+      usageUnit = d?.unit ?? "";
     } else {
       usageValue = entry.usageSummary ?? t("floating.notSet");
     }
@@ -218,6 +228,7 @@ export function FloatingBall() {
     opacity: 0.97,
   });
   const [previewEdge, setPreviewEdge] = useState<string | null>(null);
+  const [animState, setAnimState] = useState<"idle" | "fading-in" | "fading-out">("idle");
 
   const refresh = useCallback(() => {
     loadSummary(t)
@@ -249,12 +260,18 @@ export function FloatingBall() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
-    // 拖拽收起预览事件
-    void listen<{ edge?: string }>("floating-collapse-preview", (ev) => {
-      setPreviewEdge(ev.payload?.edge ?? "left");
+    // 拖拽靠近边缘：球变半透明（strip 窗口预览由 Rust 端直接管理）
+    void listen<boolean>("floating-drag-near-edge", (ev) => {
+      setPreviewEdge(ev.payload ? "near" : null);
     }).then((u) => unlisteners.push(u));
-    void listen("floating-collapse-preview-cancel", () => {
-      setPreviewEdge(null);
+    // 展开/收起淡入淡出动画
+    void listen("floating-ball-expand", () => {
+      setAnimState("fading-in");
+      // 250ms 后恢复 idle（与 CSS transition 时长匹配）
+      setTimeout(() => setAnimState("idle"), 260);
+    }).then((u) => unlisteners.push(u));
+    void listen("floating-ball-collapse", () => {
+      setAnimState("fading-out");
     }).then((u) => unlisteners.push(u));
     // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮窗 webview 不可靠，球常只按
     // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
@@ -273,15 +290,23 @@ export function FloatingBall() {
     );
   };
 
-  // 拖拽预览：靠近边缘时在球上方叠加一条半透明色条预览
+  // 拖拽预览：靠近边缘时球变透明 + 边缘显示色条预览
   const showPreview = !!previewEdge;
-  const previewIsVertical = previewEdge === "left" || previewEdge === "right";
+  const ballOpacity = animState === "fading-in" ? 0 : animState === "fading-out" ? 0 : undefined;
 
   return (
     <div
-      className={`ball${summary.takeoverActive ? " route-service-live" : ""}`}
+      className={[
+        "ball",
+        summary.takeoverActive ? "route-service-live" : "",
+        showPreview ? "drag-previewing" : "",
+      ].filter(Boolean).join(" ")}
       title={summary.takeoverActive ? t("floating.takeoverActive") : undefined}
-      style={{ "--ball-alpha": summary.opacity, position: "relative" } as CSSProperties}
+      style={{
+        "--ball-alpha": summary.opacity,
+        position: "relative",
+        opacity: ballOpacity,
+      } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerUp={() => void invoke("floating_drag_end")}
       onPointerCancel={() => void invoke("floating_drag_end")}
@@ -292,13 +317,7 @@ export function FloatingBall() {
         );
       }}
     >
-      {/* 左区：状态圆点（绿/橙/红）单独一列 */}
-      <span
-        className="ball-status-col"
-        style={{ background: summary.color }}
-        title={`${summary.usageValue}${summary.usageUnit ? ` ${summary.usageUnit}` : ""}`}
-      />
-      {/* 中区：app 图标 + 名 + 图钉 + 供应商蓝底球标（原左区内容） */}
+      {/* 中区：app 图标 + 名 + 图钉 + 供应商蓝底球标 */}
       <div className="ball-left">
         <span className="ball-app">
           <AppIcon size={10} appType={summary.appType} />
@@ -360,31 +379,6 @@ export function FloatingBall() {
           </>
         )}
       </span>
-      {/* 拖拽收起预览：靠近边缘时显示色条预览 */}
-      {showPreview && (
-        <div
-          style={{
-            position: "absolute",
-            background: summary.color,
-            opacity: 0.7,
-            borderRadius: 2,
-            pointerEvents: "none" as const,
-            ...(previewIsVertical
-              ? {
-                  width: 6,
-                  height: "120%",
-                  top: "-10%",
-                  ...(previewEdge === "left" ? { left: -10 } : { right: -10 }),
-                }
-              : {
-                  height: 6,
-                  width: "120%",
-                  left: "-10%",
-                  ...(previewEdge === "top" ? { top: -10 } : { bottom: -10 }),
-                }),
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -1492,20 +1492,44 @@ async fn query_opencode_go(
         .await
         .map_err(|e| format!("读取 OpenCode Go 页面失败: {e}"))?;
 
-    // 提取 `XXXUsage:$R[n]={status:"ok",resetInSec:N,usagePercent:P}`
-    let re = Regex::new(
-        r#"(rollingUsage|weeklyUsage|monthlyUsage):\$R\[\d+\]=\{status:"ok",resetInSec:(\d+),usagePercent:(\d+)\}"#,
+    // 提取 `XXXUsage:$R[n]={...}`，键值对顺序/数量不假定（页面结构可能变化）：
+    // - status 可能是 "ok"/"error"/其他
+    // - usagePercent 可能是整数或浮点（如 12.5）
+    // - resetInSec 前后可能有其他字段
+    let re_usage = Regex::new(
+        r#"(rollingUsage|weeklyUsage|monthlyUsage):\$R\[\d+\]=\{(?P<body>[^}]*)\}"#,
     )
     .unwrap();
+    // body 内按键名单独提取，容忍任意顺序与多余字段
+    let re_reset = Regex::new(r#"resetInSec:(\d+)"#).unwrap();
+    let re_pct = Regex::new(r#"usagePercent:([\d.]+)"#).unwrap();
+    let re_status = Regex::new(r#"status:"([^"]+)""#).unwrap();
 
     let mut rolling: Option<(u64, f64)> = None;
     let mut weekly: Option<(u64, f64)> = None;
     let mut monthly: Option<(u64, f64)> = None;
+    let mut seen_any = false;
 
-    for cap in re.captures_iter(&html) {
+    for cap in re_usage.captures_iter(&html) {
         let name = &cap[1];
-        let reset: u64 = cap[2].parse().unwrap_or(0);
-        let pct: f64 = cap[3].parse().unwrap_or(0.0);
+        let body = &cap["body"];
+        // status 非 ok 视为该窗口无效（跳过，不报错）
+        if let Some(st) = re_status.captures(body) {
+            if &st[1] != "ok" {
+                continue;
+            }
+        }
+        let reset: u64 = re_reset
+            .captures(body)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0);
+        let pct: f64 = re_pct
+            .captures(body)
+            .and_then(|c| c.get(1))
+            .and_then(|m| m.as_str().parse().ok())
+            .unwrap_or(0.0);
+        seen_any = true;
         let ent = (reset, pct);
         match name {
             "rollingUsage" => rolling = Some(ent),
@@ -1515,7 +1539,25 @@ async fn query_opencode_go(
         }
     }
 
-    if rolling.is_none() && weekly.is_none() && monthly.is_none() {
+    if !seen_any {
+        // 解析失败：打印页面中与用量键相关的片段（限长，避免整页 + 敏感信息刷日志）
+        let snippet: String = html
+            .match_indices("Usage")
+            .take(4)
+            .map(|(idx, m)| {
+                let start = idx.saturating_sub(60);
+                let end = (idx + m.len() + 180).min(html.len());
+                html[start..end]
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        log::info!(
+            "[OpenCodeGo] 页面结构未匹配用量键，相关片段(snip):\n{snippet}\n(html_len={})",
+            html.len()
+        );
         return Ok(coding_plan_not_found(
             "未能从 OpenCode Go 页面解析出用量配额（页面结构可能已变化）",
         ));

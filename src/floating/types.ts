@@ -49,5 +49,8 @@ export function usageValueClass(d: FloatingUsageData): string {
     if (used >= 90) return "usage-value-danger";
     if (used >= 70) return "usage-value-warn";
   }
+  // 余额型：remaining ≤ 0（透支）→ 红
+  const rem = d.remaining;
+  if (rem != null && isFinite(rem) && rem <= 0) return "usage-value-danger";
   return "usage-value-good";
 }

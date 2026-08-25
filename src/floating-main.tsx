@@ -3,6 +3,10 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  type FloatingEntry,
+  type FloatingUsageData,
+} from "./floating/types";
 import { FloatingBall } from "./floating/FloatingBall";
 import { FloatingPanel } from "./floating/FloatingPanel";
 import { FloatingContextMenu } from "./floating/FloatingContextMenu";
@@ -77,21 +81,34 @@ function FloatingHoverLayer({
   source,
   onEnter,
   children,
+  enterDelayMs = 0,
 }: {
   source: "ball" | "panel";
   onEnter?: () => void;
   children: React.ReactNode;
+  /** 鼠标移入后延迟多少毫秒才视为「悬停」（用于球展开后停留一会再弹面板） */
+  enterDelayMs?: number;
 }) {
+  const timerRef = React.useRef<number | null>(null);
   return (
     <div
       className="floating-hover-layer"
       onMouseEnter={() => {
+        // hover 状态立即上报（不能让球滑动动画期间的 enter/leave 交替把它清掉）
         void invoke("floating_set_hover", { source, active: true });
-        onEnter?.();
+        // 只有「弹面板」动作延迟（等球滑出动画到位，位置才正确）
+        if (onEnter) {
+          if (timerRef.current) window.clearTimeout(timerRef.current);
+          timerRef.current = window.setTimeout(() => onEnter(), enterDelayMs);
+        }
       }}
-      onMouseLeave={() =>
-        void invoke("floating_set_hover", { source, active: false })
-      }
+      onMouseLeave={() => {
+        if (timerRef.current) {
+          window.clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        void invoke("floating_set_hover", { source, active: false });
+      }}
     >
       {children}
     </div>
@@ -99,27 +116,30 @@ function FloatingHoverLayer({
 }
 
 /**
- * 侧边栏指示器：极简彩色竖/横条，从屏幕边缘微微探出。
- * 左/右 = 竖条（5×40），上 = 横条（40×5）。
- * 颜色 = 用量等级（绿/橙/红）。
+ * 侧边栏温度计指示器（纯色，无文字）：
+ * - 暗色半透明底 + 圆角矩形容器
+ * - 彩色填充条表示用量（绿 ≤70% / 橙 70-90% / 红 ≥90%）
+ * - 多套餐：填充取最差等级颜色
+ * - 只显示当前悬浮窗置顶 app 的用量（与悬浮面板置顶逻辑一致）
  */
 function FloatingStrip() {
-  const [color, setColor] = useState("#16a34a");
+  const [entry, setEntry] = useState<FloatingEntry | null>(null);
+  // 窗口尺寸变化（Rust 端 set_size 切横/竖）时强制重渲染，
+  // 否则 isVertical 停在首次渲染（预创建窗口是竖的 → 顶部横条会误判为竖）
+  const [, forceRender] = useState(0);
+
+  useEffect(() => {
+    const onResize = () => forceRender((n) => n + 1);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   useEffect(() => {
     let alive = true;
     const refresh = () => {
-      void invoke("get_floating_ball_detail").then((entry: any) => {
-        if (!alive || !entry) return;
-        let c = "#16a34a";
-        if (entry.usage && entry.usage.length > 0) {
-          for (const u of entry.usage) {
-            if (u.isValid === false) { c = "#ef4444"; break; }
-            if (u.used != null && u.used >= 90) { c = "#ef4444"; }
-            else if (u.used != null && u.used >= 70) { c = "#f97316"; }
-          }
-        }
-        setColor(c);
+      void invoke("get_floating_ball_detail").then((data: any) => {
+        if (!alive) return;
+        setEntry(data as FloatingEntry | null);
       }).catch(() => {});
     };
     refresh();
@@ -127,27 +147,80 @@ function FloatingStrip() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
 
+  const usage = entry?.usage;
+  // 主套餐 = usage[0]（当前置顶 app 的默认套餐，如 5h）。
+  // 温度计只反映主套餐：颜色按主套餐等级、填充按主套餐已用量；
+  // 不再取"所有套餐最差"——否则别的套餐高用量会把当前套餐的颜色盖掉（用户困惑点）。
+  const primary = usage?.[0];
+  const primaryUsed = primary?.used;
+  const primaryPct = (primaryUsed != null && isFinite(primaryUsed)) ? Math.min(primaryUsed, 100) : 0;
+  const fillPct = Math.max(2, primaryPct);
+
+  function statusColor(d: FloatingUsageData | undefined): string {
+    if (!d) return "#94a3b8";               // 无数据：灰
+    if (d.isValid === false) return "#ef4444";
+    const used = d.used;
+    if (used != null && isFinite(used)) {
+      if (used >= 90) return "#ef4444";
+      if (used >= 70) return "#f97316";
+    }
+    return "#16a34a";
+  }
+
+  const fillColor = usage && usage.length > 0 ? statusColor(primary) : "#94a3b8";
+  const isVertical = window.innerWidth <= window.innerHeight;
+
   return (
     <div
       style={{
-        width: "100%",
-        height: "100%",
-        background: color,
-        borderRadius: 2,
-        cursor: "pointer",
+        // 窗口比胶囊大一圈（STRIP_PAD=4px 留白），胶囊画在窗口正中央，
+        // 让 CSS 圆角在更大的渲染表面上抗锯齿（跳过 WebView2 极小窗口切方问题）
+        position: "fixed",
+        top: 4,
+        right: 4,
+        bottom: 4,
+        left: 4,
+        background: "#e3edfe",
+        // 边框黑色细线让浅色胶囊在任意壁纸上清晰可辨（浅色底足够醒目，1.5px 观感最细）
+        border: "1.5px solid #000",
+        boxSizing: "border-box",
+        // 超大圆角 = 完美胶囊（浏览器自动按短边一半裁剪）
+        borderRadius: 999,
+        cursor: "default",
+        overflow: "hidden",
       }}
-    />
+    >
+      <div
+        style={{
+          position: "absolute",
+          background: fillColor,
+          borderRadius: isVertical ? "0 0 999px 999px" : "0 999px 999px 0",
+          transition: "height 0.5s ease, width 0.5s ease, background 0.5s ease",
+          ...(isVertical
+            ? { bottom: 0, left: 0, right: 0, height: `${fillPct}%` }
+            : { top: 0, bottom: 0, left: 0, width: `${fillPct}%` }),
+        }}
+      />
+    </div>
   );
 }
 
 function FloatingApp() {
   const label = getCurrentWindow().label;
+  // strip 窗口（5×40/40×5）需要去掉 body 的 flex 居中，否则色条内容会偏移
+  useEffect(() => {
+    if (label === "floating-strip") {
+      document.body.classList.add("strip-window");
+      return () => document.body.classList.remove("strip-window");
+    }
+  }, [label]);
   return (
     <>
       <FloatingThemeSync />
       {label === "floating-ball" ? (
         <FloatingHoverLayer
           source="ball"
+          enterDelayMs={150}
           onEnter={() => void invoke("show_floating_panel")}
         >
           <FloatingBall />
