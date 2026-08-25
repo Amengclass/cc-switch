@@ -140,9 +140,9 @@ static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mut
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 胶囊厚度（逻辑像素）
-const CAPSULE_THICKNESS: f64 = 28.0;
-/// 胶囊长度（逻辑像素）：左/右竖排胶囊的高度，上/下横排胶囊的宽度
-const CAPSULE_LENGTH: f64 = 72.0;
+const CAPSULE_THICKNESS: f64 = 18.0;
+/// 胶囊长度（逻辑像素）：左/右竖排胶囊的高度，上横排胶囊的宽度
+const CAPSULE_LENGTH: f64 = 48.0;
 /// 展开触发延迟（毫秒）
 const CAPSULE_EXPAND_DELAY_MS: u64 = 250;
 /// 收起触发延迟（毫秒）
