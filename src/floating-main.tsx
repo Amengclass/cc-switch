@@ -99,7 +99,9 @@ function FloatingHoverLayer({
 }
 
 /**
- * 胶囊态：极简圆角矩形，仅显示用量颜色圆点。
+ * 侧边栏指示器：极简彩色竖/横条，从屏幕边缘微微探出。
+ * 左/右 = 竖条（5×40），上 = 横条（40×5）。
+ * 颜色 = 用量等级（绿/橙/红）。
  */
 function FloatingStrip() {
   const [color, setColor] = useState("#16a34a");
@@ -130,24 +132,11 @@ function FloatingStrip() {
       style={{
         width: "100%",
         height: "100%",
-        background: "rgba(24,24,24,0.82)",
-        borderRadius: 10,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
+        background: color,
+        borderRadius: 2,
         cursor: "pointer",
       }}
-    >
-      <div
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          background: color,
-          boxShadow: `0 0 6px ${color}99`,
-        }}
-      />
-    </div>
+    />
   );
 }
 
