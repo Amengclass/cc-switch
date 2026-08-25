@@ -99,28 +99,17 @@ function FloatingHoverLayer({
 }
 
 /**
- * 边缘指示条：纯色圆角胶囊，从屏幕边缘微微探出。
- * 颜色 = 当前用量等级（绿/橙/红），点击展开。
+ * 胶囊态：半透明毛玻璃胶囊，显示图标 + 状态文字。
+ * 窗口尺寸由 Rust 设置（28×72 或 72×28），React 填满并渲染内容。
  */
 function FloatingStrip() {
-  const [color, setColor] = useState("#94a3b8");
+  const [entry, setEntry] = useState<any>(null);
 
   useEffect(() => {
     let alive = true;
     const refresh = () => {
-      void invoke("get_floating_ball_detail").then((entry: any) => {
-        if (!alive || !entry) return;
-        let level = "good";
-        if (entry.usage && entry.usage.length > 0) {
-          for (const u of entry.usage) {
-            if (u.isValid === false) { level = "danger"; break; }
-            if (u.used != null && u.used >= 90) { level = "warn"; }
-          }
-        }
-        const colorMap: Record<string, string> = {
-          danger: "#ef4444", warn: "#f97316", good: "#16a34a",
-        };
-        setColor(colorMap[level] ?? "#94a3b8");
+      void invoke("get_floating_ball_detail").then((e: any) => {
+        if (alive) setEntry(e);
       }).catch(() => {});
     };
     refresh();
@@ -128,17 +117,64 @@ function FloatingStrip() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
 
+  // 用量等级颜色
+  let color = "#16a34a";
+  let used = "";
+  if (entry?.usage && entry.usage.length > 0) {
+    const u = entry.usage[0];
+    if (u.used != null && isFinite(u.used)) {
+      used = `${Math.round(u.used)}%`;
+      if (u.used >= 90) color = "#ef4444";
+      else if (u.used >= 70) color = "#f97316";
+    }
+  }
+
   return (
     <div
       style={{
         width: "100%",
         height: "100%",
-        background: color,
-        borderRadius: 3,
+        background: "rgba(30,30,30,0.75)",
+        backdropFilter: "blur(12px)",
+        WebkitBackdropFilter: "blur(12px)",
+        borderRadius: 14,
+        border: `1.5px solid ${color}44`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 3,
+        padding: "0 6px",
         cursor: "pointer",
+        overflow: "hidden",
+        transition: "filter 0.15s",
       }}
-      onClick={() => void invoke("floating_expand_from_strip")}
-    />
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.2)"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.filter = "brightness(1)"; }}
+    >
+      {/* 状态圆点 */}
+      <div
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: color,
+          flexShrink: 0,
+          boxShadow: `0 0 4px ${color}88`,
+        }}
+      />
+      {/* 状态文字 */}
+      <span
+        style={{
+          color: "#fff",
+          fontSize: 9,
+          fontWeight: 600,
+          whiteSpace: "nowrap",
+          letterSpacing: -0.3,
+        }}
+      >
+        {used || "—"}
+      </span>
+    </div>
   );
 }
 

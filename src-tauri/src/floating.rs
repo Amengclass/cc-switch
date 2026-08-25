@@ -139,14 +139,14 @@ static COLLAPSED_PREV_POS: std::sync::Mutex<Option<(f64, f64)>> = std::sync::Mut
 /// 拖拽预览状态：当前是否在显示收起预览
 static PREVIEW_SHOWING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 收起色条厚度（逻辑像素）：边缘指示 tab
-const COLLAPSE_STRIP_THICKNESS: f64 = 5.0;
-/// 左右竖条长度（逻辑像素）
-const COLLAPSE_STRIP_LEN_V: f64 = 28.0;
-/// 上下横条长度（逻辑像素）
-const COLLAPSE_STRIP_LEN_H: f64 = 48.0;
-/// 收起状态热区：鼠标离色条多少像素内触发展开
-const COLLAPSE_EXPAND_HOTZONE: f64 = 24.0;
+/// 胶囊厚度（逻辑像素）
+const CAPSULE_THICKNESS: f64 = 28.0;
+/// 胶囊长度（逻辑像素）：左/右竖排胶囊的高度，上/下横排胶囊的宽度
+const CAPSULE_LENGTH: f64 = 72.0;
+/// 展开触发延迟（毫秒）
+const CAPSULE_EXPAND_DELAY_MS: u64 = 250;
+/// 收起触发延迟（毫秒）
+const CAPSULE_COLLAPSE_DELAY_MS: u64 = 400;
 
 const DRAG_POLL_MS: u64 = 8;
 /// 边缘吸附阈值（逻辑像素）
@@ -670,7 +670,8 @@ fn detect_edge(ball: &WebviewWindow) -> Option<CollapseEdge> {
     } else if min_dist == dist_top {
         Some(CollapseEdge::Top)
     } else {
-        Some(CollapseEdge::Bottom)
+        // 底部不收起（任务栏区域），只吸附不折叠
+        None
     }
 }
 
@@ -718,37 +719,40 @@ fn collapse_ball(app: &tauri::AppHandle) {
     let ww = work.size.width as f64;
     let wh = work.size.height as f64;
     let gap = EDGE_GAP * scale;
-    let strip_thick = COLLAPSE_STRIP_THICKNESS * scale;
-    let strip_len_v = COLLAPSE_STRIP_LEN_V * scale; // 左右竖条高度
-    let strip_len_h = COLLAPSE_STRIP_LEN_H * scale; // 上下横条宽度
+    let capsule_thick = CAPSULE_THICKNESS * scale;
+    let capsule_len = CAPSULE_LENGTH * scale;
 
-    // 色条尺寸和位置（物理像素）
-    let (sw, sh, sx, sy) = match edge {
+    // 胶囊尺寸和位置（物理像素）
+    let (cw, ch, cx, cy) = match edge {
         CollapseEdge::Left => {
-            let y = (ball_cy - strip_len_v / 2.0).max(wt + gap).min(wt + wh - strip_len_v - gap);
-            (strip_thick, strip_len_v, wl + gap, y)
+            // 竖排胶囊：贴左边缘
+            let y = (ball_cy - capsule_len / 2.0).max(wt + gap).min(wt + wh - capsule_len - gap);
+            (capsule_thick, capsule_len, wl + gap, y)
         }
         CollapseEdge::Right => {
-            let y = (ball_cy - strip_len_v / 2.0).max(wt + gap).min(wt + wh - strip_len_v - gap);
-            (strip_thick, strip_len_v, wl + ww - strip_thick - gap, y)
+            // 竖排胶囊：贴右边缘
+            let y = (ball_cy - capsule_len / 2.0).max(wt + gap).min(wt + wh - capsule_len - gap);
+            (capsule_thick, capsule_len, wl + ww - capsule_thick - gap, y)
         }
         CollapseEdge::Top => {
-            let x = (ball_cx - strip_len_h / 2.0).max(wl + gap).min(wl + ww - strip_len_h - gap);
-            (strip_len_h, strip_thick, x, wt + gap)
+            // 横排胶囊：贴顶部
+            let x = (ball_cx - capsule_len / 2.0).max(wl + gap).min(wl + ww - capsule_len - gap);
+            (capsule_len, capsule_thick, x, wt + gap)
         }
         CollapseEdge::Bottom => {
-            let x = (ball_cx - strip_len_h / 2.0).max(wl + gap).min(wl + ww - strip_len_h - gap);
-            (strip_len_h, strip_thick, x, wt + wh - strip_thick - gap)
+            // 横排胶囊：贴底部
+            let x = (ball_cx - capsule_len / 2.0).max(wl + gap).min(wl + ww - capsule_len - gap);
+            (capsule_len, capsule_thick, x, wt + wh - capsule_thick - gap)
         }
     };
 
     // 1. 隐藏球窗口
     let _ = ball.hide();
 
-    // 2. 创建独立色条窗口
-    let strip_logic_w = sw / scale;
-    let strip_logic_h = sh / scale;
-    if let Ok(strip) = WebviewWindowBuilder::new(
+    // 2. 创建胶囊窗口
+    let capsule_logic_w = cw / scale;
+    let capsule_logic_h = ch / scale;
+    if let Ok(capsule) = WebviewWindowBuilder::new(
         app,
         STRIP_LABEL,
         tauri::WebviewUrl::App("floating.html".into()),
@@ -759,19 +763,18 @@ fn collapse_ball(app: &tauri::AppHandle) {
     .shadow(false)
     .transparent(true)
     .resizable(false)
-    .inner_size(strip_logic_w, strip_logic_h)
+    .inner_size(capsule_logic_w, capsule_logic_h)
     .visible(false)
     .build()
     {
-        // 色条窗口无 FLOATING_MARGIN，直接用物理像素定位
-        let _ = strip.set_position(tauri::PhysicalPosition::new(
-            sx.round() as i32,
-            sy.round() as i32,
+        let _ = capsule.set_position(tauri::PhysicalPosition::new(
+            cx.round() as i32,
+            cy.round() as i32,
         ));
-        let _ = strip.show();
+        let _ = capsule.show();
         log::info!(
-            "[Floating] 色条窗口: edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
-            edge, strip_logic_w, strip_logic_h, sx, sy
+            "[Floating] 胶囊窗口: edge={:?} size=({:.1},{:.1}) pos=({:.0},{:.0})",
+            edge, capsule_logic_w, capsule_logic_h, cx, cy
         );
     }
 
@@ -816,51 +819,63 @@ pub(crate) fn expand_ball(app: &tauri::AppHandle) {
     log::info!("[Floating] 悬浮球已展开");
 }
 
-/// 收起状态下轮询鼠标位置，靠近色条时自动展开
+/// 收起状态下轮询鼠标位置，hover 胶囊时延迟展开
 fn start_expand_polling(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
+        let mut hovering = false;
+        let mut hover_start: Option<std::time::Instant> = None;
+
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
             if !COLLAPSED.load(std::sync::atomic::Ordering::Acquire) {
                 break;
             }
 
-            // 查找色条窗口（收起时球窗口已隐藏，色条是独立窗口）
-            let Some(strip) = app.get_webview_window(STRIP_LABEL) else {
+            let Some(capsule) = app.get_webview_window(STRIP_LABEL) else {
                 break;
             };
 
             let Some((cursor_x, cursor_y)) = global_cursor_physical() else {
+                hovering = false;
+                hover_start = None;
                 continue;
             };
 
-            let scale = strip.scale_factor().unwrap_or(1.0);
-            let pos = match strip.outer_position() {
+            let scale = capsule.scale_factor().unwrap_or(1.0);
+            let pos = match capsule.outer_position() {
                 Ok(p) => p,
                 Err(_) => continue,
             };
-            let size = match strip.inner_size() {
+            let size = match capsule.inner_size() {
                 Ok(s) => s,
                 Err(_) => continue,
             };
 
-            // 色条窗口位置和尺寸（物理像素）
-            let strip_x = pos.x as f64;
-            let strip_y = pos.y as f64;
-            let strip_w = size.width as f64;
-            let strip_h = size.height as f64;
+            let cx = pos.x as f64;
+            let cy = pos.y as f64;
+            let cw = size.width as f64;
+            let ch = size.height as f64;
 
-            // 判断鼠标是否在热区内（色条周围 COLLAPSE_EXPAND_HOTZONE 像素）
-            let hotzone = COLLAPSE_EXPAND_HOTZONE * scale;
-            let in_hotzone = (cursor_x as f64 >= strip_x - hotzone)
-                && (cursor_x as f64 <= strip_x + strip_w + hotzone)
-                && (cursor_y as f64 >= strip_y - hotzone)
-                && (cursor_y as f64 <= strip_y + strip_h + hotzone);
+            let now_hovering = (cursor_x as f64 >= cx)
+                && (cursor_x as f64 <= cx + cw)
+                && (cursor_y as f64 >= cy)
+                && (cursor_y as f64 <= cy + ch);
 
-            if in_hotzone {
-                expand_ball(&app);
-                break;
+            if now_hovering {
+                if !hovering {
+                    // 刚进入胶囊区域，开始计时
+                    hovering = true;
+                    hover_start = Some(std::time::Instant::now());
+                } else if let Some(start) = hover_start {
+                    if start.elapsed() >= std::time::Duration::from_millis(CAPSULE_EXPAND_DELAY_MS) {
+                        expand_ball(&app);
+                        break;
+                    }
+                }
+            } else {
+                hovering = false;
+                hover_start = None;
             }
         }
     });
