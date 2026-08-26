@@ -20,6 +20,7 @@ import {
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { useRequestLogs } from "@/lib/query/usage";
@@ -140,6 +141,7 @@ export function RequestLogTable({
   const locale = getLocaleFromLanguage(language);
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="space-y-4">
       <div className="rounded-lg border bg-card/50 p-2 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -438,5 +440,6 @@ export function RequestLogTable({
         </>
       )}
     </div>
+    </TooltipProvider>
   );
 }
