@@ -22,6 +22,8 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  ChevronsUp,
+  ChevronsDown,
 } from "lucide-react";
 import {
   piKeys,
@@ -419,6 +421,19 @@ export function SessionManagerPage({
     setActiveMessageIndex(index);
     setTocDialogOpen(false);
     setTimeout(() => setActiveMessageIndex(null), 2000);
+  };
+
+  const scrollToTop = () => {
+    if (messages.length === 0) return;
+    virtualizer.scrollToIndex(0, { align: "start", behavior: "smooth" });
+  };
+
+  const scrollToBottom = () => {
+    if (messages.length === 0) return;
+    virtualizer.scrollToIndex(messages.length - 1, {
+      align: "end",
+      behavior: "smooth",
+    });
   };
 
   const handleCopy = useCallback(
@@ -1754,8 +1769,8 @@ export function SessionManagerPage({
                   <CardContent className="flex-1 min-h-0 p-0">
                     <div className="flex h-full min-w-0">
                       {/* 消息列表 */}
-                      <div className="flex-1 min-w-0 flex flex-col">
-                        <div className="px-4 pt-4 pb-2 min-w-0">
+                      <div className="flex-1 min-w-0 flex flex-col relative">
+                        <div className="px-4 pt-[6px] pb-2 min-w-0">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="size-4 text-muted-foreground" />
                             <span className="text-sm font-medium">
@@ -1766,11 +1781,19 @@ export function SessionManagerPage({
                             <Badge variant="secondary" className="text-xs">
                               {messages.length}
                             </Badge>
+                            <div className="ml-auto">
+                              <SessionTocDialog
+                                items={userMessagesToc}
+                                onItemClick={scrollToMessage}
+                                open={tocDialogOpen}
+                                onOpenChange={setTocDialogOpen}
+                              />
+                            </div>
                           </div>
                         </div>
                         <div
                           ref={scrollContainerRef}
-                          className="flex-1 overflow-y-auto px-4 pb-4 min-w-0"
+                          className="flex-1 overflow-y-auto px-4 pb-2 min-w-0"
                         >
                           {isLoadingMessages ? (
                             <div className="flex items-center justify-center py-12">
@@ -1818,6 +1841,33 @@ export function SessionManagerPage({
                             </div>
                           )}
                         </div>
+                        {/* 滚动到顶/底 浮动按钮 */}
+                        {!isLoadingMessages && messages.length > 0 && (
+                          <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="size-9 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background"
+                              onClick={scrollToTop}
+                              title={t("sessionManager.scrollToTop", {
+                                defaultValue: "到达最顶",
+                              })}
+                            >
+                              <ChevronsUp className="size-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="size-9 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background"
+                              onClick={scrollToBottom}
+                              title={t("sessionManager.scrollToBottom", {
+                                defaultValue: "到达最底",
+                              })}
+                            >
+                              <ChevronsDown className="size-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
 
                       {/* 右侧目录 - 类似少数派 (大屏幕) */}
@@ -1826,14 +1876,6 @@ export function SessionManagerPage({
                         onItemClick={scrollToMessage}
                       />
                     </div>
-
-                    {/* 浮动目录按钮 (小屏幕) */}
-                    <SessionTocDialog
-                      items={userMessagesToc}
-                      onItemClick={scrollToMessage}
-                      open={tocDialogOpen}
-                      onOpenChange={setTocDialogOpen}
-                    />
                   </CardContent>
                 </>
               )}
