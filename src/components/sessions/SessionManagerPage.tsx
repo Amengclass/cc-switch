@@ -1770,7 +1770,7 @@ export function SessionManagerPage({
                     <div className="flex h-full min-w-0">
                       {/* 消息列表 */}
                       <div className="flex-1 min-w-0 flex flex-col relative">
-                        <div className="px-4 pt-[15px] pb-2 min-w-0">
+                        <div className="px-4 pt-[9px] pb-[9px] min-w-0">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="size-4 text-muted-foreground" />
                             <span className="text-sm font-medium">
