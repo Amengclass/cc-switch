@@ -366,7 +366,7 @@ export function SessionManagerPage({
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => 120,
     overscan: 5,
-    gap: 12,
+    gap: 11,
   });
 
   useEffect(() => {
@@ -1770,7 +1770,7 @@ export function SessionManagerPage({
                     <div className="flex h-full min-w-0">
                       {/* 消息列表 */}
                       <div className="flex-1 min-w-0 flex flex-col relative">
-                        <div className="px-4 pt-[6px] pb-2 min-w-0">
+                        <div className="px-4 pt-[9px] pb-[9px] min-w-0">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="size-4 text-muted-foreground" />
                             <span className="text-sm font-medium">
@@ -1793,7 +1793,7 @@ export function SessionManagerPage({
                         </div>
                         <div
                           ref={scrollContainerRef}
-                          className="flex-1 overflow-y-auto px-4 pb-2 min-w-0"
+                          className="flex-1 overflow-y-auto px-4 pb-0 min-w-0"
                         >
                           {isLoadingMessages ? (
                             <div className="flex items-center justify-center py-12">
@@ -1843,7 +1843,7 @@ export function SessionManagerPage({
                         </div>
                         {/* 滚动到顶/底 浮动按钮 */}
                         {!isLoadingMessages && messages.length > 0 && (
-                          <div className="absolute bottom-4 right-4 flex flex-col gap-2 z-10">
+                          <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
                             <Button
                               variant="outline"
                               size="icon"
