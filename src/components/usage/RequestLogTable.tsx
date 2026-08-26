@@ -344,7 +344,10 @@ export function RequestLogTable({
                                 {log.statusCode}
                               </span>
                             </TooltipTrigger>
-                            <TooltipContent className="bg-primary/80 backdrop-blur-sm">
+                            <TooltipContent className={log.statusCode >= 200 && log.statusCode < 300
+                                ? "bg-green-600/80 backdrop-blur-sm text-white"
+                                : "bg-red-600/80 backdrop-blur-sm text-white"
+                              }>
                               {log.statusCode} {getStatusHint(log.statusCode)}
                             </TooltipContent>
                           </Tooltip>
