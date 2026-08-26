@@ -344,7 +344,7 @@ export function RequestLogTable({
                                 {log.statusCode}
                               </span>
                             </TooltipTrigger>
-                            <TooltipContent>
+                            <TooltipContent className="bg-primary/80 backdrop-blur-sm">
                               {log.statusCode} {getStatusHint(log.statusCode)}
                             </TooltipContent>
                           </Tooltip>
