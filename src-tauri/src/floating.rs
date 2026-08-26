@@ -155,7 +155,7 @@ const CAPSULE_EXPAND_DELAY_MS: u64 = 100;
 
 /// 胶囊命中区域外扩（逻辑像素）：胶囊本身只有5px，太难命中，
 /// 四周扩大20px的隐形热区，鼠标进入即开始展开计时。
-const CAPSULE_HIT_PADDING: f64 = 20.0;
+const CAPSULE_HIT_PADDING: f64 = 0.0;
 /// strip 窗口四周留白（逻辑像素）：窗口必须比胶囊内容大一圈，
 /// 让 CSS 圆角在更大的 WebView2 渲染表面上抗锯齿，否则 7.9px 厚的小窗口
 /// 会把 4px 圆角物理渲染切方（"两端不够圆"）。胶囊画在窗口正中央。
