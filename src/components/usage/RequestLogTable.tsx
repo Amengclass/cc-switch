@@ -17,6 +17,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useRequestLogs } from "@/lib/query/usage";
 import {
   getFreshInputTokens,
@@ -32,6 +37,32 @@ import {
   getLocaleFromLanguage,
   parseFiniteNumber,
 } from "./format";
+
+const STATUS_CODE_HINTS: Record<number, string> = {
+  200: "成功",
+  301: "永久重定向",
+  302: "临时重定向",
+  304: "未修改",
+  400: "请求错误",
+  401: "未授权",
+  403: "禁止访问",
+  404: "资源不存在",
+  408: "请求超时",
+  429: "请求过多",
+  500: "上游内部错误",
+  502: "网关无效响应",
+  503: "上游不可用",
+  504: "网关超时",
+};
+
+function getStatusHint(code: number): string {
+  if (STATUS_CODE_HINTS[code]) return STATUS_CODE_HINTS[code];
+  if (code >= 200 && code < 300) return "成功";
+  if (code >= 300 && code < 400) return "重定向";
+  if (code >= 400 && code < 500) return "客户端错误";
+  if (code >= 500 && code < 600) return "服务器错误";
+  return "HTTP 状态码";
+}
 
 interface RequestLogTableProps {
   range: UsageRangeSelection;
@@ -299,15 +330,22 @@ export function RequestLogTable({
                           )}
                         </TableCell>
                         <TableCell className="text-center">
-                          <span
-                            className={
-                              log.statusCode >= 200 && log.statusCode < 300
-                                ? "text-green-600"
-                                : "text-red-600"
-                            }
-                          >
-                            {log.statusCode}
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={
+                                  log.statusCode >= 200 && log.statusCode < 300
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }
+                              >
+                                {log.statusCode}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {log.statusCode} {getStatusHint(log.statusCode)}
+                            </TooltipContent>
+                          </Tooltip>
                         </TableCell>
                         <TableCell className="text-center text-xs text-muted-foreground">
                           {log.dataSource || "proxy"}
