@@ -99,10 +99,9 @@ export function SessionTocDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
         <Button
-          size="icon"
-          className="fixed bottom-20 right-4 xl:hidden size-10 rounded-full shadow-lg z-30"
+          className="xl:hidden h-9 w-9 rounded-full shadow-lg bg-primary text-primary-foreground hover:bg-primary/90 p-0"
         >
-          <List className="size-4" />
+          <List className="size-5" />
         </Button>
       </DialogTrigger>
       <DialogContent
