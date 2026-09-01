@@ -1218,7 +1218,7 @@
     "noProvider": "(No available Provider)",
     "host": "Host",
     "container": "Container",
-    "searchPlaceholder": "Search host name / address…",
+    "searchPlaceholder": "Search host name / address / container…",
     "emptyHosts": "No remote hosts yet. Add them under \"Remote Host Management\"",
     "noMatch": "No matching hosts",
     "switched": "Switched",

@@ -1218,7 +1218,7 @@
     "noProvider": "（无可用 Provider）",
     "host": "宿主机",
     "container": "容器",
-    "searchPlaceholder": "搜索主机名 / 地址…",
+    "searchPlaceholder": "搜索主机名称 / 地址 / 容器名…",
     "emptyHosts": "暂无远程主机，请在「远程主机管理」中添加",
     "noMatch": "无匹配主机",
     "switched": "已切换",
