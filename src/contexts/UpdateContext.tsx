@@ -66,6 +66,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const result = await checkForUpdate({ timeout: 30000 });
+      console.log("[Update] checkForUpdate result:", result);
 
       if (result.status === "available") {
         setHasUpdate(true);
@@ -90,7 +91,7 @@ export function UpdateProvider({ children }: { children: React.ReactNode }) {
         return false; // 已是最新
       }
     } catch (err) {
-      console.error("检查更新失败:", err);
+      console.error("[Update] 检查更新失败:", err);
       setError(err instanceof Error ? err.message : "检查更新失败");
       setHasUpdate(false);
       throw err; // 抛出错误让调用方处理
