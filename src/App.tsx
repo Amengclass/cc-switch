@@ -97,8 +97,8 @@ import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsPage } from "@/components/settings/SettingsPage";
-import { UpdateBadge } from "@/components/UpdateBadge";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
+import { UpdateNotification } from "@/components/UpdateNotification";
 import { ProxyToggle } from "@/components/proxy/ProxyToggle";
 import { ClaudeDesktopRouteToggle } from "@/components/proxy/ClaudeDesktopRouteToggle";
 import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
@@ -1957,6 +1957,18 @@ function App() {
         />
       )}
 
+      {/* 新版本通知横幅 */}
+      <div className="fixed z-50 w-full" style={{ top: dragBarHeight }}>
+        <div className="mx-auto max-w-5xl px-4 pt-1">
+          <UpdateNotification
+            onViewDetails={() => {
+              setSettingsDefaultTab("about");
+              setCurrentView("settings");
+            }}
+          />
+        </div>
+      </div>
+
       <header
         className="fixed z-50 w-full transition-all duration-300 bg-background/80 backdrop-blur-md"
         {...DRAG_REGION_ATTR}
@@ -2043,12 +2055,6 @@ function App() {
                 >
                   <Settings className="w-4 h-4" />
                 </Button>
-                <UpdateBadge
-                  onClick={() => {
-                    setSettingsDefaultTab("about");
-                    setCurrentView("settings");
-                  }}
-                />
                 {isCurrentAppTakeoverActive && (
                   <Button
                     variant="ghost"
