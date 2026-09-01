@@ -126,7 +126,7 @@ export function TargetBreadcrumb({
           align="start"
           className="min-w-[150px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
-          {servers.length > 3 && (
+          {servers.length >= 3 && (
             <div
               className="relative border-b px-2 py-1.5"
               onKeyDown={(e) => e.stopPropagation()}
@@ -206,7 +206,7 @@ export function TargetBreadcrumb({
               align="start"
               className="min-w-[180px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
             >
-              {containers.length > 3 && (
+              {containers.length >= 3 && (
                 <div
                   className="relative border-b px-2 py-1.5"
                   onKeyDown={(e) => e.stopPropagation()}
