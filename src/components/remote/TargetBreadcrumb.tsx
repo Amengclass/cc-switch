@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Container, Laptop, Loader2, Search, Server, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -158,12 +159,11 @@ export function TargetBreadcrumb({
             >
               {containers.length > 3 && (
                 <div
-                  className="flex items-center gap-1.5 border-b px-3 py-2"
+                  className="relative border-b px-3 py-2"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <input
-                    type="text"
+                  <Search className="pointer-events-none absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
                     value={containerSearch}
                     onChange={(e) => setContainerSearch(e.target.value)}
                     onKeyDown={(e) => {
@@ -173,14 +173,15 @@ export function TargetBreadcrumb({
                       }
                     }}
                     placeholder={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
-                    className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    aria-label={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
+                    className="h-8 pl-8 pr-8 text-xs"
                     autoFocus
                   />
                   {containerSearch && (
                     <button
                       type="button"
                       onClick={() => setContainerSearch("")}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      className="absolute right-5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     >
                       <X className="h-3.5 w-3.5" />
                     </button>
