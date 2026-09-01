@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Container, Laptop, Loader2, Server } from "lucide-react";
+import { ChevronRight, Container, Laptop, Loader2, Search, Server, X } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +44,18 @@ export function TargetBreadcrumb({
   onProbeHosts,
 }: TargetBreadcrumbProps) {
   const { t } = useTranslation();
+  const [containerSearch, setContainerSearch] = useState("");
+
+  const filteredContainers = containerSearch
+    ? containers.filter((c) =>
+        c.toLowerCase().includes(containerSearch.toLowerCase()),
+      )
+    : containers;
+
+  // 下拉关闭时清空搜索
+  const handleContainerOpen = (open: boolean) => {
+    if (!open) setContainerSearch("");
+  };
   const isLocal = !remoteTargetId;
   const activeHost = servers.find((s) => s.id === remoteTargetId) ?? null;
   const hostLabel = isLocal
@@ -132,7 +145,7 @@ export function TargetBreadcrumb({
             className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
             aria-hidden="true"
           />
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={handleContainerOpen}>
             <DropdownMenuTrigger asChild>
               <button type="button" className={cn(segmentCls, "rounded-r-lg")}>
                 <Container className="h-3.5 w-3.5 shrink-0" />
@@ -141,11 +154,43 @@ export function TargetBreadcrumb({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
-              className="min-w-[160px] max-h-[50vh] overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+              className="min-w-[220px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
             >
+              {containers.length > 3 && (
+                <div
+                  className="flex items-center gap-1.5 border-b px-3 py-2"
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={containerSearch}
+                    onChange={(e) => setContainerSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape" && containerSearch) {
+                        e.stopPropagation();
+                        setContainerSearch("");
+                      }
+                    }}
+                    placeholder={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
+                    className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                    autoFocus
+                  />
+                  {containerSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setContainerSearch("")}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
               <DropdownMenuRadioGroup
                 value={remoteContainerId}
                 onValueChange={setRemoteContainerId}
+                className="overflow-y-auto max-h-[40vh]"
               >
                 <DropdownMenuRadioItem value="" className="pr-2">
                   <span className="flex w-full items-center justify-between gap-2">
@@ -155,10 +200,10 @@ export function TargetBreadcrumb({
                     </span>
                   </span>
                 </DropdownMenuRadioItem>
-                {containers.length > 0 && (
+                {filteredContainers.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
-                    {containers.map((c) => (
+                    {filteredContainers.map((c) => (
                       <DropdownMenuRadioItem key={c} value={c} className="pr-2">
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
@@ -169,6 +214,11 @@ export function TargetBreadcrumb({
                       </DropdownMenuRadioItem>
                     ))}
                   </>
+                )}
+                {containerSearch && filteredContainers.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground text-center">
+                    {t("remote.noMatchingContainers", { defaultValue: "无匹配容器" })}
+                  </div>
                 )}
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
