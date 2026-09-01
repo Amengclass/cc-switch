@@ -124,7 +124,7 @@ export function TargetBreadcrumb({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          className="min-w-[160px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+          className="min-w-[150px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
           {servers.length > 3 && (
             <div
