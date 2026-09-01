@@ -12,12 +12,12 @@ interface UpdateNotificationProps {
 export function UpdateNotification({ onViewDetails }: UpdateNotificationProps) {
   const { t } = useTranslation();
   const { hasUpdate, updateInfo } = useUpdate();
-  const dismissedKey = "ccswitch:update:toastDismissed";
+  const dismissedKey = "ccswitch:update:toastEverShown";
 
   useEffect(() => {
     if (!hasUpdate || !updateInfo) return;
-    // 该版本已通知过则跳过
-    if (localStorage.getItem(dismissedKey) === updateInfo.availableVersion) return;
+    // 已经弹过则跳过
+    if (localStorage.getItem(dismissedKey)) return;
 
     const timer = setTimeout(() => {
       toast.info(
@@ -31,7 +31,7 @@ export function UpdateNotification({ onViewDetails }: UpdateNotificationProps) {
             onClick: onViewDetails,
           },
           onDismiss: () => {
-            localStorage.setItem(dismissedKey, updateInfo.availableVersion);
+            localStorage.setItem(dismissedKey, "1");
           },
         },
       );
