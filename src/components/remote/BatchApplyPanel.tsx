@@ -184,9 +184,13 @@ export function BatchApplyPanel({
     if (!kw) return hosts;
     return hosts.filter(
       (h) =>
-        h.name.toLowerCase().includes(kw) || h.host.toLowerCase().includes(kw),
+        h.name.toLowerCase().includes(kw) ||
+        h.host.toLowerCase().includes(kw) ||
+        (containersMap[h.id] ?? []).some((c) =>
+          c.toLowerCase().includes(kw),
+        ),
     );
-  }, [hosts, search]);
+  }, [hosts, search, containersMap]);
 
   const toggleContainer = (hostId: string, container: string) => {
     const key = contKey(hostId, container);
@@ -456,8 +460,8 @@ export function BatchApplyPanel({
           <ManagementListSearch
             value={search}
             onValueChange={setSearch}
-            placeholder={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址…" })}
-            ariaLabel={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址…" })}
+            placeholder={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址 / 容器名…" })}
+            ariaLabel={t("batchApply.searchPlaceholder", { defaultValue: "搜索主机名称 / 地址 / 容器名…" })}
             clearLabel={t("common.clear", { defaultValue: "清除" })}
           />
         </div>
@@ -573,7 +577,13 @@ export function BatchApplyPanel({
                             {t("batchApply.noContainer")}
                           </div>
                         )}
-                        {(cs ?? []).map((c) => (
+                        {(cs ?? [])
+                          .filter(
+                            (c) =>
+                              !search ||
+                              c.toLowerCase().includes(search.trim().toLowerCase()),
+                          )
+                          .map((c) => (
                           <label
                             key={c}
                             className="flex cursor-pointer items-center gap-2 px-2 py-1 text-sm text-muted-foreground"
