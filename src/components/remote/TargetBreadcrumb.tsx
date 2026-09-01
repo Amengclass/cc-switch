@@ -45,7 +45,16 @@ export function TargetBreadcrumb({
   onProbeHosts,
 }: TargetBreadcrumbProps) {
   const { t } = useTranslation();
+  const [hostSearch, setHostSearch] = useState("");
   const [containerSearch, setContainerSearch] = useState("");
+
+  const filteredHosts = hostSearch
+    ? servers.filter(
+        (s) =>
+          s.name.toLowerCase().includes(hostSearch.toLowerCase()) ||
+          s.address?.toLowerCase().includes(hostSearch.toLowerCase()),
+      )
+    : servers;
 
   const filteredContainers = containerSearch
     ? containers.filter((c) =>
@@ -54,6 +63,9 @@ export function TargetBreadcrumb({
     : containers;
 
   // 下拉关闭时清空搜索
+  const handleHostOpen = (open: boolean) => {
+    if (!open) setHostSearch("");
+  };
   const handleContainerOpen = (open: boolean) => {
     if (!open) setContainerSearch("");
   };
@@ -99,7 +111,7 @@ export function TargetBreadcrumb({
 
   return (
     <div className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-lg border border-border/80 bg-muted text-xs shadow-sm">
-      <DropdownMenu onOpenChange={(open) => open && onProbeHosts?.()}>
+      <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) onProbeHosts?.(); }}>
         <DropdownMenuTrigger asChild>
           <button type="button" className={cn(segmentCls, "rounded-l-lg")}>
             {isLocal ? (
@@ -112,11 +124,43 @@ export function TargetBreadcrumb({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          className="min-w-[180px] max-h-[50vh] overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+          className="min-w-[160px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
+          {servers.length > 3 && (
+            <div
+              className="relative border-b px-2 py-1.5"
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={hostSearch}
+                onChange={(e) => setHostSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && hostSearch) {
+                    e.stopPropagation();
+                    setHostSearch("");
+                  }
+                }}
+                placeholder={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
+                aria-label={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
+                className="h-7 pl-7 pr-7 text-xs"
+                autoFocus
+              />
+              {hostSearch && (
+                <button
+                  type="button"
+                  onClick={() => setHostSearch("")}
+                  className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
           <DropdownMenuRadioGroup
             value={remoteTargetId}
             onValueChange={handleSelectHost}
+            className="overflow-y-auto max-h-[40vh]"
           >
             <DropdownMenuRadioItem value="">
               {t("remote.targetLocal", { defaultValue: "本机" })}
@@ -124,7 +168,7 @@ export function TargetBreadcrumb({
             {servers.length > 0 && (
               <>
                 <DropdownMenuSeparator />
-                {servers.map((s) => (
+                {filteredHosts.map((s) => (
                   <DropdownMenuRadioItem
                     key={s.id}
                     value={s.id}
@@ -134,6 +178,11 @@ export function TargetBreadcrumb({
                     {statusDot(s.id)}
                   </DropdownMenuRadioItem>
                 ))}
+                {hostSearch && filteredHosts.length === 0 && (
+                  <div className="px-3 py-2 text-xs text-muted-foreground text-center">
+                    {t("remote.noMatchingHosts", { defaultValue: "无匹配主机" })}
+                  </div>
+                )}
               </>
             )}
           </DropdownMenuRadioGroup>
@@ -155,14 +204,14 @@ export function TargetBreadcrumb({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
-              className="min-w-[220px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+              className="min-w-[180px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
             >
               {containers.length > 3 && (
                 <div
-                  className="relative border-b px-3 py-2"
+                  className="relative border-b px-2 py-1.5"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <Search className="pointer-events-none absolute left-5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     value={containerSearch}
                     onChange={(e) => setContainerSearch(e.target.value)}
@@ -174,16 +223,16 @@ export function TargetBreadcrumb({
                     }}
                     placeholder={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
                     aria-label={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
-                    className="h-8 pl-8 pr-8 text-xs"
+                    className="h-7 pl-7 pr-7 text-xs"
                     autoFocus
                   />
                   {containerSearch && (
                     <button
                       type="button"
                       onClick={() => setContainerSearch("")}
-                      className="absolute right-5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-3 w-3" />
                     </button>
                   )}
                 </div>
