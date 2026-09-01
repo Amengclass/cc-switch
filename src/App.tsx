@@ -1957,19 +1957,14 @@ function App() {
         />
       )}
 
-      {/* 新版本通知横幅：在 header 下方显示 */}
-      <div
-        className="fixed z-[60] w-full"
-        style={{ top: `calc(${dragBarHeight}px + ${HEADER_HEIGHT})` }}
-      >
-        <div className="mx-auto max-w-5xl px-4 pt-1">
-          <UpdateNotification
-            onViewDetails={() => {
-              setSettingsDefaultTab("about");
-              setCurrentView("settings");
-            }}
-          />
-        </div>
+      {/* 新版本通知横幅：在主内容区顶部，不遮挡任何元素 */}
+      <div className="mx-auto max-w-5xl px-4 pt-1">
+        <UpdateNotification
+          onViewDetails={() => {
+            setSettingsDefaultTab("about");
+            setCurrentView("settings");
+          }}
+        />
       </div>
 
       <header
