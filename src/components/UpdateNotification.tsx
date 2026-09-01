@@ -10,9 +10,9 @@ interface UpdateNotificationProps {
 /** 轻量级更新通知横幅：检测到新版本时在主内容区顶部显示 */
 export function UpdateNotification({ onViewDetails }: UpdateNotificationProps) {
   const { t } = useTranslation();
-  const { hasUpdate, updateInfo, dismissUpdate } = useUpdate();
+  const { hasUpdate, updateInfo, isDismissed, dismissUpdate } = useUpdate();
 
-  if (!hasUpdate || !updateInfo) return null;
+  if (!hasUpdate || isDismissed || !updateInfo) return null;
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm backdrop-blur-sm">
