@@ -455,7 +455,8 @@ function App() {
       .then((list) => {
         if (active) {
           setContainers(list);
-          // 若已选容器不在当前主机列表中，清空
+          // 容器列表加载完毕后，若已选容器不在当前主机列表中才清空
+          // （不在加载前清空，否则 localStorage 记忆的容器会在拉取期间被误删）
           setRemoteContainerId((prev) =>
             prev && !list.includes(prev) ? "" : prev,
           );
