@@ -1219,7 +1219,7 @@
     "noProvider": "（無可用 Provider）",
     "host": "宿主機",
     "container": "容器",
-    "searchPlaceholder": "搜尋主機名 / 位址…",
+    "searchPlaceholder": "搜尋主機名 / 位址 / 容器名…",
     "emptyHosts": "暫無遠端主機，請在「遠端主機管理」中新增",
     "noMatch": "無符合主機",
     "switched": "已切換",
