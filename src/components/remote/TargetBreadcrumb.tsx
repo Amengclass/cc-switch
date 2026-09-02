@@ -78,10 +78,18 @@ export function TargetBreadcrumb({
     remoteContainerId || t("remote.targetHost", { defaultValue: "宿主机" });
 
   // 切换主机时同步清空容器（父级变更，子级重置回「宿主机」）
+  // 例外：切回之前访问过的服务器时恢复上次的容器选择
   const handleSelectHost = (value: string) => {
     if (value === remoteTargetId) return;
+    // 切到一台新服务器时清空容器（之前没选过容器的服务器）
+    // 切回之前访问过的服务器时恢复 localStorage 里保存的容器
+    const switchingToDifferentServer =
+      value && remoteTargetId && value !== remoteTargetId;
     setRemoteTargetId(value);
-    setRemoteContainerId("");
+    if (switchingToDifferentServer) {
+      const saved = localStorage.getItem(`cc-switch-remote-container:${value}`) || "";
+      setRemoteContainerId(saved);
+    }
   };
 
   const segmentCls =
