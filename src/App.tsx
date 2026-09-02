@@ -453,7 +453,9 @@ function App() {
   useEffect(() => {
     if (!remoteTargetId || targetKnownOffline) {
       setContainers([]);
-      setRemoteContainerId("");
+      // 不清 remoteContainerId：切回远端服务器时需要恢复之前的容器选择
+      // localStorage 已保存，重新拉取容器列表后由 setRemoteContainerId(prev => ...)
+      // 校验是否在列表中，不在才清空
       return;
     }
     // 切主机后先清空旧容器列表再拉取：effect 在渲染之后才跑，若不清空，
