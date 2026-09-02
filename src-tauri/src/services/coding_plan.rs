@@ -1540,7 +1540,10 @@ async fn query_opencode_go(
     }
 
     if !seen_any {
-        // 解析失败：打印页面中与用量键相关的片段（限长，避免整页 + 敏感信息刷日志）
+        // 解析失败：区分"上游返回错误页"与"页面结构真正变化"
+        let is_error_page = html.contains("error") || html.contains("Error")
+            || html.contains("unauthorized") || html.contains("Unauthorized")
+            || html.contains("sign in") || html.contains("Sign in");
         let snippet: String = html
             .match_indices("Usage")
             .take(4)
@@ -1558,6 +1561,11 @@ async fn query_opencode_go(
             "[OpenCodeGo] 页面结构未匹配用量键，相关片段(snip):\n{snippet}\n(html_len={})",
             html.len()
         );
+        if is_error_page {
+            return Ok(coding_plan_not_found(
+                "OpenCode Go 页面返回了错误页面（可能未登录或上游服务异常）",
+            ));
+        }
         return Ok(coding_plan_not_found(
             "未能从 OpenCode Go 页面解析出用量配额（页面结构可能已变化）",
         ));
