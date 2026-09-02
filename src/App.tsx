@@ -353,13 +353,15 @@ function App() {
 
   // 按主机保存容器选择：切走时保存当前容器（含切到本机的场景）
   const prevTargetRef = useRef(remoteTargetId);
+  const prevContainerRef = useRef(remoteContainerId);
   useEffect(() => {
     const prev = prevTargetRef.current;
-    // 切走了（prev 有值且不等于当前值）→ 保存之前主机的容器选择
+    const prevContainer = prevContainerRef.current;
+    // 切走了 → 用 ref 保存上一次的容器（不依赖当前已清空的 remoteContainerId）
     if (prev && prev !== remoteTargetId) {
       localStorage.setItem(
         `cc-switch-remote-container:${prev}`,
-        remoteContainerId,
+        prevContainer,
       );
     }
     // 保存当前主机的容器选择（选中主机时）
@@ -370,6 +372,7 @@ function App() {
       );
     }
     prevTargetRef.current = remoteTargetId;
+    prevContainerRef.current = remoteContainerId;
   }, [remoteTargetId, remoteContainerId]);
 
   // 远端目标下没有 claude-desktop 应用：切到远端时若当前 tab 是
