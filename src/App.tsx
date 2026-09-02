@@ -257,10 +257,13 @@ function App() {
   const [remoteInstalled, setRemoteInstalled] = useState<boolean | null>(null);
   const [localInstalled, setLocalInstalled] = useState<boolean | null>(null);
   // 目标细化到 Docker 容器：选中服务器后可再选容器，所有远程操作作用于容器内。
+  // 按主机记忆容器选择：切回远端时恢复上次选的容器。
   const [containers, setContainers] = useState<string[]>([]);
-  const [remoteContainerId, setRemoteContainerId] = useState<string>(
-    () => localStorage.getItem("cc-switch-remote-container") ?? "",
-  );
+  const [remoteContainerId, setRemoteContainerId] = useState<string>(() => {
+    const target = localStorage.getItem("cc-switch-remote-target") ?? "";
+    if (!target) return "";
+    return localStorage.getItem(`cc-switch-remote-container:${target}`) ?? "";
+  });
   // 主机在线状态（host_id → 是否在线）：目标选择器下拉打开时批量实时探测。
   // 不缓存：状态必须真实反映"此刻"（缓存会让用户看到假在线却连不进去）。
   const [hostsOnline, setHostsOnline] = useState<Record<string, boolean>>({});
@@ -348,9 +351,15 @@ function App() {
     localStorage.setItem("cc-switch-remote-target", remoteTargetId);
   }, [remoteTargetId]);
 
+  // 按主机保存容器选择（仅在选中远端主机时保存）
   useEffect(() => {
-    localStorage.setItem("cc-switch-remote-container", remoteContainerId);
-  }, [remoteContainerId]);
+    if (remoteTargetId) {
+      localStorage.setItem(
+        `cc-switch-remote-container:${remoteTargetId}`,
+        remoteContainerId,
+      );
+    }
+  }, [remoteTargetId, remoteContainerId]);
 
   // 远端目标下没有 claude-desktop 应用：切到远端时若当前 tab 是
   // claude-desktop，自动切回 claude（sharedFeatureApp 本就映射 claude）。
