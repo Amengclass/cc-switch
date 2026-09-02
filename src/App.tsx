@@ -411,7 +411,7 @@ function App() {
       setRemoteCurrentProviderId(null);
       setRemoteInstalled(null);
       setContainers([]);
-      setRemoteContainerId("");
+      // 不清 remoteContainerId：用户可能切回同一台服务器需要恢复之前的容器选择
       return;
     }
     // 目标选择器已探明该主机离线：跳过连接型调用（不发起建连），直接置空
