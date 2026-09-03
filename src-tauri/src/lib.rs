@@ -1788,6 +1788,7 @@ pub fn run() {
             floating::floating_record_active_app,
             floating::floating_refresh_usage,
             floating::floating_set_remote_takeover,
+            floating::floating_set_remote_context,
             floating::show_floating_panel,
             floating::hide_floating_panel,
             floating::floating_set_hover,
