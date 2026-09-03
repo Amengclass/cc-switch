@@ -158,6 +158,7 @@ async function loadSummary(
       usageValue: "—",
       usageUnit: "",
       usageLines: null,
+      usageLineLevels: null,
       opacity,
     };
 

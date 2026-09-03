@@ -52,7 +52,7 @@ export function TargetBreadcrumb({
     ? servers.filter(
         (s) =>
           s.name.toLowerCase().includes(hostSearch.toLowerCase()) ||
-          s.address?.toLowerCase().includes(hostSearch.toLowerCase()),
+          s.host?.toLowerCase().includes(hostSearch.toLowerCase()),
       )
     : servers;
 
