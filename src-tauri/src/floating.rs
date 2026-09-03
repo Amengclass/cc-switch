@@ -144,6 +144,10 @@ static PREVIEW_EDGE: std::sync::Mutex<Option<CollapseEdge>> = std::sync::Mutex::
 static CACHED_WORK_AREA: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
 /// 缓存的 DPI 缩放比
 static CACHED_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(10000);
+/// 远端上下文：前端切换远端目标时写入，悬浮球据此读取远端供应商。
+/// (host_id, container_id, current_provider_id)
+static REMOTE_CONTEXT: std::sync::Mutex<Option<(String, Option<String>, String)>> =
+    std::sync::Mutex::new(None);
 
 /// 胶囊厚度（逻辑像素）：贴边缘的宽度（温度计指示器风格）
 /// 8px 足够显示小字百分比标签，又不会太宽遮挡屏幕内容
@@ -1592,8 +1596,18 @@ async fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingE
         .map(|c| c.enabled)
         .unwrap_or(false);
 
-    let current_id =
-        crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None);
+    let current_id = {
+        // 远端模式：用前端传来的远端当前供应商 ID
+        if let Some((_, _, ref remote_pid)) = *REMOTE_CONTEXT.lock().unwrap() {
+            if !remote_pid.is_empty() {
+                Some(remote_pid.clone())
+            } else {
+                crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None)
+            }
+        } else {
+            crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None)
+        }
+    };
 
     let (provider_name, model, usage_summary, worst_pct, usage, queried_at, has_provider) =
         match current_id {
@@ -1777,6 +1791,25 @@ pub async fn floating_set_remote_takeover(
 ) -> Result<(), String> {
     crate::settings::set_floating_remote_takeover(Some(active)).map_err(|e| e.to_string())?;
     let _ = app.emit("floating-pin-changed", resolve_ball_target());
+    let _ = app.emit("floating-data-refresh", ());
+    Ok(())
+}
+
+/// 前端切换远端目标时调用：传递 (host_id, container_id, provider_id)，
+/// 悬浮球据此读取远端当前供应商（替代本地设置）。
+/// 传 None 时表示回到本机模式。
+#[tauri::command]
+pub async fn floating_set_remote_context(
+    app: tauri::AppHandle,
+    host_id: Option<String>,
+    container_id: Option<String>,
+    provider_id: Option<String>,
+) -> Result<(), String> {
+    let ctx = match (host_id, provider_id) {
+        (Some(h), Some(p)) => Some((h, container_id, p)),
+        _ => None,
+    };
+    *REMOTE_CONTEXT.lock().unwrap() = ctx;
     let _ = app.emit("floating-data-refresh", ());
     Ok(())
 }

@@ -654,6 +654,22 @@ function App() {
       active: isRemoteTakeoverActive,
     }).catch((e) => console.error("[Floating] 同步远端接管状态失败", e));
   }, [isRemoteTakeoverActive]);
+  // 同步远端供应商给悬浮球
+  useEffect(() => {
+    if (remoteTargetId) {
+      void invoke("floating_set_remote_context", {
+        hostId: remoteTargetId,
+        containerId: remoteContainerId || null,
+        providerId: effectiveCurrentProviderId || null,
+      }).catch(() => {});
+    } else {
+      void invoke("floating_set_remote_context", {
+        hostId: null,
+        containerId: null,
+        providerId: null,
+      }).catch(() => {});
+    }
+  }, [remoteTargetId, remoteContainerId, effectiveCurrentProviderId]);
   const activeProviderId = useMemo(() => {
     if (!proxyAppId) return undefined;
     const target = proxyStatus?.active_targets?.find(
