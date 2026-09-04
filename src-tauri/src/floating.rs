@@ -1429,7 +1429,18 @@ fn resolve_model(app_type: &AppType, provider: &crate::provider::Provider) -> Op
         AppType::Codex => settings
             .get("config")
             .and_then(|v| v.as_str())
-            .and_then(crate::codex_config::extract_codex_model)
+            .and_then(|text| {
+                text.lines().find_map(|line| {
+                    let line = line.trim();
+                    if line.starts_with("model") {
+                        line.split_once('=')
+                            .map(|(_, v)| v.trim().trim_matches('"').to_string())
+                            .filter(|s| !s.is_empty())
+                    } else {
+                        None
+                    }
+                })
+            })
             .filter(|s| !s.is_empty()),
         _ => None,
     }

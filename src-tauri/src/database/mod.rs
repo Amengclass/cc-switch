@@ -53,19 +53,9 @@ use std::sync::Mutex;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
-///
-/// 增强版暂时把版本标回 v16 以兼容原生 cc-switch：原生应用在
-/// `user_version` 高于其支持版本时会拒绝打开数据库。
-pub(crate) const SCHEMA_VERSION: i32 = 16;
-
-/// 增强版历史写入过的最大 schema 版本。
-///
-/// 增强版暂时把 `SCHEMA_VERSION` 标回 v16 以兼容原生 cc-switch：原生应用在
-/// `user_version` 高于其支持版本时会拒绝打开数据库。当磁盘上的 `user_version`
-/// 位于 `(SCHEMA_VERSION, TOLERATED_MAX_SCHEMA_VERSION]` 区间时，属于增强版
-/// 自己之前写入的版本（如 v17），init 时会回写为 `SCHEMA_VERSION`，不视为“过新”。
-/// 仅严格高于此值的版本才是真正来自更高版本应用的库。
-pub(crate) const TOLERATED_MAX_SCHEMA_VERSION: i32 = 17;
+/// 当前 Schema 版本号
+/// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
+pub(crate) const SCHEMA_VERSION: i32 = 18;
 
 /// 安全地序列化 JSON，避免 unwrap panic
 pub(crate) fn to_json_string<T: Serialize>(value: &T) -> Result<String, AppError> {
@@ -191,10 +181,8 @@ impl Database {
         }
         let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
         let version = Self::get_user_version(&conn)?;
-        // 增强版暂时把 schema 标回 v16（兼容原生 app）。v17 是增强版自己之前
-        // 写入的版本，属「我方上溢」，init 时会回写为 16，不当作过新；
-        // 仅严格高于 TOLERATED_MAX_SCHEMA_VERSION 才是真正的高版本库。
-        Ok((version > TOLERATED_MAX_SCHEMA_VERSION).then_some(version))
+        // 高于当前 schema 版本的才是来自更高版本应用的库
+        Ok((version > SCHEMA_VERSION).then_some(version))
     }
 
     /// 创建内存数据库（用于测试）

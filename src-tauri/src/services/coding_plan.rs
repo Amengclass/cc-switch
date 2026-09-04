@@ -1,7 +1,7 @@
-//! 国产 Token Plan 额度查询服务
+//! Token Plan / 编程套餐额度查询服务
 //!
-//! 支持 Kimi For Coding、智谱 GLM、MiniMax 的 Token Plan 额度查询。
-//! 复用 subscription 模块的 SubscriptionQuota / QuotaTier 类型。
+//! 支持 Kimi For Coding、智谱 GLM、MiniMax、ZenMux、火山方舟、OpenCode Go
+//! 的套餐额度查询。复用 subscription 模块的 SubscriptionQuota / QuotaTier 类型。
 
 use super::subscription::{
     CredentialStatus, QuotaTier, SubscriptionQuota, TIER_FIVE_HOUR, TIER_MONTHLY, TIER_WEEKLY_LIMIT,
@@ -22,6 +22,10 @@ enum CodingPlanProvider {
     /// `https://ark.cn-beijing.volces.com/api/plan[/v3]`（Agent Plan）
     /// 或 `/api/coding[/v3]`（Coding Plan））。
     Volcengine,
+    /// OpenCode Go（$10/月订阅，美元额度三时间窗口）。base_url 分两档：
+    /// `https://opencode.ai/zen/go`（claude/claude-desktop 直连 /messages）
+    /// 与 `https://opencode.ai/zen/go/v1`（codex/opencode/pi 走 Chat）。
+    OpencodeGo,
 }
 
 fn detect_provider(base_url: &str) -> Option<CodingPlanProvider> {
@@ -38,6 +42,10 @@ fn detect_provider(base_url: &str) -> Option<CodingPlanProvider> {
         Some(CodingPlanProvider::MiniMaxEn)
     } else if url.contains("zenmux") {
         Some(CodingPlanProvider::ZenMux)
+    } else if url.contains("opencode.ai/zen/go") {
+        // 同时覆盖 /zen/go 与 /zen/go/v1 两档 base；Zen 按量版（/zen/v1）
+        // 没有任何用量/余额 API（实测 404），刻意不命中。
+        Some(CodingPlanProvider::OpencodeGo)
     } else if url.contains("volces.com/api/plan") || url.contains("volces.com/api/coding") {
         // 仅匹配 Agent Plan（/api/plan[/v3]）与 Coding Plan（/api/coding[/v3]）
         // 入口；DouBaoSeed 按量付费走 /api/v3 与 /api/compatible，没有套餐
@@ -700,6 +708,126 @@ fn parse_minimax_tiers(body: &serde_json::Value) -> Vec<QuotaTier> {
     tiers
 }
 
+// ── OpenCode Go ─────────────────────────────────────────────
+
+/// 解析 OpenCode Go usage 端点响应为 tier 列表。
+///
+/// 响应形态（上游 `packages/console/app/src/routes/zen/go/v1/usage.ts`）：
+/// `{"usage":{"rolling"|"weekly"|"monthly":{"status":"ok"|"rate-limited",
+/// "percent":0-100 已用整数,"resetsAt":ISO8601}}}`，三窗口对应文档口径
+/// $12/5h、$30/周、$60/月（端点不回传金额，仅百分比）。
+///
+/// 该端点是第一方但未文档化的路由，上线当天（2026-08-11）就改过一次形态
+/// （旧扁平 `rollingUsage/usagePercent/resetInSec` 已作废），故逐窗口防御
+/// 解析：缺失或 percent 不可解析的窗口跳过，不整体失败。
+///
+/// `status=="rate-limited"` 时上游已把 percent 钉在 100，无需特判；
+/// percent 为 0 时上游的 `resetsAt` 是「now+窗口时长」的占位值（滚动窗按
+/// 最后记账时间整窗清零，此时窗口早已过期），丢弃不展示倒计时。
+fn parse_opencode_go_tiers(body: &serde_json::Value) -> Vec<QuotaTier> {
+    const WINDOWS: [(&str, &str); 3] = [
+        ("rolling", TIER_FIVE_HOUR),
+        ("weekly", TIER_WEEKLY_LIMIT),
+        ("monthly", TIER_MONTHLY),
+    ];
+    let Some(usage) = body.get("usage") else {
+        return Vec::new();
+    };
+    let mut tiers = Vec::new();
+    for (key, tier_name) in WINDOWS {
+        let Some(window) = usage.get(key) else {
+            continue;
+        };
+        let Some(percent) = window.get("percent").and_then(parse_f64) else {
+            continue;
+        };
+        let resets_at = if percent > 0.0 {
+            window.get("resetsAt").and_then(extract_reset_time)
+        } else {
+            None
+        };
+        tiers.push(QuotaTier {
+            name: tier_name.to_string(),
+            utilization: percent,
+            resets_at,
+            used_value_usd: None,
+            max_value_usd: None,
+        });
+    }
+    tiers
+}
+
+async fn query_opencode_go(api_key: &str) -> Result<SubscriptionQuota, String> {
+    let client = crate::proxy::http_client::get();
+
+    // 用量端点只认 `Authorization: Bearer`——与推理侧 /messages 只认
+    // x-api-key 正好相反，不能互换。
+    let resp = client
+        .get("https://opencode.ai/zen/go/v1/usage")
+        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Accept", "application/json")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await;
+
+    let resp = match resp {
+        Ok(r) => r,
+        Err(e) => return Err(format!("Network error: {e}")),
+    };
+
+    let status = resp.status();
+    // 403 EntitlementError：key 本身有效（Zen 与 Go 共用同一把 workspace
+    // API key），但该 workspace 没有 Go 订阅——与 401 认证失败分开提示。
+    if status == reqwest::StatusCode::FORBIDDEN {
+        return Ok(make_error(
+            "API key is valid but has no OpenCode Go subscription (HTTP 403)".to_string(),
+        ));
+    }
+    if status == reqwest::StatusCode::UNAUTHORIZED {
+        return Ok(SubscriptionQuota {
+            tool: "coding_plan".to_string(),
+            credential_status: CredentialStatus::Expired,
+            credential_message: Some("Invalid API key".to_string()),
+            success: false,
+            tiers: vec![],
+            extra_usage: None,
+            error: Some(format!("Authentication failed (HTTP {status})")),
+            queried_at: Some(now_millis()),
+        });
+    }
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Ok(make_error(format!("API error (HTTP {status}): {body}")));
+    }
+
+    let raw = match resp.bytes().await {
+        Ok(b) => b,
+        Err(e) => return Err(format!("Failed to read response: {e}")),
+    };
+    let body: serde_json::Value = match serde_json::from_slice(&raw) {
+        Ok(v) => v,
+        Err(e) => return Ok(make_error(format!("Failed to parse response: {e}"))),
+    };
+
+    let tiers = parse_opencode_go_tiers(&body);
+    // 三个窗口一个都没解析出来 = 响应形态不认识（未文档化端点可能再次
+    // 变形），明确报错而不是渲染一张空卡片。
+    if tiers.is_empty() {
+        return Ok(make_error("Unexpected usage response shape".to_string()));
+    }
+
+    Ok(SubscriptionQuota {
+        tool: "coding_plan".to_string(),
+        credential_status: CredentialStatus::Valid,
+        credential_message: None,
+        success: true,
+        tiers,
+        extra_usage: None,
+        error: None,
+        queried_at: Some(now_millis()),
+    })
+}
+
 // ── 火山方舟 Agent Plan / Coding Plan ───────────────────────
 //
 // 与 Kimi/MiniMax（数据面 Bearer 余额接口）不同，火山用量接口是**控制面
@@ -1283,24 +1411,9 @@ pub async fn get_coding_plan_quota(
     coding_plan_provider: Option<&str>,
     team_organization_id: Option<&str>,
     team_project_id: Option<&str>,
-    workspace_id: Option<&str>,
-    auth_cookie: Option<&str>,
+    _workspace_id: Option<&str>,
+    _auth_cookie: Option<&str>,
 ) -> Result<SubscriptionQuota, String> {
-    // OpenCode Go：抓取网页用量（不用 api_key/base_url，靠 workspace_id + auth_cookie）。
-    if coding_plan_provider
-        .map(|p| p.eq_ignore_ascii_case("opencode_go"))
-        .unwrap_or(false)
-    {
-        let ws = workspace_id.unwrap_or("").trim();
-        let cookie = auth_cookie.unwrap_or("").trim();
-        if ws.is_empty() || cookie.is_empty() {
-            return Ok(coding_plan_not_found(
-                "OpenCode Go usage query needs the workspace ID + auth cookie",
-            ));
-        }
-        return query_opencode_go(ws, cookie).await;
-    }
-
     // 智谱团队版：base_url 与个人版智谱（open.bigmodel.cn）相同，detect_provider 无法
     // 区分，必须靠显式 coding_plan_provider == "zhipu_team" 路由。需 api_key + 组织 ID
     // + 项目 ID 三者齐全，缺任一返回 NotFound 引导补全。
@@ -1351,6 +1464,7 @@ pub async fn get_coding_plan_quota(
         CodingPlanProvider::MiniMaxCn => query_minimax(api_key, true).await,
         CodingPlanProvider::MiniMaxEn => query_minimax(api_key, false).await,
         CodingPlanProvider::ZenMux => query_zenmux(base_url, api_key).await,
+        CodingPlanProvider::OpencodeGo => query_opencode_go(api_key).await,
         // 火山已在上面的 AK/SK 分支提前返回，此处不可达。
         CodingPlanProvider::Volcengine => {
             unreachable!("volcengine handled via AK/SK branch above")
@@ -1457,165 +1571,6 @@ fn js_object_to_json(text: &str) -> String {
     re_ref.replace_all(&s, "").into_owned()
 }
 
-async fn query_opencode_go(
-    workspace_id: &str,
-    auth_cookie: &str,
-) -> Result<SubscriptionQuota, String> {
-    // 抓 `/go` 仪表盘页（官方 SSR 自带 rollingUsage/weeklyUsage/monthlyUsage 的现成百分比），
-    // 比抓 /usage 抠逐条记录再聚合更简单且官方准确。对齐 opencode-go-usage 的
-    // `extract_quota_from_go_page`。
-    let url = format!("https://opencode.ai/workspace/{workspace_id}/go");
-    let client = crate::proxy::http_client::get();
-    let resp = client
-        .get(&url)
-        .header("Cookie", format!("auth={auth_cookie}"))
-        .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-        .header("Accept", "text/html,application/xhtml+xml,*/*")
-        .timeout(std::time::Duration::from_secs(15))
-        .send()
-        .await
-        .map_err(|e| format!("OpenCode Go 页面请求失败: {e}"))?;
-
-    let status = resp.status();
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return Ok(coding_plan_not_found(
-            "OpenCode auth cookie 失效或未授权（请重新获取 auth cookie）",
-        ));
-    }
-    if !status.is_success() {
-        return Ok(coding_plan_not_found(&format!(
-            "OpenCode Go 页面返回 HTTP {status}"
-        )));
-    }
-    let html = resp
-        .text()
-        .await
-        .map_err(|e| format!("读取 OpenCode Go 页面失败: {e}"))?;
-
-    // 提取 `XXXUsage:$R[n]={...}`，键值对顺序/数量不假定（页面结构可能变化）：
-    // - status 可能是 "ok"/"error"/其他
-    // - usagePercent 可能是整数或浮点（如 12.5）
-    // - resetInSec 前后可能有其他字段
-    let re_usage = Regex::new(
-        r#"(rollingUsage|weeklyUsage|monthlyUsage):\$R\[\d+\]=\{(?P<body>[^}]*)\}"#,
-    )
-    .unwrap();
-    // body 内按键名单独提取，容忍任意顺序与多余字段
-    let re_reset = Regex::new(r#"resetInSec:(\d+)"#).unwrap();
-    let re_pct = Regex::new(r#"usagePercent:([\d.]+)"#).unwrap();
-    let re_status = Regex::new(r#"status:"([^"]+)""#).unwrap();
-
-    let mut rolling: Option<(u64, f64)> = None;
-    let mut weekly: Option<(u64, f64)> = None;
-    let mut monthly: Option<(u64, f64)> = None;
-    let mut seen_any = false;
-
-    for cap in re_usage.captures_iter(&html) {
-        let name = &cap[1];
-        let body = &cap["body"];
-        // status 非 ok 视为该窗口无效（跳过，不报错）
-        if let Some(st) = re_status.captures(body) {
-            if &st[1] != "ok" {
-                continue;
-            }
-        }
-        let reset: u64 = re_reset
-            .captures(body)
-            .and_then(|c| c.get(1))
-            .and_then(|m| m.as_str().parse().ok())
-            .unwrap_or(0);
-        let pct: f64 = re_pct
-            .captures(body)
-            .and_then(|c| c.get(1))
-            .and_then(|m| m.as_str().parse().ok())
-            .unwrap_or(0.0);
-        seen_any = true;
-        let ent = (reset, pct);
-        match name {
-            "rollingUsage" => rolling = Some(ent),
-            "weeklyUsage" => weekly = Some(ent),
-            "monthlyUsage" => monthly = Some(ent),
-            _ => {}
-        }
-    }
-
-    if !seen_any {
-        // 解析失败：区分"上游返回错误页"与"页面结构真正变化"
-        let is_error_page = html.contains("error") || html.contains("Error")
-            || html.contains("unauthorized") || html.contains("Unauthorized")
-            || html.contains("sign in") || html.contains("Sign in");
-        let snippet: String = html
-            .match_indices("Usage")
-            .take(4)
-            .map(|(idx, m)| {
-                let start = idx.saturating_sub(60);
-                let end = (idx + m.len() + 180).min(html.len());
-                html[start..end]
-                    .chars()
-                    .filter(|c| !c.is_control())
-                    .collect::<String>()
-            })
-            .collect::<Vec<_>>()
-            .join("\n---\n");
-        log::info!(
-            "[OpenCodeGo] 页面结构未匹配用量键，相关片段(snip):\n{snippet}\n(html_len={})",
-            html.len()
-        );
-        if is_error_page {
-            return Ok(coding_plan_not_found(
-                "OpenCode Go 页面返回了错误页面（可能未登录或上游服务异常）",
-            ));
-        }
-        return Ok(coding_plan_not_found(
-            "未能从 OpenCode Go 页面解析出用量配额（页面结构可能已变化）",
-        ));
-    }
-
-    // 重置时间 = 当前时刻 + resetInSec（转 ISO）。
-    let reset_to_iso = |reset_sec: u64| -> Option<String> {
-        millis_to_iso8601(now_millis() + (reset_sec as i64) * 1000)
-    };
-
-    let mut tiers = Vec::new();
-    if let Some((r, p)) = rolling {
-        tiers.push(QuotaTier {
-            name: TIER_FIVE_HOUR.to_string(),
-            utilization: p,
-            resets_at: reset_to_iso(r),
-            used_value_usd: None,
-            max_value_usd: None,
-        });
-    }
-    if let Some((r, p)) = weekly {
-        tiers.push(QuotaTier {
-            name: TIER_WEEKLY_LIMIT.to_string(),
-            utilization: p,
-            resets_at: reset_to_iso(r),
-            used_value_usd: None,
-            max_value_usd: None,
-        });
-    }
-    if let Some((r, p)) = monthly {
-        tiers.push(QuotaTier {
-            name: TIER_MONTHLY.to_string(),
-            utilization: p,
-            resets_at: reset_to_iso(r),
-            used_value_usd: None,
-            max_value_usd: None,
-        });
-    }
-
-    Ok(SubscriptionQuota {
-        tool: "coding_plan".to_string(),
-        credential_status: CredentialStatus::Valid,
-        credential_message: Some("OpenCode Go".to_string()),
-        success: true,
-        tiers,
-        extra_usage: None,
-        error: None,
-        queried_at: Some(now_millis()),
-    })
-}
 
 /// 从 SolidJS SSR 的 `<script>` 中提取含 `inputTokens` 的 `$R[n]=[...]` 数组，
 /// 输出逐条记录 JSON（id / timeCreated / cost 等）。
@@ -1873,12 +1828,94 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_afp_tiers, parse_coding_plan_tiers, parse_minimax_tiers, parse_zhipu_token_tiers,
-        query_zhipu_team_at, volcengine_canonical_query, volcengine_is_auth_error_code,
-        volcengine_region, volcengine_response_error, volcengine_sign, zhipu_quota_base,
+        detect_provider, parse_afp_tiers, parse_coding_plan_tiers, parse_minimax_tiers,
+        parse_opencode_go_tiers, parse_zhipu_token_tiers, query_zhipu_team_at,
+        volcengine_canonical_query, volcengine_is_auth_error_code, volcengine_region,
+        volcengine_response_error, volcengine_sign, zhipu_quota_base, CodingPlanProvider,
         TIER_FIVE_HOUR, TIER_MONTHLY, TIER_WEEKLY_LIMIT,
     };
     use serde_json::json;
+
+    #[test]
+    fn opencode_go_detects_both_base_variants_but_not_zen() {
+        // claude/claude-desktop 预设 base 是 /zen/go，codex/opencode/pi 是
+        // /zen/go/v1，两档都要命中；Zen 按量版（/zen/v1）无用量 API，不得命中。
+        assert!(matches!(
+            detect_provider("https://opencode.ai/zen/go"),
+            Some(CodingPlanProvider::OpencodeGo)
+        ));
+        assert!(matches!(
+            detect_provider("https://opencode.ai/zen/go/v1"),
+            Some(CodingPlanProvider::OpencodeGo)
+        ));
+        assert!(detect_provider("https://opencode.ai/zen/v1").is_none());
+    }
+
+    #[test]
+    fn opencode_go_three_windows_map_to_known_tiers() {
+        let body = json!({
+            "usage": {
+                "rolling": { "status": "ok", "percent": 37, "resetsAt": "2026-08-26T14:12:03.000Z" },
+                "weekly":  { "status": "ok", "percent": 62, "resetsAt": "2026-08-31T00:00:00.000Z" },
+                "monthly": { "status": "rate-limited", "percent": 100, "resetsAt": "2026-09-11T00:00:00.000Z" }
+            }
+        });
+        let tiers = parse_opencode_go_tiers(&body);
+        assert_eq!(tiers.len(), 3);
+        assert_eq!(tiers[0].name, TIER_FIVE_HOUR);
+        assert_eq!(tiers[0].utilization, 37.0);
+        assert_eq!(
+            tiers[0].resets_at.as_deref(),
+            Some("2026-08-26T14:12:03.000Z")
+        );
+        assert_eq!(tiers[1].name, TIER_WEEKLY_LIMIT);
+        assert_eq!(tiers[1].utilization, 62.0);
+        assert_eq!(tiers[2].name, TIER_MONTHLY);
+        assert_eq!(tiers[2].utilization, 100.0);
+    }
+
+    #[test]
+    fn opencode_go_zero_percent_drops_placeholder_reset_time() {
+        // percent==0 时上游 resetsAt 是 now+窗口时长的占位值（整窗早已清零），
+        // 不能当真实重置时刻展示倒计时。
+        let body = json!({
+            "usage": {
+                "rolling": { "status": "ok", "percent": 0, "resetsAt": "2026-08-26T15:00:00.000Z" }
+            }
+        });
+        let tiers = parse_opencode_go_tiers(&body);
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].utilization, 0.0);
+        assert!(tiers[0].resets_at.is_none());
+    }
+
+    #[test]
+    fn opencode_go_partial_windows_skip_malformed() {
+        // 防御：未文档化端点上线当天就改过形态——坏窗口跳过、好窗口保留，
+        // percent 兼容字符串数字。
+        let body = json!({
+            "usage": {
+                "rolling": { "status": "ok" },
+                "weekly":  { "status": "ok", "percent": "12" },
+                "monthly": null
+            }
+        });
+        let tiers = parse_opencode_go_tiers(&body);
+        assert_eq!(tiers.len(), 1);
+        assert_eq!(tiers[0].name, TIER_WEEKLY_LIMIT);
+        assert_eq!(tiers[0].utilization, 12.0);
+    }
+
+    #[test]
+    fn opencode_go_legacy_flat_shape_returns_empty() {
+        // 2026-08-11 上线当天仅存在 53 分钟的旧扁平形态：不兼容，返回空
+        // 由调用方按「响应形态不认识」报错。
+        let body = json!({
+            "useBalance": false,
+            "rollingUsage": { "status": "ok", "usagePercent": 37, "resetInSec": 3600 }
+        });
+        assert!(parse_opencode_go_tiers(&body).is_empty());
+    }
 
     #[test]
     fn zhipu_new_plan_two_tiers_sorted_by_reset_time() {

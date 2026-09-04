@@ -54,46 +54,28 @@ pub async fn apply_codex_provider_settings(
 
     let mut notes = vec![];
 
-    // 1) modelCatalog 变换（本机 write_codex_provider_live_with_catalog 纯计算）：
-    //    有 catalog → 写远端同名 catalog 文件 + 注入字段；无 → 仅清理/web_search 兜底
-    let (config_text, catalog) =
-        crate::codex_config::prepare_codex_catalog_plan(settings, config_text, profile)
-            .map_err(|e| e.to_string())?;
-    if let Some(catalog) = catalog {
-        let catalog_path = format!(
-            "{root}/.codex/{}",
-            crate::codex_config::CC_SWITCH_CODEX_MODEL_CATALOG_FILENAME
-        );
-        let catalog_json = serde_json::to_string_pretty(&catalog)
-            .map_err(|e| format!("序列化 model_catalog_json 失败: {e}"))?;
-        session
-            .write_settings_with_backup(&catalog_path, &catalog_json, container, None)
-            .await?;
-        notes.push(format!("已写入远端 {catalog_path}"));
-    }
+    // 1) modelCatalog + config 生成（上游 v3.20.1 统一接口）
+    let config_text = crate::codex_config::prepare_codex_provider_live_config(
+        &auth,
+        &config_text,
+    )
+    .map_err(|e| e.to_string())?;
 
-    // 2) unified 路由 + bearer token + auth 判定（本机 write_codex_live_for_provider 纯计算）
-    let plan = crate::codex_config::build_codex_live_config(category, &auth, &config_text)
-        .map_err(|e| e.to_string())?;
-
-    // 3) 原子写 config.toml（存在才备份 .bak + 失败清理 tmp）。
-    //    不做 hash 校验（expected_hash=None），与本机 codex 切换行为完全一致。
+    // 2) 原子写 config.toml
     session
-        .write_settings_with_backup(&config_path, &plan.config_text, container, None)
+        .write_settings_with_backup(&config_path, &config_text, container, None)
         .await?;
     notes.push(format!("已整文件覆盖远端 {config_path}"));
     notes.push("新建的 Codex 会话立即生效".to_string());
 
-    // 4) auth.json：仅当本机语义要求时写入；否则保留远端用户自己的登录态
-    if plan.write_auth {
+    // 4) auth.json：写入上游传递的 auth
+    {
         let auth_text = serde_json::to_string_pretty(&auth)
             .map_err(|e| format!("序列化 auth.json 失败: {e}"))?;
         session
             .write_settings_with_backup(&auth_path, &auth_text, container, None)
             .await?;
         notes.push(format!("已写入远端 {auth_path}（官方登录态）"));
-    } else {
-        notes.push("未改动远端 auth.json（保留远端原有登录态）".to_string());
     }
 
     Ok(EffectReport {
