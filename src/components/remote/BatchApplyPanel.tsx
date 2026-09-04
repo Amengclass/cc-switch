@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronRight,
   Container,
@@ -27,7 +28,15 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  PopoverArrow,
 } from "@/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface Target {
   hostId: string;
@@ -38,7 +47,11 @@ interface Target {
 interface BatchApplyPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 可选的 app 列表；为空时固定使用当前 app */
+  availableApps?: string[];
   app: string;
+  /** app 切换回调：父组件据此重新获取对应 app 的 providers */
+  onAppChange?: (app: string) => void;
   hosts: RemoteHost[];
   providers: Record<string, Provider>;
   defaultProviderId?: string | null;
@@ -76,12 +89,16 @@ const classifyHostError = (err: unknown): "ssh" | "docker" => {
 export function BatchApplyPanel({
   open,
   onOpenChange,
-  app,
+  availableApps,
+  app: initialApp,
+  onAppChange,
   hosts,
   providers,
   defaultProviderId,
 }: BatchApplyPanelProps) {
   const { t } = useTranslation();
+  const [selectedApp, setSelectedApp] = useState(initialApp);
+  const app = selectedApp;
   // 当前应用标识：sharedFeatureApp 已把 claude-desktop 映射为 claude，这里再兜底一次。
   // 图标名复用 AppSwitcher 的 APP_ICON_NAME 映射（claude→claude / codex→openai /
   // gemini→gemini / grokbuild→grok / opencode→opencode / openclaw→openclaw /
@@ -314,20 +331,66 @@ export function BatchApplyPanel({
       onClose={() => onOpenChange(false)}
       contentClassName="px-6 py-6 w-full flex flex-col gap-4"
       footer={
-        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 relative">
           {/* 底部固定条·左侧：Provider 选择（始终可见，不用滚动即可选） */}
           <div className="flex min-w-0 flex-1 items-center gap-3">
-            {/* 当前应用标识：醒目告知这批 Provider 是给哪个 app 推 */}
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-sm font-medium text-foreground">
-              {appIconName ? (
-                <ProviderIcon
-                  icon={appIconName}
-                  name={appDisplayName}
-                  size={16}
-                />
-              ) : null}
-              <span className="whitespace-nowrap">{appDisplayName}</span>
-            </span>
+            {/* App 选择器：可选时显示下拉，否则显示固定标识 */}
+            {/* App 选择器 */}
+            {availableApps && availableApps.length > 1 ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-sm font-medium text-foreground hover:bg-primary/10 transition-colors"
+                  >
+                    {appIconName ? (
+                      <ProviderIcon
+                        icon={appIconName}
+                        name={appDisplayName}
+                        size={16}
+                      />
+                    ) : null}
+                    <span className="whitespace-nowrap">{appDisplayName}</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-auto min-w-0 p-1.5" sideOffset={6}>
+                  <PopoverArrow className="fill-popover" />
+                  <div className="flex flex-wrap gap-1">
+                    {availableApps.map((a) => (
+                      <button
+                        key={a}
+                        type="button"
+                        onClick={() => {
+                          setSelectedApp(a);
+                          setSelected(new Set());
+                          setExpanded(new Set());
+                          onAppChange?.(a);
+                        }}
+                        className={cn(
+                          "rounded-md px-2 py-1.5 text-left text-sm transition-colors whitespace-nowrap",
+                          a === app
+                            ? "bg-primary/10 text-primary font-medium"
+                            : "text-foreground hover:bg-muted",
+                        )}
+                      >
+                        {t(`apps.${a}`, { defaultValue: a })}
+                      </button>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : (
+              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-primary/20 bg-primary/5 px-2 py-1 text-sm font-medium text-foreground">
+                {appIconName ? (
+                  <ProviderIcon
+                    icon={appIconName}
+                    name={appDisplayName}
+                    size={16}
+                  />
+                ) : null}
+                <span className="whitespace-nowrap">{appDisplayName}</span>
+              </span>
+            )}
             <span className="whitespace-nowrap text-sm text-muted-foreground">
               {t("batchApply.forApp")}
             </span>
@@ -517,14 +580,17 @@ export function BatchApplyPanel({
                   >
                     <ChevronRight
                       className={cn(
-                        "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform",
+                        "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform ml-0.5",
                         expanded.has(host.id) && "rotate-90",
                       )}
                     />
-                    <span className="truncate">{host.name}</span>
+                    <div className="flex flex-col min-w-0">
+                      <span className="truncate text-sm">{host.name}</span>
+                      <span className="text-[11px] text-muted-foreground/60 truncate">{host.host}</span>
+                    </div>
                   </button>
                   {cs != null && cs.length > 0 && (
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                       {t("batchApply.containerCount", { count: cs.length })}
                     </span>
                   )}
@@ -535,12 +601,14 @@ export function BatchApplyPanel({
                     </span>
                   )}
                   {sshDown && (
-                    <span className="ml-auto shrink-0 text-xs text-red-500">
+                    <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-red-500">
+                      <XCircle className="h-3.5 w-3.5" />
                       {t("batchApply.cannotConnect")}
                     </span>
                   )}
                   {!sshDown && hostErrors[host.id] === "docker" && (
-                    <span className="ml-auto shrink-0 text-xs text-amber-500">
+                    <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-amber-500">
+                      <AlertTriangle className="h-3.5 w-3.5" />
                       {t("batchApply.containerUnavailable")}
                     </span>
                   )}

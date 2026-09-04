@@ -245,6 +245,7 @@ function App() {
 
   // ===== 批量应用 Provider 面板（入口A：目标选择器栏；入口B：远程主机管理页）=====
   const [batchApplyOpen, setBatchApplyOpen] = useState(false);
+  const [batchApplyApp, setBatchApplyApp] = useState<string>(sharedFeatureApp);
 
   // ===== 目标选择器（本机 / 远程服务器）=====
   const [servers, setServers] = useState<RemoteHost[]>([]);
@@ -259,6 +260,7 @@ function App() {
   // 目标细化到 Docker 容器：选中服务器后可再选容器，所有远程操作作用于容器内。
   // 按主机记忆容器选择：切回远端时恢复上次选的容器。
   const [containers, setContainers] = useState<string[]>([]);
+  const [containersLoading, setContainersLoading] = useState(false);
   const [remoteContainerId, setRemoteContainerId] = useState<string>(() => {
     const target = localStorage.getItem("cc-switch-remote-target") ?? "";
     if (!target) return "";
@@ -475,11 +477,13 @@ function App() {
     // 切主机后先清空旧容器列表再拉取：effect 在渲染之后才跑，若不清空，
     // 拉取期间的渲染窗口会显示上一台主机的容器（下拉串台）。
     setContainers([]);
+    setContainersLoading(true);
     let active = true;
     listDockerContainers(remoteTargetId)
       .then((list) => {
         if (active) {
           setContainers(list);
+          setContainersLoading(false);
           // 容器列表加载完毕后，若已选容器不在当前主机列表中才清空
           // （不在加载前清空，否则 localStorage 记忆的容器会在拉取期间被误删）
           setRemoteContainerId((prev) =>
@@ -488,7 +492,10 @@ function App() {
         }
       })
       .catch(() => {
-        if (active) setContainers([]);
+        if (active) {
+          setContainers([]);
+          setContainersLoading(false);
+        }
       });
     return () => {
       active = false;
@@ -630,6 +637,9 @@ function App() {
     status: proxyStatus,
   } = useProxyStatus();
   const proxyAppId = isProxyAppId(activeApp) ? activeApp : null;
+  const batchApplyProviders = useProvidersQuery(batchApplyApp as AppId, {
+    isProxyRunning,
+  });
   const currentAppUsesProxy =
     proxyAppId !== null || activeApp === "claude-desktop";
   const isCurrentAppTakeoverActive = proxyAppId
@@ -2643,6 +2653,7 @@ function App() {
                 setRemoteContainerId={setRemoteContainerId}
                 servers={servers}
                 containers={containers}
+                containersLoading={containersLoading}
                 hostsOnline={hostsOnline}
                 onProbeHosts={probeHosts}
               />
@@ -2725,10 +2736,12 @@ function App() {
         <BatchApplyPanel
           open={batchApplyOpen}
           onOpenChange={setBatchApplyOpen}
+          availableApps={APP_IDS.filter((a) => visibleApps[a] && a !== "claude-desktop")}
           app={sharedFeatureApp}
+          onAppChange={setBatchApplyApp}
           hosts={servers}
-          providers={data?.providers ?? {}}
-          defaultProviderId={data?.currentProviderId || undefined}
+          providers={batchApplyProviders.data?.providers ?? {}}
+          defaultProviderId={batchApplyProviders.data?.currentProviderId || undefined}
         />
       )}
 

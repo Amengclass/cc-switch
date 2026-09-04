@@ -546,7 +546,7 @@
 | `~/.ssh/config` 兼容 | 解析别名、ProxyJump/跳板机配置 |
 | ~~远端「发现」安装 Skills~~ | ✅ 已完成(2026-08-08 核实):`useInstallRemoteSkillFromDiscoverable`(useSkills.ts:186) + 后端 `install_remote_skill_from_discoverable`(commands.rs:2203) |
 | 远端「从备份恢复」Skills | 本地备份 → 恢复到远端 SSOT。**未完成**:前端 isRemote 时 no-op(UnifiedSkillsPanel.tsx:770-772) + 后端无 remote restore 命令 |
-| 远程切换应用到全部模型槽位 | 支持现有「应用到全部」预设行为 |
+| ~~远程切换应用到全部模型槽位~~ | ✅ 已完成(2026-09-04):批量应用面板已支持选择 app + 多选落点 + 广播切换,实现「应用到全部」行为 |
 | 团队共享与审计 | 切换记录、操作日志、只读成员视图(host_switches 表未落地) |
 | ~~远程 Sessions per-app~~ | ✅ 已完成(2026-08-08 核实):hermes/opencode SQLite hybrid 已实现(commands.rs:1369-1457,直查远端 sqlite3) |
 | ~~get_remote_current_provider 兜底 per-app~~ | ✅ 已完成(2026-08-08 核实):claude/codex/gemini/grokbuild 四 app 均有 base_url 兜底(commands.rs:1188-1227) |
@@ -636,7 +636,7 @@
 
 | 事项 | 说明 |
 |---|---|
-| 悬浮窗样式与右键菜单 | 继续打磨悬浮窗样式细节(尺寸/间距/动效);悬浮球右键菜单(快捷切换、打开主界面等) |
+| ~~悬浮窗样式与右键菜单~~ | ✅ 已完成(2026-08-08 核实):右键菜单已完成(FloatingContextMenu.tsx);样式打磨已完成(尺寸/间距/动效均调整到位,2026-09-04 用户确认) |
 
 ### 模块③ 本地体验增强 — 待完成
 
@@ -645,8 +645,8 @@
 | 事项 | 说明 |
 |---|---|
 | ⚠️ **i18n 国际化未完成项（重点）** | 早期做了一部分（如技能安装/卸载 loading 已 i18n 化），**但仍有内容未完成、未走 t()**：① 悬浮窗全部文案硬编码中文（FloatingContextMenu「设置/隐藏」、FloatingPanel「刚刚/x分钟前/从未更新/暂无数据/已用/剩余/当前供应商/打开主界面/关闭悬浮窗」、FloatingBall「未设置」、FloatingWindowSettings「固定当前位置」）；② 主界面其他组件硬编码中文（toast/按钮/placeholder/tooltip 等，**具体残留位置待统一扫描确认**，2026-08-08 记录——用户反馈"早期做了一些没完成，具体内容忘了但确定有"）。处理方式：统一扫描 src/（含 src/floating/）全部硬编码中文 → 逐个走 t() + 四语 key |
-| `handleImport` 远端导入改用 `mergeImportedSkills` | ⚠️ 部分(2026-08-08 核实):hook onSuccess 已用 mergeImportedSkills,但 UnifiedSkillsPanel.tsx:509-510 远端分支仍 `[...old, ...installed]` 简单展开;远端数据仍缺 description(useSkills.ts:464-471) |
-| `useImportSkillsFromApps` 远端路径返回完整数据 | ⚠️ 部分(2026-08-08 核实):ZIP 路径已返回完整数据(useSkills.ts:566-591),目录导入仍缺 description,多余一次 invalidate |
+| ~~`handleImport` 远端导入改用 `mergeImportedSkills`~~ | ✅ 已完成(2026-09-04 核实):hook onSuccess 已用 `mergeImportedSkills` 按 id 去重合并(UnifiedSkillsPanel.tsx:534),远端分支一致 |
+| ~~`useImportSkillsFromApps` 远端路径返回完整数据~~ | ✅ 已完成(2026-09-04 核实):ZIP 路径 + 目录导入均已返回完整数据含 description(useSkills.ts:602),即时更新 UI 已统一策略 |
 | ~~远端「从市场安装」Skills~~ | ✅ 已完成(2026-08-08 核实):`useInstallRemoteSkillFromDiscoverable` + `install_remote_skill_from_discoverable`,SkillsPage.tsx:171 已接入 |
 | 远端「更新」Skill | ❌ 未完成(2026-08-08 核实):无 updateRemoteSkill/update_remote_skill;前端远端隐藏更新入口(UnifiedSkillsPanel.tsx:1027) |
 | ~~技能安装/卸载 loading 提示多语言适配~~ | ✅ 已完成(2026-08-08 核实):已 i18n(UnifiedSkillsPanel.tsx:375/549 + 四语 key) |
@@ -664,6 +664,7 @@
 
 | 事项 | 说明 |
 |---|---|
+| ~~基座升级 v3.20.1~~ | ✅ 已完成(2026-09-04):merge 上游 v3.20.1 进 fork(40+ commit),解决 3 个冲突(database/mod.rs schema v18、codingPlanProviders.ts pattern、codex_config.rs 重构);适配 API 变更(extract_codex_model→内联、prepare_codex_catalog_plan→prepare_codex_provider_live_config、query_opencode_go 旧版删除);OpenCode Go 从 workspace_id+auth_cookie 切换为 API key 方式;UsageScriptModal.tsx 清理旧凭证字段;编译通过+应用启动正常 |
 | 打包测试 | 独立 exe 测试(Win/macOS),README 更新 |
 
 **构建注意事项：**

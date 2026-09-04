@@ -20,6 +20,8 @@ interface TargetBreadcrumbProps {
   setRemoteContainerId: (value: string) => void;
   servers: RemoteHost[];
   containers: string[];
+  /** 容器列表正在加载中 */
+  containersLoading?: boolean;
   /** 主机在线状态（host_id → 是否在线）；打开下拉时探活填充 */
   hostsOnline?: Record<string, boolean>;
   /** 下拉打开时触发的批量探活回调 */
@@ -41,6 +43,7 @@ export function TargetBreadcrumb({
   setRemoteContainerId,
   servers,
   containers,
+  containersLoading,
   hostsOnline,
   onProbeHosts,
 }: TargetBreadcrumbProps) {
@@ -207,7 +210,11 @@ export function TargetBreadcrumb({
             <DropdownMenuTrigger asChild>
               <button type="button" className={cn(segmentCls, "rounded-r-lg")}>
                 <Container className="h-3.5 w-3.5 shrink-0" />
-                <span className="max-w-[140px] truncate">{containerLabel}</span>
+                {containersLoading && !containers.length ? (
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                ) : (
+                  <span className="max-w-[140px] truncate">{containerLabel}</span>
+                )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
