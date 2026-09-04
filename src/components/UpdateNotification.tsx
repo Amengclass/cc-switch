@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowUpCircle } from "lucide-react";
 import { toast } from "sonner";
@@ -13,11 +13,13 @@ export function UpdateNotification({ onViewDetails }: UpdateNotificationProps) {
   const { t } = useTranslation();
   const { hasUpdate, updateInfo } = useUpdate();
   const dismissedKey = "ccswitch:update:toastEverShown";
+  const firedRef = useRef(false);
 
   useEffect(() => {
     if (!hasUpdate || !updateInfo) return;
-    // 已经弹过则跳过
     if (localStorage.getItem(dismissedKey)) return;
+    if (firedRef.current) return;
+    firedRef.current = true;
 
     const timer = setTimeout(() => {
       toast.info(
