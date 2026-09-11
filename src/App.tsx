@@ -709,20 +709,36 @@ function App() {
     : currentProviderId;
   // 同步远端供应商给悬浮球
   useEffect(() => {
-    if (remoteTargetId) {
-      void invoke("floating_set_remote_context", {
-        hostId: remoteTargetId,
-        containerId: remoteContainerId || null,
-        providerId: effectiveCurrentProviderId || null,
-      }).catch(() => {});
-    } else {
-      void invoke("floating_set_remote_context", {
-        hostId: null,
-        containerId: null,
-        providerId: null,
-      }).catch(() => {});
+    // per-app 路由接管状态快照：本机取 takeoverStatus，远端取该主机的 routeProxyApps。
+    // 推给悬浮窗后与主窗口 UI 同源：开关一变即刻生效，无需等 DB 落库或查询往返。
+    const routeMap: Record<string, boolean> = {};
+    for (const appId of APP_IDS) {
+      if (appId === "claude-desktop") continue;
+      if (!remoteTargetId) {
+        // ProxyTakeoverStatus 未声明 pi 字段：按 Record 安全索引
+        routeMap[appId] = !!(takeoverStatus as Record<string, boolean | undefined> | undefined)?.[appId];
+      } else if (remoteContainerId) {
+        routeMap[appId] =
+          !!activeRemoteHost?.routeProxyContainerApps?.[remoteContainerId]?.[
+            appId
+          ];
+      } else {
+        routeMap[appId] = !!activeRemoteHost?.routeProxyApps?.[appId];
+      }
     }
-  }, [remoteTargetId, remoteContainerId, effectiveCurrentProviderId]);
+    void invoke("floating_set_remote_context", {
+      hostId: remoteTargetId || null,
+      containerId: remoteContainerId || null,
+      providerId: effectiveCurrentProviderId || null,
+      routeProxyApps: routeMap,
+    }).catch(() => {});
+  }, [
+    remoteTargetId,
+    remoteContainerId,
+    effectiveCurrentProviderId,
+    activeRemoteHost,
+    takeoverStatus,
+  ]);
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||

@@ -149,6 +149,14 @@ static CACHED_SCALE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 static REMOTE_CONTEXT: std::sync::Mutex<Option<(String, Option<String>, String)>> =
     std::sync::Mutex::new(None);
 
+/// 前端推送的「各 app 路由接管状态」快照（本机与远端统一，与主窗口 UI 同源）。
+/// 主窗口已知真值（本机 takeoverStatus / 远端 routeProxyApps），推送后悬浮窗
+/// 立即可用，无需等 DB proxy_config 落库或查询往返。
+/// 为 None 时回退读本机 DB —— 冷启动尚未收到推送时的兜底。
+static ROUTE_PROXY_MAP: std::sync::Mutex<Option<std::collections::BTreeMap<String, bool>>> =
+    std::sync::Mutex::new(None);
+
+
 /// 胶囊厚度（逻辑像素）：贴边缘的宽度（温度计指示器风格）
 /// 8px 足够显示小字百分比标签，又不会太宽遮挡屏幕内容
 const CAPSULE_THICKNESS: f64 = 8.0;
@@ -1593,25 +1601,38 @@ fn floating_queried_at(
     None
 }
 
+/// 该 app 的路由接管状态：优先用前端推送的快照（ROUTE_PROXY_MAP，本机/远端统一，
+/// 与主窗口 UI 同源、即时）；尚未收到推送时返回 None，调用方回退读本机 DB。
+/// 悬浮球与悬浮面板共用，保证两者读到同一真值来源。
+fn pushed_route_for(app_type_str: &str) -> Option<bool> {
+    let map = ROUTE_PROXY_MAP.lock().unwrap();
+    map.as_ref().map(|m| m.get(app_type_str).copied().unwrap_or(false))
+}
+
 /// 构建单个 app 的悬浮窗行条目（当前供应商 / 模型 / 用量 / 路由纳管）。
 /// 面板（`get_floating_window_data` 遍历所有可见 app）与悬浮球
 /// （`get_floating_ball_detail` 只取目标 app）共用，保证两者数据一致。
 async fn build_floating_entry(state: &AppState, app_type: &AppType) -> FloatingEntry {
     let app_type_str = app_type.as_str();
 
-    // 路由纳管状态与主窗口 takeoverStatus 同源（proxy_config.enabled）
-    let takeover_active = state
-        .db
-        .get_proxy_config_for_app(app_type_str)
-        .await
-        .map(|c| c.enabled)
-        .unwrap_or(false);
+    // 路由纳管状态：优先用前端推送的快照（即时、本机/远端同源）；
+    // 未收到推送时（如冷启动早期）回退读本机 DB proxy_config.enabled
+    let takeover_active = match pushed_route_for(app_type_str) {
+        Some(active) => active,
+        None => state
+            .db
+            .get_proxy_config_for_app(app_type_str)
+            .await
+            .map(|c| c.enabled)
+            .unwrap_or(false),
+    };
 
+    let remote_pid = REMOTE_CONTEXT.lock().unwrap().as_ref().map(|(_, _, pid)| pid.clone());
     let current_id = {
         // 远端模式：用前端传来的远端当前供应商 ID
-        if let Some((_, _, ref remote_pid)) = *REMOTE_CONTEXT.lock().unwrap() {
-            if !remote_pid.is_empty() {
-                Some(remote_pid.clone())
+        if let Some(ref pid) = remote_pid {
+            if !pid.is_empty() {
+                Some(pid.clone())
             } else {
                 crate::settings::get_effective_current_provider(&state.db, app_type).unwrap_or(None)
             }
@@ -1794,6 +1815,18 @@ fn resolve_ball_target() -> Option<FloatingBallTarget> {
     None
 }
 
+/// 向悬浮面板与悬浮球窗口**定向**发 `floating-data-refresh`。
+/// 全局 broadcast 对隐藏/非聚焦的浮窗 webview 不可靠（历史踩坑：面板收不到
+/// 事件只能等下一轮轮询，表现为「路由开关已开但面板迟迟不变」）。
+/// 逐窗口定向 emit 才能保证面板即时同步路由/供应商/用量状态。
+pub(crate) fn emit_data_refresh(app: &tauri::AppHandle) {
+    for label in [PANEL_LABEL, BALL_LABEL, STRIP_LABEL] {
+        if let Some(w) = app.get_webview_window(label) {
+            let _ = w.emit("floating-data-refresh", ());
+        }
+    }
+}
+
 /// 主窗口计算「球当前目标 app 是否处远端接管」后写入设置（球 1s 轮询读它显示流动边框）。
 #[tauri::command]
 pub async fn floating_set_remote_takeover(
@@ -1801,33 +1834,38 @@ pub async fn floating_set_remote_takeover(
     active: bool,
 ) -> Result<(), String> {
     crate::settings::set_floating_remote_takeover(Some(active)).map_err(|e| e.to_string())?;
-    let _ = app.emit("floating-pin-changed", resolve_ball_target());
-    let _ = app.emit("floating-data-refresh", ());
+    // emit_pin_changed 内部已定向 emit_data_refresh，无需重复
+    emit_pin_changed(&app);
     Ok(())
 }
 
-/// 前端切换远端目标时调用：传递 (host_id, container_id, provider_id)，
-/// 悬浮球据此读取远端当前供应商（替代本地设置）。
-/// 传 None 时表示回到本机模式。
+/// 前端推送「当前上下文」：远端目标 (host_id, container_id, provider_id)，
+/// 以及各 app 的路由接管状态 route_proxy_apps（本机与远端统一推送）。
+/// host 为空表示回到本机模式（REMOTE_CONTEXT 清空），但 route_proxy_apps 仍会写入
+/// —— 本机模式悬浮窗同样需要即时的 per-app 路由状态。
 #[tauri::command]
 pub async fn floating_set_remote_context(
     app: tauri::AppHandle,
     host_id: Option<String>,
     container_id: Option<String>,
     provider_id: Option<String>,
+    route_proxy_apps: Option<std::collections::BTreeMap<String, bool>>,
 ) -> Result<(), String> {
-    let ctx = match (host_id, provider_id) {
-        (Some(h), Some(p)) => Some((h, container_id, p)),
-        _ => None,
-    };
-    *REMOTE_CONTEXT.lock().unwrap() = ctx;
-    let _ = app.emit("floating-data-refresh", ());
+    // host 存在即视为远端模式：provider_id 可空（远端可能未设置当前供应商），
+    // 若因 provider 为空而整体退化为 None，悬浮窗会错误回退到本机路由状态。
+    *REMOTE_CONTEXT.lock().unwrap() =
+        host_id.map(|h| (h, container_id, provider_id.unwrap_or_default()));
+    // 路由状态快照：与主窗口 UI 同源，悬浮窗直接采用，不必等 DB 落库
+    if let Some(map) = route_proxy_apps {
+        *ROUTE_PROXY_MAP.lock().unwrap() = Some(map);
+    }
+    emit_data_refresh(&app);
     Ok(())
 }
 
 /// 悬浮球拉取「显示哪个 app」：置顶优先，否则最近活跃 app。
-/// takeover_active 用目标 app 自身的 proxy_config.enabled（与悬浮面板每行同源），
-/// 而非全局 floating_remote_takeover——否则球会跟主窗口当前 tab 而不跟置顶的 app。
+/// takeover_active 与悬浮面板同一逻辑（pushed_route_for）：优先用前端推送的
+/// per-app 路由快照，未推送时回退本机 DB，保证球与面板显示一致。
 #[tauri::command]
 pub async fn get_floating_ball_target(
     state: tauri::State<'_, AppState>,
@@ -1835,12 +1873,16 @@ pub async fn get_floating_ball_target(
     let Some(mut target) = resolve_ball_target() else {
         return Ok(None);
     };
-    target.takeover_active = state
-        .db
-        .get_proxy_config_for_app(&target.app_type)
-        .await
-        .map(|c| c.enabled)
-        .unwrap_or(false);
+    let remote_route = pushed_route_for(&target.app_type);
+    target.takeover_active = match remote_route {
+        Some(active) => active,
+        None => state
+            .db
+            .get_proxy_config_for_app(&target.app_type)
+            .await
+            .map(|c| c.enabled)
+            .unwrap_or(false),
+    };
     Ok(Some(target))
 }
 
@@ -1868,7 +1910,7 @@ pub async fn floating_set_pin_app(
     // 事件不可靠（球/面板都只按 poll 节奏刷新），逐个 emit_to 保证到达球窗口。
     let t1 = std::time::Instant::now();
     emit_pin_changed(&app);
-    let _ = app.emit("floating-data-refresh", ());
+    emit_data_refresh(&app);
     log::info!(
         "[Floating] 置顶事件已发出 (emit 耗时 {}ms)",
         t1.elapsed().as_millis()
@@ -1921,8 +1963,8 @@ fn emit_pin_changed(app: &tauri::AppHandle) {
     if let Some(ball) = app.get_webview_window(BALL_LABEL) {
         let _ = ball.emit("floating-pin-changed", target);
     }
-    // 全局广播 data-refresh（面板/球都刷新）
-    let _ = app.emit("floating-data-refresh", ());
+    // 定向广播 data-refresh（面板/球都刷新）
+    emit_data_refresh(app);
 }
 
 // ============================================================
@@ -2058,7 +2100,9 @@ pub async fn show_floating_panel(app: tauri::AppHandle) -> Result<(), String> {
     let _ = panel.show();
     log::debug!("[Floating] 悬浮面板已显示 pos=({px:.0},{py:.0})");
 
-    let _ = app.emit("floating-data-refresh", ());
+    // 定向发给面板（含球/strip），确保展开瞬间即为最新路由/供应商/用量状态，
+    // 不必等下一轮兜底轮询。
+    emit_data_refresh(&app);
 
     // 面板绝不主动查询 API：用量查询只由主窗口（useUsageQuery / 手动刷新）
     // 和托盘悬停发起，结果写入 UsageCache 后经 usage-cache-updated 事件 +

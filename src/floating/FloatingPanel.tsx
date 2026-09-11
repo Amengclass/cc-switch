@@ -193,13 +193,27 @@ export function FloatingPanel() {
     void listen("usage-cache-updated", refresh).then((u) =>
       unlisteners.push(u),
     );
-    // 高频轮询作为事件兜底：隐藏窗口若收不到事件，3s 内也能同步到
-    // 主窗口最新的供应商/余量（get_floating_window_data 只读本地缓存）。
-    const timer = setInterval(refresh, 3_000);
+
+    // 刷新策略：无条件 1s 轮询（与悬浮球同款，实测最可靠）。
+    // 为什么不只靠事件：面板窗口绝大多数时间隐藏，WebView2(Chromium) 会节流隐藏
+    // 窗口的渲染进程——不仅 setInterval 降频，连 IPC 事件回调也会被推迟到窗口
+    // 重新可见才执行（代码库历史实测结论）。只靠 emit 会出现「隐藏期间不更新、
+    // 显示后仍是旧值」。
+    // 成本可控：Chromium 对隐藏窗口的定时器自动降频（约 1 次/分钟），可见时恢复
+    // 1s；且 get_floating_window_data 只读本地缓存，不发网络请求。
+    // 事件监听保留：可见时事件能即时到达，作为 1s 之外的加速路径。
+    const timer = setInterval(refresh, 1_000);
     const nowTimer = setInterval(() => setNow(Date.now()), 30_000);
+    // 窗口显示瞬间补一次（不等第一个 tick）
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       clearInterval(timer);
       clearInterval(nowTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
       unlisteners.forEach((u) => u());
     };
   }, [refresh]);

@@ -274,9 +274,11 @@ export function FloatingBall() {
     void listen("floating-ball-collapse", () => {
       setAnimState("fading-out");
     }).then((u) => unlisteners.push(u));
-    // 可靠性兜底：实测跨窗口事件（含 emit_to）到悬浮窗 webview 不可靠，球常只按
-    // 轮询刷新；get_floating_ball_detail 已改为单 app 轻量查询，1s 轮询成本可忽略，
-    // 保证置顶/跟随任何变化 ≤1s 生效。
+    // 1s 轮询是主要可靠路径：实测跨窗口事件（含定向 emit）到悬浮窗 webview 并
+    // 不可靠，且隐藏窗口会被 Chromium 节流而推迟事件回调。球虽常年可见，但依赖
+    // 事件会导致「有时快、有时慢」；1s 轮询稳定且 get_floating_ball_detail 只查
+    // 单个 app（本地缓存读取），成本可忽略。
+    // 事件监听保留作加速：能收到时即时刷新，收不到最多 1s 后由轮询补齐。
     const timer = setInterval(refresh, 1_000);
     return () => {
       clearInterval(timer);
