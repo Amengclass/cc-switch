@@ -29,9 +29,9 @@
 | 模块 | 范围 | 状态速览 |
 |---|---|---|
 | **模块① 远程主机统一控制面(SSH)** | 远程主机管理/切换 Provider/远程面板/Docker 容器/提速/per-app 扩展/安装检测 | 已完成 11 项;待完成 12 项(见「待完成」模块①) |
-| **模块② 悬浮窗组件(加速球)** | 桌面小球/悬停面板/右键菜单/定位与尺寸保护 | 已完成;待完成:样式打磨 + 右键菜单增强 |
-| **模块③ 本地体验增强** | UI 修复/图像拦截钩子/前端刷新策略一致性 | 已完成 2 项;待完成 6 项 |
-| **模块④ 基座升级与工程** | 官方 v3.19.2 合并/构建与发布 | 已完成 2 项;待完成 2 项 |
+| **模块② 悬浮窗组件(加速球)** | 桌面小球/悬停面板/右键菜单/定位与尺寸保护/路由状态同步 | 已完成(含样式打磨) |
+| **模块③ 本地体验增强** | UI 修复/图像拦截钩子/前端刷新策略一致性/更新提示 | 已完成 4 项;待完成 5 项 |
+| **模块④ 基座升级与工程** | 官方 v3.20.1 合并/构建与发布 | 已完成 3 项;待完成 1 项 |
 
 ---
 
@@ -280,6 +280,32 @@
 - **悬浮窗尺寸保护(修复窗口大小异常,2026-08-07)**:两个根因——(1) `window-state` 插件把悬浮窗恢复成历史错误尺寸(`skip_initial_state` 实测拦不住,改用 **`with_denylist`** 完全排除球/面板/菜单三个窗口);(2) **WebView2 内容加载后把悬浮窗窗口 resize 成 133 逻辑宽**(球/菜单实测被拉宽,面板/菜单未 show 故不受影响),用 **`on_page_load` 回调强制 `set_size` 回逻辑尺寸**(含 300ms 延迟二次兜底);右键菜单宽度 60、面板 300、球 64 由此保证,菜单右缘与球右缘对齐
 - 右键菜单交互:弹出即抢焦点,**鼠标离开/重新悬停球都不关闭**;只有**点击菜单外部任意处**(小球/桌面/其他应用,靠失焦 `Focused(false)` 收起)才关闭;点击球只关菜单不开主窗口(`MENU_CLOSED_AT` 300ms 内抑制单击开主窗)
 
+### 悬浮窗路由接管状态实时同步(2026-09-12)
+- **症状**:开/关路由接管后,悬浮球与悬浮面板的绿框(`.route-service-live` / `.row-takeover`)更新缓慢甚至不变。
+- **根因(三层,逐一修复)**:
+  1. **前端快照只推远端**:`App.tsx` 的同步 effect 仅在有 `remoteTargetId` 时推 `routeProxyApps`,
+     本机模式传 `null` → 后端只能读 DB `proxy_config`,须等接管流程落库,延迟明显。
+  2. **无乐观更新**:点击后要等 mutation 返回(后端写 live 配置,数百 ms)→ `invalidate` →
+     `refetch` → `state` 变化 → 才推快照,共 **4 次 IPC 往返**。
+  3. **轮询间隔被拉长 + 跨窗口事件不可靠**:球曾为 5s、面板曾为 30s;
+     而实测 emit(含定向 `emit_to`)到悬浮窗 webview 不可靠——隐藏窗口会被 WebView2 节流,
+     连 IPC 回调都会推迟到窗口重新可见才执行,导致「只能干等轮询」。
+- **修复**:
+  - **数据源统一**:`floating.rs` 新增 `ROUTE_PROXY_MAP`(`Mutex<Option<BTreeMap<String,bool>>>`),
+    存前端推送的 per-app 路由快照;`pushed_route_for()` **优先读快照、未推送时回退本机 DB**;
+    **悬浮球(`get_floating_ball_target`)与面板(`build_floating_entry`)共用同一函数**,保证两者一致。
+  - **本机也推快照**:`App.tsx` 改为本机取 `takeoverStatus`、远端取 `routeProxyApps`/`routeProxyContainerApps`,
+    统一推送,不再传 `null`。
+  - **乐观更新**:`useProxyStatus` 的 `setTakeoverForApp` 加 `onMutate` 立即写 `takeoverStatus` 缓存
+    (+ `onError` 回滚),**点击瞬间后端值即正确**。
+  - **事件定向推送**:新增 `emit_data_refresh()`,对 `floating-panel`/`floating-ball`/`floating-strip`
+    逐窗口 `w.emit()`(全局广播不可靠);接管开关、远端目标切换、置顶、面板展开全部改用它。
+  - **轮询作为可靠保底**:球与面板统一 **1s 轮询**(`get_floating_ball_detail` /
+    `get_floating_window_data` 均只读本地 SQLite 缓存,**不发网络请求**);
+    面板隐藏时 Chromium 自动降频至约 1 次/分钟,后台开销可忽略。事件保留作加速路径。
+- **设计结论**:Tauri 多窗口内存隔离,跨窗口只能走 IPC;轮询是**唯一 100% 可靠**的通知机制,
+  事件只能作为「能到达时更快」的优化,不能作为正确性依赖。
+
 ### 模块③ 本地体验增强
 
 ### 图像拦截钩子(纯文本模型保护)
@@ -296,6 +322,24 @@
   所有 toast 统一默认定位,不再因覆盖选择性生效而漂移
 - **目标选择器可滚动**:主机/容器下拉框 `max-h-[50vh]` + 可见细滚动条
 - **目标选择器聚焦样式**:与全局 `*:focus-visible` 保持一致,不下拉特殊处理
+
+### 更新提示回归上游 + 可关闭开关(2026-09-12)
+- **背景**:早前 fork 把上游的更新提示横幅改成了 **toast 弹窗**(提交 `41fe5d1e`/`0ae14a01`/`8771b75f`),
+  且引入功能退化——用 `ccswitch:update:toastEverShown` **一次性 key** 记忆,
+  **关闭过一次后所有后续新版本都永远不再提示**(而原版是按 `dismissedVersion` 按版本记忆)。
+- **改动**:
+  - 删除自制的 `UpdateNotification.tsx`(toast 版)
+  - 启用上游 `UpdateBadge`(merge v3.20.1 时已带进来但与上游逐字节一致、未被引用):
+    header 里绿色 ⬆️ 圆形图标,仅 `hasUpdate` 时渲染,点击跳「设置 > 关于」;
+    **不打断用户、不会「关了就永远看不到」、无需 localStorage 记忆逻辑**
+  - 新增设置项 `AppSettings.show_update_badge`(`Option<bool>`,serde camelCase;
+    `None`/`true` = 显示,跟随上游行为;`false` = 隐藏图标入口)。
+    **仅控制入口显隐,后台自动检查更新不受影响**,「关于」页仍可手动检查。
+  - 开关位置:设置 → 通用 → **「主页面显示」区**,紧邻同类的「显示项目切换」
+    (`showProfileSwitcher`)——两者都是主页面顶部入口的显隐控制,归为一类。
+  - 清理:`App.tsx` 中 UpdateNotification 遗留的横幅容器空 `<div>`;
+    `BatchApplyPanel.tsx` 中 `DropdownMenu` 残留 import(app 选择器改 Popover 后的死代码,曾触发 TS6192)。
+- **i18n**:key 置于 `settings.appVisibility.showUpdateBadge` / `showUpdateBadgeDescription`,四语齐全。
 
 ### 模块④ 基座升级与工程基建
 
