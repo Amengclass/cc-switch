@@ -760,7 +760,9 @@
       "geminiDesc": "Google Gemini CLI",
       "opencodeDesc": "OpenCode CLI",
       "showProfileSwitcher": "プロジェクト切り替えを表示",
-      "showProfileSwitcherDescription": "メイン画面上部にプロジェクト切り替えを表示します"
+      "showProfileSwitcherDescription": "メイン画面上部にプロジェクト切り替えを表示します",
+      "showUpdateBadge": "更新通知を表示",
+      "showUpdateBadgeDescription": "新しいバージョンがある場合、ヘッダーに緑のアイコンを表示します。オフにしてもバックグラウンドで更新を確認し、「このアプリについて」ページで手動確認できます"
     },
     "skillStorage": {
       "title": "スキル保存場所",

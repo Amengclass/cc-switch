@@ -760,7 +760,9 @@
       "geminiDesc": "Google Gemini CLI",
       "opencodeDesc": "OpenCode CLI",
       "showProfileSwitcher": "Show project switcher",
-      "showProfileSwitcherDescription": "Show the project switcher in the main page header"
+      "showProfileSwitcherDescription": "Show the project switcher in the main page header",
+      "showUpdateBadge": "Show Update Indicator",
+      "showUpdateBadgeDescription": "Show a green icon in the header when a new version is available. Background checks still run when disabled; you can check manually on the About page"
     },
     "skillStorage": {
       "title": "Skill Storage Location",

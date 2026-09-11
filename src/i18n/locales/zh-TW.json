@@ -760,7 +760,9 @@
       "geminiDesc": "Google Gemini CLI",
       "opencodeDesc": "OpenCode CLI",
       "showProfileSwitcher": "顯示專案切換",
-      "showProfileSwitcherDescription": "在主頁面頂部顯示專案切換入口"
+      "showProfileSwitcherDescription": "在主頁面頂部顯示專案切換入口",
+      "showUpdateBadge": "顯示更新提示",
+      "showUpdateBadgeDescription": "有新版本時在頂欄顯示綠色圖示入口；關閉後仍會在背景檢查更新，可在「關於」頁手動查看"
     },
     "skillStorage": {
       "title": "Skills 儲存位置",

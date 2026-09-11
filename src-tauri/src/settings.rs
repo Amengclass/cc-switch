@@ -424,6 +424,13 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_apps: Option<VisibleApps>,
 
+    // ===== 更新提示 =====
+    /// 是否在 header 显示「有新版本」入口图标（绿色 ⬆️）。
+    /// None / true = 显示（默认，跟随上游行为）；false = 隐藏图标入口。
+    /// 仅控制入口显隐，后台自动检查更新不受影响（设置页「关于」仍可手动检查）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_update_badge: Option<bool>,
+
     // ===== 悬浮窗（加速球）设置 =====
     /// 是否启用桌面悬浮球（默认关闭）
     #[serde(default)]
@@ -585,6 +592,8 @@ impl Default for AppSettings {
             common_config_confirmed: None,
             language: None,
             visible_apps: None,
+            // 默认显示更新入口（跟随上游行为）
+            show_update_badge: None,
             enable_floating_window: false,
             floating_window_position: None,
             floating_snap_speed_ms: None,

@@ -98,7 +98,7 @@ import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsPage } from "@/components/settings/SettingsPage";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
-import { UpdateNotification } from "@/components/UpdateNotification";
+import { UpdateBadge } from "@/components/UpdateBadge";
 import { ProxyToggle } from "@/components/proxy/ProxyToggle";
 import { ClaudeDesktopRouteToggle } from "@/components/proxy/ClaudeDesktopRouteToggle";
 import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
@@ -2024,16 +2024,6 @@ function App() {
         />
       )}
 
-      {/* 新版本通知横幅：在主内容区顶部，不遮挡任何元素 */}
-      <div className="mx-auto max-w-5xl px-4 pt-1">
-        <UpdateNotification
-          onViewDetails={() => {
-            setSettingsDefaultTab("about");
-            setCurrentView("settings");
-          }}
-        />
-      </div>
-
       <header
         className="fixed z-50 w-full transition-all duration-300 bg-background/80 backdrop-blur-md"
         {...DRAG_REGION_ATTR}
@@ -2120,6 +2110,15 @@ function App() {
                 >
                   <Settings className="w-4 h-4" />
                 </Button>
+                {/* 新版本入口（上游 UpdateBadge）：默认显示，可在设置→通用关闭 */}
+                {settingsData?.showUpdateBadge !== false && (
+                  <UpdateBadge
+                    onClick={() => {
+                      setSettingsDefaultTab("about");
+                      setCurrentView("settings");
+                    }}
+                  />
+                )}
                 {isCurrentAppTakeoverActive && (
                   <Button
                     variant="ghost"
