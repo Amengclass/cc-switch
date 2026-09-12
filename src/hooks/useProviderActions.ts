@@ -9,6 +9,7 @@ import {
   openclawApi,
   type AppId,
 } from "@/lib/api";
+import { saveRemoteUsageScript } from "@/lib/api/remoteUsageScript";
 import type {
   Provider,
   UsageScript,
@@ -45,6 +46,8 @@ export function useProviderActions(
   activeApp: AppId,
   isProxyRunning?: boolean,
   isProxyTakeover?: boolean,
+  remoteTargetId?: string,
+  remoteContainerId?: string,
 ) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -380,6 +383,21 @@ export function useProviderActions(
   // 保存用量脚本
   const saveUsageScript = useCallback(
     async (provider: Provider, script: UsageScript) => {
+      // 远端目标：直接写远端 SSOT，不写本地 DB
+      // （P2 收敛：整段实现见 lib/api/remoteUsageScript，官方本机逻辑一字未动）
+      if (remoteTargetId) {
+        await saveRemoteUsageScript({
+          provider,
+          script,
+          remoteTargetId,
+          remoteContainerId,
+          activeApp,
+          queryClient,
+          t,
+        });
+        return;
+      }
+
       try {
         const updatedProvider: Provider = {
           ...provider,
@@ -420,7 +438,7 @@ export function useProviderActions(
         toast.error(detail);
       }
     },
-    [activeApp, queryClient, t],
+    [activeApp, queryClient, t, remoteTargetId, remoteContainerId],
   );
 
   // Set provider as default model (OpenClaw only)

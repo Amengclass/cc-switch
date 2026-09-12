@@ -86,10 +86,11 @@ describe("useDragSort", () => {
     ]);
   });
 
-  it("should call API and invalidate query cache after successful drag", async () => {
+  it("should call API and update query cache optimistically after successful drag", async () => {
     updateSortOrderMock.mockResolvedValue(true);
     const { wrapper, queryClient } = createWrapper();
     const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const setDataSpy = vi.spyOn(queryClient, "setQueryData");
 
     const { result } = renderHook(() => useDragSort(mockProviders, "claude"), {
       wrapper,
@@ -111,8 +112,15 @@ describe("useDragSort", () => {
       ],
       "claude",
     );
+    // 本机排序已改为「乐观更新」直接改缓存（避免 invalidateQueries 重拉导致列表闪回），
+    // 因此断言 setQueryData 而不是 invalidateQueries(["providers"])。
+    expect(setDataSpy).toHaveBeenCalledWith(
+      ["providers", "claude"],
+      expect.any(Function),
+    );
+    // 路由类 app（claude 属于）仍需让故障转移队列失效
     expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ["providers", "claude"],
+      queryKey: ["failoverQueue", "claude"],
     });
     expect(toastSuccessMock).toHaveBeenCalledTimes(1);
     expect(toastErrorMock).not.toHaveBeenCalled();

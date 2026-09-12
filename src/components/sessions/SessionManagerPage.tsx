@@ -22,6 +22,8 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  ChevronsUp,
+  ChevronsDown,
 } from "lucide-react";
 import {
   piKeys,
@@ -49,6 +51,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { deleteRemoteSession } from "@/lib/api/remote";
 import {
   Tooltip,
   TooltipContent,
@@ -189,15 +192,28 @@ const filterSetToAllowedValues = (
   return changed ? next : current;
 };
 
-export function SessionManagerPage({ appId }: { appId: string }) {
+export function SessionManagerPage({
+  appId,
+  remoteTargetId,
+  remoteContainerId,
+}: {
+  appId: string;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useSessionsQuery();
+  // 远程会话：一次拉取所有 app 的全量数据（对齐本机 sessionsApi.list()），
+  // providerFilter 客户端过滤
+  const { data, isLoading, isFetching, refetch } = useSessionsQuery(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const sessions = data ?? [];
   const piSessionDiscovery = useQuery({
     queryKey: piKeys.sessionDiscovery,
     queryFn: () => piApi.getSessionDiscovery(),
-    enabled: appId === "pi",
+    enabled: appId === "pi" && !remoteTargetId,
     staleTime: 30 * 1000,
   });
   const detailRef = useRef<HTMLDivElement | null>(null);
@@ -337,6 +353,10 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     useSessionMessagesQuery(
       selectedSession?.providerId,
       selectedSession?.sourcePath,
+      selectedSession?.sessionId,
+      remoteTargetId,
+      remoteContainerId,
+      selectedSession?.providerId,
     );
   const deleteSessionMutation = useDeleteSessionMutation();
   const isDeleting = deleteSessionMutation.isPending || isBatchDeleting;
@@ -346,7 +366,7 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     getScrollElement: () => scrollContainerRef.current,
     estimateSize: () => 120,
     overscan: 5,
-    gap: 12,
+    gap: 11,
   });
 
   useEffect(() => {
@@ -401,6 +421,19 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     setActiveMessageIndex(index);
     setTocDialogOpen(false);
     setTimeout(() => setActiveMessageIndex(null), 2000);
+  };
+
+  const scrollToTop = () => {
+    if (messages.length === 0) return;
+    virtualizer.scrollToIndex(0, { align: "start", behavior: "smooth" });
+  };
+
+  const scrollToBottom = () => {
+    if (messages.length === 0) return;
+    virtualizer.scrollToIndex(messages.length - 1, {
+      align: "end",
+      behavior: "smooth",
+    });
   };
 
   const handleCopy = useCallback(
@@ -461,6 +494,56 @@ export function SessionManagerPage({ appId }: { appId: string }) {
     setDeleteTargets(null);
 
     if (targets.length === 0) {
+      return;
+    }
+
+    // 远端目标：逐个删除（走 FileOps 远端实现），再刷新远端会话缓存
+    if (remoteTargetId) {
+      setIsBatchDeleting(true);
+      try {
+        let deletedCount = 0;
+        for (const target of targets) {
+          try {
+            await deleteRemoteSession(
+              remoteTargetId,
+              target.sourcePath!,
+              target.sessionId,
+              remoteContainerId,
+              target.providerId,
+            );
+            deletedCount += 1;
+            queryClient.removeQueries({
+              queryKey: [
+                "sessionMessages",
+                "remote",
+                remoteTargetId,
+                remoteContainerId ?? "__host__",
+                target.sourcePath,
+              ],
+            });
+          } catch (e) {
+            console.error("Failed to delete remote session:", e);
+          }
+        }
+        await queryClient.invalidateQueries({
+          queryKey: [
+            "sessions",
+            "remote",
+            remoteTargetId,
+            remoteContainerId ?? "__host__",
+          ],
+        });
+        if (deletedCount > 0) {
+          toast.success(
+            t("sessionManager.batchDeleteSuccess", {
+              defaultValue: "已删除 {{count}} 个会话",
+              count: deletedCount,
+            }),
+          );
+        }
+      } finally {
+        setIsBatchDeleting(false);
+      }
       return;
     }
 
@@ -1187,9 +1270,29 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                               variant="ghost"
                               size="icon"
                               className="size-7"
-                              onClick={() => void refetch()}
+                              onClick={() => {
+                                void refetch();
+                                // 同时刷新当前选中会话的消息内容（本机 + 远端通用）
+                                if (selectedSession?.sourcePath) {
+                                  void queryClient.invalidateQueries({
+                                    queryKey: [
+                                      "sessionMessages",
+                                      ...(remoteTargetId
+                                        ? [
+                                            "remote",
+                                            remoteTargetId,
+                                            remoteContainerId ?? "__host__",
+                                          ]
+                                        : [selectedSession.providerId]),
+                                      selectedSession.sourcePath,
+                                    ],
+                                  });
+                                }
+                              }}
                             >
-                              <RefreshCw className="size-3.5" />
+                              <RefreshCw
+                                className={`size-3.5 ${isFetching ? "animate-spin" : ""}`}
+                              />
                             </Button>
                           </TooltipTrigger>
                           <TooltipContent>{t("common.refresh")}</TooltipContent>
@@ -1666,8 +1769,8 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                   <CardContent className="flex-1 min-h-0 p-0">
                     <div className="flex h-full min-w-0">
                       {/* 消息列表 */}
-                      <div className="flex-1 min-w-0 flex flex-col">
-                        <div className="px-4 pt-4 pb-2 min-w-0">
+                      <div className="flex-1 min-w-0 flex flex-col relative">
+                        <div className="px-4 pt-[9px] pb-[9px] min-w-0">
                           <div className="flex items-center gap-2">
                             <MessageSquare className="size-4 text-muted-foreground" />
                             <span className="text-sm font-medium">
@@ -1678,11 +1781,19 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             <Badge variant="secondary" className="text-xs">
                               {messages.length}
                             </Badge>
+                            <div className="ml-auto">
+                              <SessionTocDialog
+                                items={userMessagesToc}
+                                onItemClick={scrollToMessage}
+                                open={tocDialogOpen}
+                                onOpenChange={setTocDialogOpen}
+                              />
+                            </div>
                           </div>
                         </div>
                         <div
                           ref={scrollContainerRef}
-                          className="flex-1 overflow-y-auto px-4 pb-4 min-w-0"
+                          className="flex-1 overflow-y-auto px-4 pb-0 min-w-0"
                         >
                           {isLoadingMessages ? (
                             <div className="flex items-center justify-center py-12">
@@ -1730,6 +1841,33 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                             </div>
                           )}
                         </div>
+                        {/* 滚动到顶/底 浮动按钮 */}
+                        {!isLoadingMessages && messages.length > 0 && (
+                          <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-10">
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="size-9 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background"
+                              onClick={scrollToTop}
+                              title={t("sessionManager.scrollToTop", {
+                                defaultValue: "到达最顶",
+                              })}
+                            >
+                              <ChevronsUp className="size-4" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="size-9 rounded-full bg-background/80 backdrop-blur-sm shadow-md hover:bg-background"
+                              onClick={scrollToBottom}
+                              title={t("sessionManager.scrollToBottom", {
+                                defaultValue: "到达最底",
+                              })}
+                            >
+                              <ChevronsDown className="size-4" />
+                            </Button>
+                          </div>
+                        )}
                       </div>
 
                       {/* 右侧目录 - 类似少数派 (大屏幕) */}
@@ -1738,14 +1876,6 @@ export function SessionManagerPage({ appId }: { appId: string }) {
                         onItemClick={scrollToMessage}
                       />
                     </div>
-
-                    {/* 浮动目录按钮 (小屏幕) */}
-                    <SessionTocDialog
-                      items={userMessagesToc}
-                      onItemClick={scrollToMessage}
-                      open={tocDialogOpen}
-                      onOpenChange={setTocDialogOpen}
-                    />
                   </CardContent>
                 </>
               )}

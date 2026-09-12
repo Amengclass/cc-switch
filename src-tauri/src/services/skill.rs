@@ -340,6 +340,9 @@ pub struct ImportSkillSelection {
     pub directory: String,
     #[serde(default)]
     pub apps: SkillApps,
+    /// 本地磁盘完整路径（远端导入时使用；本地导入忽略）
+    #[serde(default)]
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -622,7 +625,7 @@ impl SkillService {
             AppType::Gemini => home.join(".gemini").join("skills"),
             AppType::GrokBuild => home.join(".grok").join("skills"),
             AppType::OpenCode => home.join(".config").join("opencode").join("skills"),
-            AppType::OpenClaw => home.join(".openclaw").join("skills"),
+            AppType::OpenClaw => home.join(".openclaw").join("workspace").join("skills"),
             AppType::Hermes => crate::hermes_config::get_hermes_dir().join("skills"),
             AppType::Pi => crate::pi_config::get_pi_agent_dir()?.join("skills"),
         })
@@ -762,6 +765,82 @@ impl SkillService {
     /// 1. 下载到 SSOT 目录
     /// 2. 保存到数据库
     /// 3. 同步到启用的应用目录
+    ///    下载 `DiscoverableSkill` 对应的仓库并解析出技能源目录（含路径安全检查）。
+    ///
+    /// 返回 `(临时目录守卫, 规范化后的临时根目录, 规范化后的源目录, 实际使用的分支)`。
+    /// 临时目录守卫必须保持存活直到调用方完成复制/上传，防止半成品目录被回收；
+    /// 规范化后的临时根目录供调用方推导文档路径（#6119）。
+    ///
+    /// 本地 `install` 与远端「发现技能安装」共用这一条下载路径，保证两端的坐标
+    /// 校验、超时、归档预算、路径安全检查完全一致。
+    pub(crate) async fn download_and_resolve_skill_source(
+        &self,
+        skill: &DiscoverableSkill,
+    ) -> Result<(tempfile::TempDir, PathBuf, PathBuf, String)> {
+        let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
+            anyhow!(format_skill_error(
+                "INVALID_SKILL_DIRECTORY",
+                &[("directory", &skill.directory)],
+                Some("checkZipContent"),
+            ))
+        })?;
+
+        let repo = SkillRepo {
+            owner: skill.repo_owner.clone(),
+            name: skill.repo_name.clone(),
+            branch: skill.repo_branch.clone(),
+            enabled: true,
+        };
+
+        let (temp_guard, used_branch) = timeout(
+            std::time::Duration::from_secs(60),
+            self.download_repo(&repo),
+        )
+        .await
+        .map_err(|_| {
+            anyhow!(format_skill_error(
+                "DOWNLOAD_TIMEOUT",
+                &[
+                    ("owner", &repo.owner),
+                    ("name", &repo.name),
+                    ("timeout", "60")
+                ],
+                Some("checkNetwork"),
+            ))
+        })??;
+        let temp_dir = temp_guard.path();
+
+        let source =
+            Self::resolve_skill_source_dir(temp_dir, &skill.directory).ok_or_else(|| {
+                let missing = temp_dir.join(&source_rel).display().to_string();
+                anyhow!(format_skill_error(
+                    "SKILL_DIR_NOT_FOUND",
+                    &[("path", &missing)],
+                    Some("checkRepoUrl"),
+                ))
+            })?;
+
+        let canonical_temp = temp_dir
+            .canonicalize()
+            .unwrap_or_else(|_| temp_dir.to_path_buf());
+        let canonical_source = source.canonicalize().map_err(|_| {
+            anyhow!(format_skill_error(
+                "SKILL_DIR_NOT_FOUND",
+                &[("path", &source.display().to_string())],
+                Some("checkRepoUrl"),
+            ))
+        })?;
+        if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
+            return Err(anyhow!(format_skill_error(
+                "INVALID_SKILL_DIRECTORY",
+                &[("directory", &skill.directory)],
+                Some("checkZipContent"),
+            )));
+        }
+
+        Ok((temp_guard, canonical_temp, canonical_source, used_branch))
+    }
+
     pub async fn install(
         &self,
         db: &Arc<Database>,
@@ -810,67 +889,16 @@ impl SkillService {
 
         // 如果已存在则跳过下载
         if !dest.exists() {
-            let repo = SkillRepo {
-                owner: skill.repo_owner.clone(),
-                name: skill.repo_name.clone(),
-                branch: skill.repo_branch.clone(),
-                enabled: true,
-            };
-
-            // 下载仓库
-            let (temp_guard, used_branch) = timeout(
-                std::time::Duration::from_secs(60),
-                self.download_repo(&repo),
-            )
-            .await
-            .map_err(|_| {
-                anyhow!(format_skill_error(
-                    "DOWNLOAD_TIMEOUT",
-                    &[
-                        ("owner", &repo.owner),
-                        ("name", &repo.name),
-                        ("timeout", "60")
-                    ],
-                    Some("checkNetwork"),
-                ))
-            })??;
-            let temp_dir = temp_guard.path();
+            let (_temp_guard, canonical_temp, canonical_source, used_branch) =
+                self.download_and_resolve_skill_source(skill).await?;
             repo_branch = used_branch;
 
-            // 复制到 SSOT
-            let source =
-                Self::resolve_skill_source_dir(temp_dir, &skill.directory).ok_or_else(|| {
-                    let missing = temp_dir.join(&source_rel).display().to_string();
-                    anyhow!(format_skill_error(
-                        "SKILL_DIR_NOT_FOUND",
-                        &[("path", &missing)],
-                        Some("checkRepoUrl"),
-                    ))
-                })?;
-
-            let canonical_temp = temp_dir
-                .canonicalize()
-                .unwrap_or_else(|_| temp_dir.to_path_buf());
-            let canonical_source = source.canonicalize().map_err(|_| {
-                anyhow!(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
-                    &[("path", &source.display().to_string())],
-                    Some("checkRepoUrl"),
-                ))
-            })?;
-            if !canonical_source.starts_with(&canonical_temp) || !canonical_source.is_dir() {
-                return Err(anyhow!(format_skill_error(
-                    "INVALID_SKILL_DIRECTORY",
-                    &[("directory", &skill.directory)],
-                    Some("checkZipContent"),
-                )));
-            }
-
+            // 复制到 SSOT（_temp_guard 在本块结束时释放，确保源目录存活）
             // 用真实解析出的源目录推导文档路径——skills.sh 的 directory 只是
             // skillId（末级目录名），嵌套目录场景直接拼接会丢路径、链接 404（#6111）
             resolved_doc_path = Self::doc_path_for_source(&canonical_temp, &canonical_source);
 
-            downloaded_source = Some((temp_guard, canonical_source));
+            downloaded_source = Some((_temp_guard, canonical_source));
 
             // 使用实际下载成功的分支，避免 readme_url / repo_branch 与真实分支不一致。
             if repo_branch != skill.repo_branch {
@@ -2007,6 +2035,22 @@ impl SkillService {
 
             // 其他应用保存用户选择；Pi 的 exists=active 必须直接来自原生目录。
             let mut apps = selection.apps;
+
+            // 勾选 = 同步落盘到对应 app 的 skills 目录；全灭则只进 SSOT 托管。
+            // Pi 保留原逻辑单独处理（含同名冲突保护）。
+            for app in AppType::all() {
+                if matches!(app, AppType::Pi) {
+                    continue;
+                }
+                if apps.is_enabled_for(&app) {
+                    Self::sync_to_app_dir(&dir_name, &app)?;
+                }
+            }
+
+            // Pi 的 exists=active 必须直接来自原生目录。
+            if apps.pi {
+                Self::sync_to_app_dir(&dir_name, &AppType::Pi)?;
+            }
             apps.pi = Self::skill_exists_in_app(&dir_name, &AppType::Pi);
 
             // 从 lock 文件提取仓库信息
@@ -3783,7 +3827,8 @@ impl SkillService {
     /// 同步等一长串 `?`，任何一处提前返回都会把最多 512 MiB 的临时内容永久留在
     /// 磁盘上。守卫交给调用方持有，清理就变成作用域结束时自动发生，不再依赖每条
     /// 出口都记得手写 `remove_dir_all`（实测漏了不止一条）。
-    fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
+    /// 解压本地 ZIP 到临时目录（远程安装复用：解压 → 扫描 SKILL.md → 上传远端）。
+    pub(crate) fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
         Self::extract_local_zip_in(zip_path, &std::env::temp_dir())
     }
 
@@ -3870,8 +3915,8 @@ impl SkillService {
         Ok(temp_dir)
     }
 
-    /// 递归扫描目录查找包含 SKILL.md 的技能目录
-    fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    /// 递归扫描目录查找包含 SKILL.md 的技能目录（远程安装复用）。
+    pub(crate) fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut skill_dirs = Vec::new();
         Self::scan_skills_recursive(dir, &mut skill_dirs)?;
         Ok(skill_dirs)
@@ -4967,6 +5012,7 @@ mod tests {
             vec![ImportSkillSelection {
                 directory: "native-skill".to_string(),
                 apps: SkillApps::default(),
+                path: None,
             }],
         )
         .expect("import native Pi skill");
@@ -4974,6 +5020,47 @@ mod tests {
         assert_eq!(imported.len(), 1);
         assert!(imported[0].apps.pi);
         assert!(SkillService::get_all_installed(&db).unwrap()[0].apps.pi);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn importing_pi_selection_deploys_to_pi_directory() {
+        let temp = tempdir().expect("tempdir");
+        let _home = TestHomeGuard::set(temp.path());
+        let _pi_dir = crate::pi_config::test_support::TestAgentDir::new();
+        let db = std::sync::Arc::new(Database::memory().expect("memory db"));
+
+        // 在 Claude 目录放一个未管理的技能（源目录），勾选 Pi 导入。
+        let claude_dir = SkillService::get_app_skills_dir(&AppType::Claude)
+            .unwrap()
+            .join("test-skill");
+        write_skill(&claude_dir, "test-skill");
+
+        let mut apps = SkillApps::default();
+        apps.set_enabled_for(&AppType::Pi, true);
+
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "test-skill".to_string(),
+                apps,
+                path: None,
+            }],
+        )
+        .expect("import with Pi selected");
+
+        assert_eq!(imported.len(), 1);
+        assert!(
+            imported[0].apps.pi,
+            "勾选 Pi 导入后 apps.pi 应为 true"
+        );
+        let pi_dest = SkillService::get_app_skills_dir(&AppType::Pi)
+            .unwrap()
+            .join("test-skill");
+        assert!(
+            pi_dest.is_dir(),
+            "勾选 Pi 导入后应真正部署到 ~/.pi/agent/skills"
+        );
     }
 
     #[test]

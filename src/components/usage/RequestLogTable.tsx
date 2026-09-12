@@ -17,6 +17,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useRequestLogs } from "@/lib/query/usage";
 import {
   getFreshInputTokens,
@@ -32,6 +38,32 @@ import {
   getLocaleFromLanguage,
   parseFiniteNumber,
 } from "./format";
+
+const STATUS_CODE_HINTS: Record<number, string> = {
+  200: "请求成功",
+  301: "地址已永久变更，请更新链接",
+  302: "地址临时变更，自动跳转",
+  304: "内容未变化，使用缓存",
+  400: "请求格式有误，请检查参数",
+  401: "未登录或 Token 已过期",
+  403: "已登录但无权访问",
+  404: "资源不存在或已删除",
+  408: "服务器等待超时，请重试",
+  429: "请求太频繁，请稍后再试",
+  500: "服务器内部异常",
+  502: "上游服务返回了无效数据",
+  503: "上游服务暂时不可用，请稍后重试",
+  504: "上游服务响应超时",
+};
+
+function getStatusHint(code: number): string {
+  if (STATUS_CODE_HINTS[code]) return STATUS_CODE_HINTS[code];
+  if (code >= 200 && code < 300) return "成功";
+  if (code >= 300 && code < 400) return "重定向";
+  if (code >= 400 && code < 500) return "客户端错误";
+  if (code >= 500 && code < 600) return "服务器错误";
+  return "HTTP 状态码";
+}
 
 interface RequestLogTableProps {
   range: UsageRangeSelection;
@@ -109,6 +141,7 @@ export function RequestLogTable({
   const locale = getLocaleFromLanguage(language);
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="space-y-4">
       <div className="rounded-lg border bg-card/50 p-2 backdrop-blur-sm">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -299,15 +332,25 @@ export function RequestLogTable({
                           )}
                         </TableCell>
                         <TableCell className="text-center">
-                          <span
-                            className={
-                              log.statusCode >= 200 && log.statusCode < 300
-                                ? "text-green-600"
-                                : "text-red-600"
-                            }
-                          >
-                            {log.statusCode}
-                          </span>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={
+                                  log.statusCode >= 200 && log.statusCode < 300
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }
+                              >
+                                {log.statusCode}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className={log.statusCode >= 200 && log.statusCode < 300
+                                ? "bg-green-600/80 backdrop-blur-sm text-white"
+                                : "bg-red-600/80 backdrop-blur-sm text-white"
+                              }>
+                              {log.statusCode} {getStatusHint(log.statusCode)}
+                            </TooltipContent>
+                          </Tooltip>
                         </TableCell>
                         <TableCell className="text-center text-xs text-muted-foreground">
                           {log.dataSource || "proxy"}
@@ -400,5 +443,6 @@ export function RequestLogTable({
         </>
       )}
     </div>
+    </TooltipProvider>
   );
 }

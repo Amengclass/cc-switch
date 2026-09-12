@@ -48,6 +48,19 @@ fn merge_settings_for_save(
     // 开关）后、前端 query 缓存刷新前的一次全量保存会把旧 marker 重放回来，
     // 重新开启时被"复活"的标记挡住而漏迁。
     incoming.local_migrations = existing.local_migrations.clone();
+    // floating_locked 由设置页「固定当前位置」开关管理；若某些保存路径未携带该字段
+    // （None，如旧版前端），保留现有值避免被清掉。
+    if incoming.floating_locked.is_none() {
+        incoming.floating_locked = existing.floating_locked;
+    }
+    // floating_opacity 同理：设置页滑块；旧版/未携带该字段的保存路径不清掉已有值。
+    if incoming.floating_opacity.is_none() {
+        incoming.floating_opacity = existing.floating_opacity;
+    }
+    // floating_auto_collapse：边缘自动收起开关
+    if incoming.floating_auto_collapse.is_none() {
+        incoming.floating_auto_collapse = existing.floating_auto_collapse;
+    }
     incoming
 }
 
@@ -60,6 +73,7 @@ pub async fn get_settings() -> Result<crate::settings::AppSettings, String> {
 /// 保存设置
 #[tauri::command]
 pub async fn save_settings(
+    app: tauri::AppHandle,
     state: tauri::State<'_, crate::store::AppState>,
     settings: crate::settings::AppSettings,
 ) -> Result<bool, String> {
@@ -68,7 +82,23 @@ pub async fn save_settings(
     let unify_codex_changed =
         merged.unify_codex_session_history != existing.unify_codex_session_history;
     let unify_codex_enabled = merged.unify_codex_session_history;
+    let floating_changed = merged.enable_floating_window != existing.enable_floating_window;
+    let floating_enabled = merged.enable_floating_window;
+    let auto_collapse_changed =
+        merged.floating_auto_collapse != existing.floating_auto_collapse;
+    let auto_collapse_disabled = !merged.floating_auto_collapse.unwrap_or(false);
     crate::settings::update_settings(merged).map_err(|e| e.to_string())?;
+
+    // 悬浮窗开关变更时创建/销毁悬浮球窗口（仅当用户显式切换才动作）
+    if floating_changed {
+        crate::floating::apply_floating_window_setting(&app, floating_enabled);
+    }
+    // 边缘收起开关关闭时，若球处于收起状态则立即展开
+    if auto_collapse_changed && auto_collapse_disabled {
+        if crate::floating::is_ball_collapsed() {
+            crate::floating::expand_ball(&app);
+        }
+    }
 
     // 统一会话开关变更时立即重写当前官方 Codex 供应商的 live 配置，
     // 不必等下一次切换才生效。

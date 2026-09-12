@@ -205,7 +205,9 @@ fn schema_migration_sets_user_version_when_missing() {
 fn schema_migration_rejects_future_version() {
     let conn = Connection::open_in_memory().expect("open memory db");
     Database::create_tables_on_conn(&conn).expect("create tables");
-    Database::set_user_version(&conn, SCHEMA_VERSION + 1).expect("set future version");
+    // 真正过新的是高于 SCHEMA_VERSION 的版本。
+    Database::set_user_version(&conn, SCHEMA_VERSION + 1)
+        .expect("set future version");
 
     let err =
         Database::apply_schema_migrations_on_conn(&conn).expect_err("should reject higher version");

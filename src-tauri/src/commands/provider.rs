@@ -122,14 +122,26 @@ pub async fn switch_provider(
     id: String,
 ) -> Result<SwitchResult, String> {
     let app_type = AppType::from_str(&app).map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app_handle
+    let app_type_log = app_type.as_str().to_string();
+    let id_log = id.clone();
+    let handle = app_handle.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let state = handle
             .try_state::<AppState>()
             .ok_or_else(|| "应用状态不可用".to_string())?;
         switch_provider_internal(state.inner(), app_type, &id).map_err(|e| e.to_string())
     })
     .await
-    .map_err(|e| format!("供应商切换任务执行失败: {e}"))?
+    .map_err(|e| format!("供应商切换任务执行失败: {e}"))?;
+
+    // 主窗口手动切换不经过 failover / profile / 托盘路径（那些各有
+    // provider-switched 事件），悬浮窗面板/小球靠事件驱动刷新，这里补一个
+    // 悬浮窗专用事件让面板重新读缓存。用量查询由主窗口自身
+    // （useUsageQuery 因 providerId 变化自动发起）完成，悬浮窗不查 API。
+    log::info!("[Provider] 手动切换成功 {app_type_log} -> {id_log}，emit floating-data-refresh");
+    let _ = app_handle.emit("floating-data-refresh", ());
+
+    result
 }
 
 fn import_default_config_internal(state: &AppState, app_type: AppType) -> Result<bool, AppError> {
@@ -471,14 +483,14 @@ pub async fn queryProviderUsage(
     //      不写失败快照、不 emit：保留上一份托盘快照，与前端 react-query reject
     //      保留上次 data 的语义一致；否则失败快照会经 useUsageCacheBridge 盲写
     //      回 query 缓存，抹掉 reject 本该保留的旧值。
-    let inner = query_provider_usage_inner(
-        &state,
-        &copilot_state,
-        &xai_state,
-        app_type.clone(),
-        &providerId,
-    )
-    .await;
+    let inner = {
+        let providers = state
+            .db
+            .get_all_providers(app_type.as_str())
+            .map_err(|e| format!("Failed to get providers: {e}"))?;
+        let provider = providers.get(&providerId);
+        query_usage_for_provider(provider, &copilot_state, &xai_state, app_type.clone()).await
+    };
     if let Ok(snapshot) = &inner {
         let payload = serde_json::json!({
             "kind": "script",
@@ -541,19 +553,16 @@ fn resolve_coding_plan_credentials(
     }
 }
 
-async fn query_provider_usage_inner(
-    state: &AppState,
+/// 按供应商的 usage_script 与模板类型分派余量查询。不读取任何数据库，
+/// provider 由调用方提供（本机从 SQLite、远端从远端 SSOT）。这样远端场景
+/// 与本机共用同一份分派逻辑，保证两边行为一致（远端向本机看齐）。
+#[allow(clippy::too_many_arguments)]
+pub async fn query_usage_for_provider(
+    provider: Option<&crate::provider::Provider>,
     copilot_state: &CopilotAuthState,
     xai_state: &XaiOAuthState,
     app_type: AppType,
-    provider_id: &str,
 ) -> Result<crate::provider::UsageResult, String> {
-    // 从数据库读取供应商信息，检查特殊模板类型
-    let providers = state
-        .db
-        .get_all_providers(app_type.as_str())
-        .map_err(|e| format!("Failed to get providers: {e}"))?;
-    let provider = providers.get(provider_id);
     let usage_script = provider
         .and_then(|p| p.meta.as_ref())
         .and_then(|m| m.usage_script.as_ref());
@@ -612,6 +621,7 @@ async fn query_provider_usage_inner(
         let team_organization_id = usage_script.and_then(|s| s.team_organization_id.clone());
         let team_project_id = usage_script.and_then(|s| s.team_project_id.clone());
 
+
         let quota = crate::services::coding_plan::get_coding_plan_quota(
             &base_url,
             &api_key,
@@ -620,6 +630,7 @@ async fn query_provider_usage_inner(
             coding_plan_provider.as_deref(),
             team_organization_id.as_deref(),
             team_project_id.as_deref(),
+
         )
         .await
         .map_err(|e| format!("Failed to query coding plan: {e}"))?;
@@ -758,7 +769,10 @@ async fn query_provider_usage_inner(
     }
 
     // ── 通用 JS 脚本路径 ──
-    ProviderService::query_usage(state, app_type, provider_id)
+    let Some(provider) = provider else {
+        return Err("供应商不存在".to_string());
+    };
+    crate::services::provider::usage::execute_usage_for_provider(provider, &app_type)
         .await
         .map_err(|e| e.to_string())
 }

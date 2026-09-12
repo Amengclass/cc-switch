@@ -28,6 +28,7 @@ export const APP_IDS: AppId[] = [
   "pi",
 ];
 
+/** App IDs shown in Skills panels */
 export const DEFAULT_VISIBLE_APPS: VisibleApps = {
   claude: true,
   "claude-desktop": true,
@@ -47,6 +48,7 @@ export const SKILLS_APP_IDS: AppId[] = [
   "gemini",
   "grokbuild",
   "opencode",
+  "openclaw",
   "hermes",
   "pi",
 ];
@@ -98,6 +100,48 @@ export const MCP_APP_IDS: McpAppId[] = [
 export function isMcpAppId(appId: string): appId is McpAppId {
   return (MCP_APP_IDS as string[]).includes(appId);
 }
+
+/**
+ * 各 app 的 CLI 安装命令（本机 / 远端），key 与 APP_ICON_MAP 一致。
+ * 包名如有出入请按各 CLI 官方文档修正。
+ */
+export const APP_INSTALL_CMDS: Record<
+  string,
+  { local: string; remote: string }
+> = {
+  claude: {
+    local: "npm i -g @anthropic-ai/claude-code",
+    remote: "npm i -g @anthropic-ai/claude-code",
+  },
+  codex: {
+    local: "npm i -g @openai/codex",
+    remote: "npm i -g @openai/codex",
+  },
+  gemini: {
+    local: "npm i -g @google/gemini-cli",
+    remote: "npm i -g @google/gemini-cli",
+  },
+  grokbuild: {
+    local: "npm i -g @grok/grok-cli",
+    remote: "npm i -g @grok/grok-cli",
+  },
+  opencode: {
+    local: "npm i -g opencode-ai",
+    remote: "npm i -g opencode-ai",
+  },
+  openclaw: {
+    local: "npm i -g openclaw",
+    remote: "npm i -g openclaw",
+  },
+  hermes: {
+    local: "npm i -g hermes-cli",
+    remote: "npm i -g hermes-cli",
+  },
+  pi: {
+    local: "npm i -g @earendil-works/pi-coding-agent@latest",
+    remote: "npm i -g @earendil-works/pi-coding-agent@latest",
+  },
+};
 
 export const APP_ICON_MAP: Record<AppId, AppConfig> = {
   claude: {

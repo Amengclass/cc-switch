@@ -3,10 +3,10 @@
 //! Handles provider CRUD operations, switching, and configuration management.
 
 mod endpoints;
-mod gemini_auth;
-mod live;
+pub(crate) mod gemini_auth;
+pub(crate) mod live;
 mod pi;
-mod usage;
+pub(crate) mod usage;
 
 use indexmap::IndexMap;
 use regex::Regex;

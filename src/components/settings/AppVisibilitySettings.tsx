@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { FolderOpen } from "lucide-react";
+import { ArrowUpCircle, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ToggleRow } from "@/components/ui/toggle-row";
 import { cn } from "@/lib/utils";
@@ -88,13 +88,28 @@ export function AppVisibilitySettings({
           );
         })}
       </div>
-      <ToggleRow
-        icon={<FolderOpen className="h-4 w-4 text-emerald-500" />}
-        title={t("settings.appVisibility.showProfileSwitcher")}
-        description={t("settings.appVisibility.showProfileSwitcherDescription")}
-        checked={settings.showProfileSwitcher ?? true}
-        onCheckedChange={(value) => onChange({ showProfileSwitcher: value })}
-      />
+      <div className="space-y-3">
+        <ToggleRow
+          icon={<FolderOpen className="h-4 w-4 text-emerald-500" />}
+          title={t("settings.appVisibility.showProfileSwitcher")}
+          description={t(
+            "settings.appVisibility.showProfileSwitcherDescription",
+          )}
+          checked={settings.showProfileSwitcher ?? true}
+          onCheckedChange={(value) => onChange({ showProfileSwitcher: value })}
+        />
+        {/* 与「项目切换」同类：都是主页面顶部入口的显隐控制。
+            关闭仅隐藏图标，后台自动检查更新不受影响（「关于」页仍可手动检查）。 */}
+        <ToggleRow
+          icon={
+            <ArrowUpCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+          }
+          title={t("settings.appVisibility.showUpdateBadge")}
+          description={t("settings.appVisibility.showUpdateBadgeDescription")}
+          checked={settings.showUpdateBadge !== false}
+          onCheckedChange={(value) => onChange({ showUpdateBadge: value })}
+        />
+      </div>
     </section>
   );
 }

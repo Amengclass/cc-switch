@@ -12,7 +12,7 @@ use crate::error::AppError;
 use crate::services::usage_cache::UsageCache;
 use crate::store::AppState;
 
-const TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION: &str = "official_subscription";
+pub(crate) const TEMPLATE_TYPE_OFFICIAL_SUBSCRIPTION: &str = "official_subscription";
 const H_TIER_NAMES: &[&str] = &[crate::services::subscription::TIER_FIVE_HOUR];
 const W_TIER_NAMES: &[&str] = &[
     crate::services::subscription::TIER_WEEKLY_LIMIT,
@@ -59,6 +59,7 @@ pub struct TrayTexts {
     pub open_website: &'static str,
     pub no_providers_label: &'static str,
     pub lightweight_mode: &'static str,
+    pub floating_window: &'static str,
     pub quit: &'static str,
     pub _auto_label: &'static str,
     pub projects_label: &'static str,
@@ -108,6 +109,7 @@ impl TrayTexts {
                 open_website: "Open Official Website",
                 no_providers_label: "(no providers)",
                 lightweight_mode: "Lightweight Mode",
+                floating_window: "Floating Widget",
                 quit: "Quit",
                 _auto_label: "Auto (Failover)",
                 projects_label: "Projects",
@@ -118,6 +120,7 @@ impl TrayTexts {
                 open_website: "公式サイトを開く",
                 no_providers_label: "(プロバイダーなし)",
                 lightweight_mode: "軽量モード",
+                floating_window: "フローティングコンポーネント",
                 quit: "終了",
                 _auto_label: "自動 (フェイルオーバー)",
                 projects_label: "プロジェクト",
@@ -128,6 +131,7 @@ impl TrayTexts {
                 open_website: "開啟官方網站",
                 no_providers_label: "(無供應商)",
                 lightweight_mode: "輕量模式",
+                floating_window: "懸浮窗",
                 quit: "退出",
                 _auto_label: "自動 (故障轉移)",
                 projects_label: "專案",
@@ -138,6 +142,7 @@ impl TrayTexts {
                 open_website: "打开官方网站",
                 no_providers_label: "(无供应商)",
                 lightweight_mode: "轻量模式",
+                floating_window: "悬浮窗",
                 quit: "退出",
                 _auto_label: "自动 (故障转移)",
                 projects_label: "项目",
@@ -195,7 +200,7 @@ pub const TRAY_SECTIONS: [TrayAppSection; 4] = [
 const UTIL_WARN_PCT: f64 = 70.0;
 const UTIL_DANGER_PCT: f64 = 90.0;
 
-fn emoji_for_utilization(pct: f64) -> &'static str {
+pub(crate) fn emoji_for_utilization(pct: f64) -> &'static str {
     if pct >= UTIL_DANGER_PCT {
         "\u{1F534}" // 🔴
     } else if pct >= UTIL_WARN_PCT {
@@ -205,7 +210,7 @@ fn emoji_for_utilization(pct: f64) -> &'static str {
     }
 }
 
-fn format_subscription_summary(
+pub(crate) fn format_subscription_summary(
     quota: &crate::services::subscription::SubscriptionQuota,
 ) -> Option<String> {
     if !quota.success {
@@ -241,7 +246,7 @@ fn format_subscription_summary(
     Some(format!("{emoji} {body}"))
 }
 
-fn labeled_tier_parts(entries: &[(&str, f64)]) -> Vec<(&'static str, f64)> {
+pub(crate) fn labeled_tier_parts(entries: &[(&str, f64)]) -> Vec<(&'static str, f64)> {
     let mut parts = Vec::new();
     for &(label, tier_names) in TIER_LABEL_GROUPS {
         let max_utilization = entries
@@ -257,14 +262,14 @@ fn labeled_tier_parts(entries: &[(&str, f64)]) -> Vec<(&'static str, f64)> {
     parts
 }
 
-fn tier_pct(data: &crate::provider::UsageData) -> Option<f64> {
+pub(crate) fn tier_pct(data: &crate::provider::UsageData) -> Option<f64> {
     match (data.used, data.total) {
         (Some(used), Some(total)) if total > 0.0 => Some(used / total * 100.0),
         _ => None,
     }
 }
 
-fn format_script_summary(result: &crate::provider::UsageResult) -> Option<String> {
+pub(crate) fn format_script_summary(result: &crate::provider::UsageResult) -> Option<String> {
     if !result.success {
         return None;
     }
@@ -320,7 +325,7 @@ fn managed_codex_account_id(provider: &crate::provider::Provider) -> Option<Stri
     None
 }
 
-fn provider_uses_official_subscription(provider: &crate::provider::Provider) -> bool {
+pub(crate) fn provider_uses_official_subscription(provider: &crate::provider::Provider) -> bool {
     // Managed Codex uses the account-scoped path in tray_usage_source instead
     // of the CLI's app-wide subscription cache.
     if managed_codex_account_id(provider).is_some() {
@@ -368,7 +373,7 @@ fn tray_usage_source(
     .then_some(TrayUsageSource::Script)
 }
 
-fn format_usage_suffix(
+pub(crate) fn format_usage_suffix(
     usage_cache: &UsageCache,
     app_type: &AppType,
     provider: &crate::provider::Provider,
@@ -674,6 +679,8 @@ fn handle_auto_click(app: &tauri::AppHandle, app_type: &AppType) -> Result<(), A
         if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
             log::error!("发射 proxy-flags-changed 事件失败: {e}");
         }
+        // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+        crate::floating::record_active_app_sync(app, app_type_str);
         // 发射 provider-switched 事件（保持向后兼容，Auto 切换也算一种切换）
         if let Err(e) = app.emit("provider-switched", event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
@@ -718,6 +725,8 @@ fn handle_provider_click(
         if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
             log::error!("发射 proxy-flags-changed 事件失败: {e}");
         }
+        // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+        crate::floating::record_active_app_sync(app, app_type_str);
         // 发射 provider-switched 事件（保持向后兼容）
         if let Err(e) = app.emit("provider-switched", event_data) {
             log::error!("发射 provider-switched 事件失败: {e}");
@@ -948,7 +957,16 @@ pub fn create_tray_menu(
     )
     .map_err(|e| AppError::Message(format!("创建轻量模式菜单失败: {e}")))?;
 
-    menu_builder = menu_builder.item(&lightweight_item).separator();
+    let floating_window_item = crate::floating::tray_menu_item(
+        app,
+        tray_texts.floating_window,
+        app_settings.enable_floating_window,
+    )?;
+
+    menu_builder = menu_builder
+        .item(&lightweight_item)
+        .item(&floating_window_item)
+        .separator();
 
     // 退出菜单（分隔符已在上面的 section 循环中添加）
     let quit_item = MenuItem::with_id(app, "quit", tray_texts.quit, true, None::<&str>)
@@ -1082,6 +1100,10 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
             } else if let Err(e) = crate::lightweight::enter_lightweight_mode(app) {
                 log::error!("进入轻量模式失败: {e}");
             }
+        }
+        "floating_window" => {
+            crate::floating::toggle_from_tray(app);
+            refresh_tray_menu(app);
         }
         "quit" => {
             log::info!("退出应用");

@@ -24,3 +24,12 @@ pub(crate) fn update_pi_provider_usage_script(
 pub(crate) fn get_pi_session_discovery() -> PiSessionDiscovery {
     crate::session_manager::providers::pi::session_discovery()
 }
+
+/// 获取 Pi live 配置中的供应商 ID 列表
+/// 用于前端判断供应商是否已添加到 models.json
+#[tauri::command]
+pub(crate) fn get_pi_live_provider_ids() -> Result<Vec<String>, String> {
+    crate::pi_config::read_pi_native_providers()
+        .map(|providers| providers.keys().cloned().collect())
+        .map_err(|e| e.to_string())
+}

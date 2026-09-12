@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "CC Switch",
+  "productName": "CC Switch Magic",
   "version": "3.20.3",
   "identifier": "com.ccswitch.desktop",
   "build": {
@@ -31,12 +31,13 @@
         "enable": true,
         "scope": []
       }
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "createUpdaterArtifacts": true,
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -56,7 +57,9 @@
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["ccswitch"]
+        "schemes": [
+          "ccswitch"
+        ]
       }
     },
     "updater": {

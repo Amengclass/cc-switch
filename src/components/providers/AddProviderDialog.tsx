@@ -38,6 +38,8 @@ interface AddProviderDialogProps {
       ensureGrokBuildOfficialSeed?: boolean;
     },
   ) => Promise<void> | void;
+  /** 远端目标下已存在的供应商 key 集合（添加时重复校验用） */
+  remoteExistingKeys?: string[];
 }
 
 export function AddProviderDialog({
@@ -45,6 +47,7 @@ export function AddProviderDialog({
   onOpenChange,
   appId,
   onSubmit,
+  remoteExistingKeys,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
   // OpenCode and OpenClaw don't support universal providers
@@ -433,6 +436,7 @@ export function AddProviderDialog({
               onSubmittingChange={setIsFormSubmitting}
               onSubmitReadyChange={handleSubmitReadyChange}
               showButtons={false}
+              remoteExistingKeys={remoteExistingKeys}
             />
           </TabsContent>
 
@@ -451,6 +455,7 @@ export function AddProviderDialog({
           onSubmittingChange={setIsFormSubmitting}
           onSubmitReadyChange={handleSubmitReadyChange}
           showButtons={false}
+          remoteExistingKeys={remoteExistingKeys}
         />
       )}
 

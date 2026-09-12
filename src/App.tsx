@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Plus,
+  Send,
   Settings,
   ArrowLeft,
   Minus,
@@ -25,6 +26,7 @@ import {
   Shield,
   Cpu,
   LayoutDashboard,
+  Server,
   Loader2,
   RefreshCw,
 } from "lucide-react";
@@ -41,6 +43,7 @@ import {
 } from "@/lib/api";
 import { checkAllEnvConflicts, checkEnvConflicts } from "@/lib/api/env";
 import { useProviderActions } from "@/hooks/useProviderActions";
+import { useRemoteTarget } from "@/hooks/useRemoteTarget";
 import { openclawKeys, useOpenClawHealth } from "@/hooks/useOpenClaw";
 import { hermesKeys, useOpenHermesWebUI } from "@/hooks/useHermes";
 import { hermesApi } from "@/lib/api/hermes";
@@ -48,7 +51,10 @@ import { useProxyStatus } from "@/hooks/useProxyStatus";
 import { useUsageCacheBridge } from "@/hooks/useUsageCacheBridge";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
-import { useScanUnmanagedSkills } from "@/hooks/useSkills";
+import {
+  useScanUnmanagedSkills,
+  useRemoteUnmanagedSkillsQuery,
+} from "@/hooks/useSkills";
 import {
   extractErrorMessage,
   translatePiProviderMutationError,
@@ -63,16 +69,35 @@ import {
   DRAG_REGION_STYLE,
 } from "@/lib/platform";
 import { AppSwitcher } from "@/components/AppSwitcher";
+import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
+import { InstallCommandPopover } from "@/components/remote/InstallCommandPopover";
+import { APP_INSTALL_CMDS } from "@/config/appConfig";
+import {
+
+  getRemoteOpenClawDefaultModel,
+  setRemoteOpenClawDefaultModel,
+  removeRemoteProviderFromLive,
+  addRemoteProvider,
+  updateRemoteProvider,
+  deleteRemoteProvider,
+  type RemoteProvidersView,
+} from "@/lib/api/remote";
+import {
+  useRemoteProvidersQuery,
+  useSwitchRemoteProviderMutation,
+} from "@/lib/query/remoteMutations";
+
 import { ProfileSwitcher } from "@/components/profiles/ProfileSwitcher";
 import { ProviderList } from "@/components/providers/ProviderList";
 import { AddProviderDialog } from "@/components/providers/AddProviderDialog";
 import { EditProviderDialog } from "@/components/providers/EditProviderDialog";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { SettingsPage } from "@/components/settings/SettingsPage";
-import { UpdateBadge } from "@/components/UpdateBadge";
 import { EnvWarningBanner } from "@/components/env/EnvWarningBanner";
+import { UpdateBadge } from "@/components/UpdateBadge";
 import { ProxyToggle } from "@/components/proxy/ProxyToggle";
 import { ClaudeDesktopRouteToggle } from "@/components/proxy/ClaudeDesktopRouteToggle";
+import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
 import { FailoverToggle } from "@/components/proxy/FailoverToggle";
 import { RoutingActivationBrand } from "@/components/proxy/RoutingActivationBrand";
 import UsageScriptModal from "@/components/UsageScriptModal";
@@ -93,6 +118,8 @@ import { DeepLinkImportDialog } from "@/components/DeepLinkImportDialog";
 import { FirstRunNoticeDialog } from "@/components/FirstRunNoticeDialog";
 import { AgentsPanel } from "@/components/agents/AgentsPanel";
 import { UniversalProviderPanel } from "@/components/universal";
+import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
+import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
 import { McpIcon } from "@/components/BrandIcons";
 import { Button } from "@/components/ui/button";
 import { SessionManagerPage } from "@/components/sessions/SessionManagerPage";
@@ -124,6 +151,7 @@ type View =
   | "universal"
   | "sessions"
   | "workspace"
+  | "remote"
   | "openclawEnv"
   | "openclawTools"
   | "openclawAgents"
@@ -159,6 +187,7 @@ const VALID_VIEWS: View[] = [
   "universal",
   "sessions",
   "workspace",
+  "remote",
   "openclawEnv",
   "openclawTools",
   "openclawAgents",
@@ -166,6 +195,10 @@ const VALID_VIEWS: View[] = [
 ];
 
 const getInitialView = (): View => {
+  // 远端功能关闭时不起始于「远程主机管理」视图（还原原生）
+  if (localStorage.getItem("cc-switch-remote-feature-enabled") === "0") {
+    return "providers";
+  }
   const saved = localStorage.getItem(VIEW_STORAGE_KEY) as View | null;
   if (saved && VALID_VIEWS.includes(saved)) {
     return saved;
@@ -180,6 +213,15 @@ function App() {
   const [activeApp, setActiveApp] = useState<AppId>(getInitialApp);
   const sharedFeatureApp: AppId =
     activeApp === "claude-desktop" ? "claude" : activeApp;
+
+  // 悬浮球「跟随最近使用」= 跟随主窗口当前 app tab：切 app 即同步记录 last_app，
+  // 而非只在 provider-switched（供应商切换）时更新——否则球会停在上次切供应商
+  // 的 app。置顶（pin）时 resolve 仍优先 floating_pin_app，这里记录 last_app 无碍。
+  useEffect(() => {
+    void invoke("floating_record_active_app", { appType: activeApp }).catch(
+      () => {},
+    );
+  }, [activeApp]);
   const [currentView, setCurrentView] = useState<View>(getInitialView);
   const [skillsDiscoverySource, setSkillsDiscoverySource] =
     useState<SkillsPageSource>("repos");
@@ -196,6 +238,47 @@ function App() {
       isChecking: false,
       hasSkills: false,
     });
+
+  // ===== 远端目标（本机 / 服务器 / 容器）：状态 / 拉取 / 探活 / 持久化 =====
+  // 整块收敛在 hooks/useRemoteTarget（P2 收敛点），官方 App.tsx 里只留这一次调用。
+  const {
+    batchApplyOpen,
+    setBatchApplyOpen,
+    batchApplyApp,
+    setBatchApplyApp,
+    servers,
+    setServers,
+    remoteTargetId,
+    setRemoteTargetId,
+    remoteCurrentProviderId,
+    setRemoteCurrentProviderId,
+
+    containers,
+    setContainers,
+    containersLoading,
+    remoteContainerId,
+    setRemoteContainerId,
+    hostsOnline,
+    targetKnownOffline,
+    retryRemoteTarget,
+    probeHosts,
+    autoImportDefault,
+    handleAutoImportDefaultChange,
+    remoteFeatureEnabled,
+    handleRemoteFeatureEnabledChange,
+    remoteAvailableForApp,
+    activeRemoteHost,
+    currentInstalled,
+    refreshInstallStatus,
+  } = useRemoteTarget({
+    activeApp,
+    sharedFeatureApp,
+    currentView,
+    setActiveApp,
+    queryClient,
+    onRemoteFeatureDisabled: () =>
+      setCurrentView((v) => (v === "remote" ? "providers" : v)),
+  });
 
   useEffect(() => {
     localStorage.setItem(VIEW_STORAGE_KEY, currentView);
@@ -263,12 +346,22 @@ function App() {
   const [promptPrimaryAction, setPromptPrimaryAction] =
     useState<PromptPrimaryAction>("prompt");
   const mcpPanelRef = useRef<any>(null);
+  const remoteHostsPanelRef = useRef<any>(null);
   const skillsPageRef = useRef<any>(null);
   const unifiedSkillsPanelRef = useRef<any>(null);
   // 订阅未管理 Skill 的共享缓存（实际扫描由 UnifiedSkillsPanel 进入页面时触发）。
   // 这里 enabled 默认 false，仅用于「导入」按钮的绿点提示，不主动发起扫描。
   const { data: unmanagedSkills } = useScanUnmanagedSkills();
-  const hasUnmanagedSkills = (unmanagedSkills?.length ?? 0) > 0;
+  // 远端目标（宿主机/容器）：圆点指示所选目标可导入技能数，而非本机。
+  // 仅订阅共享缓存（enabled:false，扫描由 UnifiedSkillsPanel 挂载时发起，对齐本机）。
+  const isRemoteSkillsTarget = Boolean(remoteTargetId);
+  const { data: remoteUnmanagedSkills } = useRemoteUnmanagedSkillsQuery(
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
+  );
+  const hasUnmanagedSkills =
+    ((isRemoteSkillsTarget ? remoteUnmanagedSkills : unmanagedSkills)?.length ??
+      0) > 0;
   const addActionButtonClass =
     "bg-orange-500 hover:bg-orange-600 dark:bg-orange-500 dark:hover:bg-orange-600 text-white shadow-lg shadow-orange-500/30 dark:shadow-orange-500/40 rounded-full w-8 h-8";
 
@@ -278,11 +371,33 @@ function App() {
     status: proxyStatus,
   } = useProxyStatus();
   const proxyAppId = isProxyAppId(activeApp) ? activeApp : null;
+  const batchApplyProviders = useProvidersQuery(batchApplyApp as AppId, {
+    isProxyRunning,
+  });
   const currentAppUsesProxy =
     proxyAppId !== null || activeApp === "claude-desktop";
   const isCurrentAppTakeoverActive = proxyAppId
     ? takeoverStatus?.[proxyAppId] || false
     : false;
+  // 悬浮窗「路由接管」状态同步：本应显示「当前 app 是否开启路由」，故本机与远端
+  // 都要算。本机看本机接管开关；远端看所选主机/容器上该 app 的路由接管开关。
+  // 算好后写入后端设置，球靠 1s 轮询读它显示流动边框。
+  // （activeRemoteHost 已在上方 line 401 定义）
+  const isRemoteTakeoverActive = remoteTargetId
+    ? !!(
+        activeRemoteHost &&
+        (remoteContainerId
+          ? activeRemoteHost.routeProxyContainerApps?.[remoteContainerId]?.[
+              sharedFeatureApp
+            ]
+          : activeRemoteHost.routeProxyApps?.[sharedFeatureApp])
+      )
+    : isCurrentAppTakeoverActive;
+  useEffect(() => {
+    void invoke("floating_set_remote_takeover", {
+      active: isRemoteTakeoverActive,
+    }).catch((e) => console.error("[Floating] 同步远端接管状态失败", e));
+  }, [isRemoteTakeoverActive]);
   const activeProviderId = useMemo(() => {
     if (!proxyAppId) return undefined;
     const target = proxyStatus?.active_targets?.find(
@@ -291,12 +406,73 @@ function App() {
     return target?.provider_id;
   }, [proxyStatus?.active_targets, proxyAppId]);
 
-  const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
-    isProxyRunning: currentAppUsesProxy && isProxyRunning,
+  const {
+    data,
+    isLoading: localIsLoading,
+    refetch,
+  } = useProvidersQuery(activeApp, {
+    isProxyRunning,
   });
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
-  const providers = useMemo(() => data?.providers ?? {}, [data]);
+  // per-target 独立：远端目标下，供应商面板数据源是该目标机器自己的 SSOT
+  // （本机 DB 不参与）；本机目标保持现有模型完全不变。
+  const remoteProvidersQuery = useRemoteProvidersQuery(
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
+    sharedFeatureApp,
+    autoImportDefault,
+    // 目标选择器已探明当前主机离线 → 不再发起连接（秒显示离线）
+    targetKnownOffline || undefined,
+  );
+  const providers = useMemo(
+    () =>
+      remoteTargetId
+        ? (remoteProvidersQuery.data?.providers ?? {})
+        : (data?.providers ?? {}),
+    [remoteTargetId, remoteProvidersQuery.data, data],
+  );
+  const isLoading = remoteTargetId
+    ? remoteProvidersQuery.isLoading
+    : localIsLoading;
   const currentProviderId = data?.currentProviderId ?? "";
+  // 选中服务器时，当前供应商高亮取自该远端目标（SSOT current / 切换记录 / live 兜底）
+  const effectiveCurrentProviderId = remoteTargetId
+    ? (remoteProvidersQuery.data?.currentProviderId ??
+      remoteCurrentProviderId ??
+      "")
+    : currentProviderId;
+  // 同步远端供应商给悬浮球
+  useEffect(() => {
+    // per-app 路由接管状态快照：本机取 takeoverStatus，远端取该主机的 routeProxyApps。
+    // 推给悬浮窗后与主窗口 UI 同源：开关一变即刻生效，无需等 DB 落库或查询往返。
+    const routeMap: Record<string, boolean> = {};
+    for (const appId of APP_IDS) {
+      if (appId === "claude-desktop") continue;
+      if (!remoteTargetId) {
+        // ProxyTakeoverStatus 未声明 pi 字段：按 Record 安全索引
+        routeMap[appId] = !!(takeoverStatus as Record<string, boolean | undefined> | undefined)?.[appId];
+      } else if (remoteContainerId) {
+        routeMap[appId] =
+          !!activeRemoteHost?.routeProxyContainerApps?.[remoteContainerId]?.[
+            appId
+          ];
+      } else {
+        routeMap[appId] = !!activeRemoteHost?.routeProxyApps?.[appId];
+      }
+    }
+    void invoke("floating_set_remote_context", {
+      hostId: remoteTargetId || null,
+      containerId: remoteContainerId || null,
+      providerId: effectiveCurrentProviderId || null,
+      routeProxyApps: routeMap,
+    }).catch(() => {});
+  }, [
+    remoteTargetId,
+    remoteContainerId,
+    effectiveCurrentProviderId,
+    activeRemoteHost,
+    takeoverStatus,
+  ]);
   const isOpenClawView =
     activeApp === "openclaw" &&
     (currentView === "providers" ||
@@ -307,7 +483,8 @@ function App() {
       currentView === "openclawAgents");
   const { data: openclawHealthWarnings = [] } =
     useOpenClawHealth(isOpenClawView);
-  const hasSkillsSupport = sharedFeatureApp !== "openclaw";
+  // 所有应用(含 openclaw)均支持 Skills 管理;openclaw 走独立按钮组,default 分支恒显示
+  const hasSkillsSupport = true;
   const hasSessionSupport =
     sharedFeatureApp === "claude" ||
     sharedFeatureApp === "codex" ||
@@ -317,7 +494,6 @@ function App() {
     sharedFeatureApp === "gemini" ||
     sharedFeatureApp === "hermes" ||
     sharedFeatureApp === "pi";
-  const hasMcpSupport = sharedFeatureApp !== "pi";
 
   const {
     addProvider,
@@ -330,37 +506,99 @@ function App() {
     activeApp,
     currentAppUsesProxy && isProxyRunning,
     isProxyRunning && isCurrentAppTakeoverActive,
+    remoteTargetId || undefined,
+    remoteContainerId || undefined,
   );
-  const handleEnablePiProvider = async (provider: Provider) => {
-    try {
-      await providersApi.switch(provider.id, "pi");
-      await invalidatePiProviderCaches(queryClient);
-      await providersApi.updateTrayMenu().catch((error) => {
-        console.error(
-          "Failed to update tray menu after enabling Pi provider",
-          error,
-        );
+
+  // 远程切换 mutation：与本机 useSwitchProviderMutation 同构（onSuccess 回写高亮 +
+  // invalidateQueries + 集中 toast；isPending 供按钮禁用防连点）。
+  const remoteSwitchMutation = useSwitchRemoteProviderMutation(
+    setRemoteCurrentProviderId,
+  );
+
+  // 供应商切换：选中服务器目标时走远端原子写回，否则走本地
+  const handleProviderSwitch = async (provider: Provider) => {
+    if (remoteTargetId) {
+      // 一次 IPC：后端 EffectReport.currentProviderId 直接带回当前供应商 id，
+      // 高亮/刷新/toast 都由 mutation onSuccess 完成
+      await remoteSwitchMutation.mutateAsync({
+        hostId: remoteTargetId,
+        providerId: provider.id,
+        app: sharedFeatureApp,
+        container: remoteContainerId || undefined,
       });
-      toast.success(
-        t("pi.provider.enabled", {
-          defaultValue: "已在 Pi 中启用",
-        }),
-        { closeButton: true },
-      );
-    } catch (error) {
-      const detail = extractErrorMessage(error);
-      toast.error(
-        t("pi.provider.enableFailed", {
-          defaultValue: "无法在 Pi 中启用此供应商",
-        }),
-        {
-          description:
-            translatePiProviderMutationError(detail, t) || detail || undefined,
-          closeButton: true,
-        },
-      );
+      return;
     }
+    await switchProvider(provider);
   };
+
+  // 远端 OpenClaw「设为默认」：对齐本机 setAsDefaultModel 的完整语义 ——
+  // 后端写远端 openclaw.json 的 agents.defaults.model（openclaw 实际读取的键），
+  // 支持下拉选具体模型，并保留原默认的 fallback 链（除去新 primary）。
+  const handleRemoteSetAsDefault = useCallback(
+    async (provider: Provider, modelId?: string) => {
+      const config = provider.settingsConfig as {
+        models?: { id?: string; name?: string }[];
+      };
+      const models = config?.models ?? [];
+      if (models.length === 0) {
+        toast.error(
+          t("notifications.openclawNoModels", {
+            defaultValue: "该供应商没有配置模型",
+          }),
+        );
+        return;
+      }
+      const selectedModel = modelId
+        ? models.find((model) => model.id === modelId)
+        : models[0];
+      if (!selectedModel) {
+        toast.error(
+          t("notifications.openclawModelNotFound", {
+            defaultValue: "所选模型已不存在，请刷新后重试",
+          }),
+        );
+        return;
+      }
+      try {
+        const primary = `${provider.id}/${selectedModel.id}`;
+        const existingDefault = await getRemoteOpenClawDefaultModel(
+          remoteTargetId,
+          remoteContainerId || undefined,
+        );
+        const model: { primary: string; fallbacks: string[] } = {
+          primary,
+          fallbacks: existingDefault?.fallbacks?.filter(
+            (fallback) => fallback !== primary,
+          ) ?? [],
+        };
+        await setRemoteOpenClawDefaultModel(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          model,
+        );
+        void remoteProvidersQuery.refetch();
+        // 失效远端 openclaw defaultModel 查询缓存，使"设为默认"按钮状态更新
+        void queryClient.invalidateQueries({
+          queryKey: ["remoteOpenclawDefaultModel", remoteTargetId, remoteContainerId],
+        });
+        toast.success(
+          t("notifications.openclawDefaultModelSet", {
+            defaultValue: "已设为默认模型",
+          }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        toast.error(
+          extractErrorMessage(error) ||
+            t("notifications.openclawDefaultModelSetFailed", {
+              defaultValue: "设置默认模型失败",
+            }),
+        );
+      }
+    },
+    [remoteTargetId, remoteContainerId, remoteProvidersQuery, queryClient, t],
+  );
 
   const disableOmoMutation = useDisableCurrentOmo();
   const handleDisableOmo = () => {
@@ -686,6 +924,12 @@ function App() {
     };
   }, []);
 
+  // 悬浮窗右键菜单「设置」：打开主窗口后切到设置页（与 Ctrl+, 同一入口）
+  useTauriEvent("open-settings", () => {
+    if (managementBusyRef.current) return;
+    setCurrentView("settings");
+  });
+
   const [launchDashboardOpen, setLaunchDashboardOpen] = useState(false);
   const openHermesWebUI = useOpenHermesWebUI(() =>
     setLaunchDashboardOpen(true),
@@ -704,6 +948,66 @@ function App() {
     }
   };
 
+  // 服务端返回权威最新视图 → 直接写入缓存（免第二次 SSH refetch；
+  // 语义与本机 invalidate 一致：操作成功后缓存 = 最新状态）
+  const setRemoteProvidersCache = (view: RemoteProvidersView) => {
+    queryClient.setQueryData<RemoteProvidersView>(
+      [
+        "remoteProviders",
+        remoteTargetId,
+        remoteContainerId || "__host__",
+        sharedFeatureApp,
+      ],
+      view,
+    );
+  };
+
+  // 远端目标下添加供应商：直接写该目标自己的 SSOT（本机 DB 不参与）。
+  // id 生成对齐本机 useAddProviderMutation：additive 用 providerKey，其余 UUID。
+  const handleAddRemoteProvider = async (
+    provider: Omit<Provider, "id"> & { providerKey?: string },
+  ) => {
+    try {
+      let id: string;
+      if (
+        sharedFeatureApp === "opencode" ||
+        sharedFeatureApp === "openclaw" ||
+        sharedFeatureApp === "hermes"
+      ) {
+        if (!provider.providerKey) {
+          throw new Error(`Provider key is required for ${sharedFeatureApp}`);
+        }
+        id = provider.providerKey;
+      } else {
+        id = crypto.randomUUID();
+      }
+      const newProvider: Provider = {
+        ...(provider as Omit<Provider, "id">),
+        id,
+        createdAt: Date.now(),
+      } as Provider;
+      const view = await addRemoteProvider(
+        remoteTargetId!,
+        sharedFeatureApp,
+        newProvider,
+        true,
+        remoteContainerId || undefined,
+      );
+      setRemoteProvidersCache(view);
+      toast.success(
+        t("remote.addDone", {
+          defaultValue: "已添加到远端 {{target}}",
+          target: activeRemoteHost?.name ?? remoteTargetId,
+        }),
+        { closeButton: true },
+      );
+    } catch (error) {
+      console.error("[App] Failed to add remote provider:", error);
+      toast.error(extractErrorMessage(error), { closeButton: true });
+      throw error;
+    }
+  };
+
   const handleEditProvider = async ({
     provider,
     originalId,
@@ -711,6 +1015,39 @@ function App() {
     provider: Provider;
     originalId?: string;
   }) => {
+    if (remoteTargetId) {
+      // per-target 独立：远端目标的供应商编辑直接写该目标自己的 SSOT
+      // （后端按「是否在生效位置」决定是否重写远端 live，对齐本机 update 语义）；
+      // 本机 DB 不参与。
+      try {
+        const view = await updateRemoteProvider(
+          remoteTargetId,
+          sharedFeatureApp,
+          provider,
+          originalId,
+          remoteContainerId || undefined,
+        );
+        setRemoteProvidersCache(view);
+        toast.success(
+          t("remote.editSynced", {
+            defaultValue: "已同步更新后的配置到远端 {{target}}",
+            target: activeRemoteHost?.name ?? remoteTargetId,
+          }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        console.error("Failed to update remote provider:", error);
+        toast.error(
+          t("remote.editSyncError", {
+            defaultValue: "供应商更新失败",
+          }),
+          { description: extractErrorMessage(error) },
+        );
+      }
+      setEditingProvider(null);
+      return;
+    }
+
     await updateProvider(provider, originalId);
     setEditingProvider(null);
   };
@@ -718,6 +1055,49 @@ function App() {
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     const { provider, action } = confirmAction;
+
+    if (remoteTargetId) {
+      // 远程目标（per-target 独立）：remove 走远端 live 移除（SSOT 标记同步）；
+      // delete 删该远端目标自己的 SSOT（additive 且已写入 live 时同时移除 live）。
+      // 本机 DB 不参与。
+      try {
+        if (action === "remove") {
+          const view = await removeRemoteProviderFromLive(
+            remoteTargetId,
+            sharedFeatureApp,
+            provider.id,
+            remoteContainerId || undefined,
+          );
+          // 后端带回最新视图，直接写入缓存（按钮「移除」→「添加」立即翻转）
+          setRemoteProvidersCache(view);
+          toast.success(
+            t("notifications.removeFromConfigSuccess", {
+              defaultValue: "已从远端配置移除",
+            }),
+            { closeButton: true },
+          );
+        } else {
+          const view = await deleteRemoteProvider(
+            remoteTargetId,
+            sharedFeatureApp,
+            provider.id,
+            remoteContainerId || undefined,
+          );
+          setRemoteProvidersCache(view);
+          toast.success(
+            t("notifications.providerDeleted", {
+              defaultValue: "供应商删除成功",
+            }),
+            { closeButton: true },
+          );
+        }
+      } catch (error) {
+        console.error("Failed to handle remote provider action:", error);
+        toast.error(extractErrorMessage(error), { closeButton: true });
+      }
+      setConfirmAction(null);
+      return;
+    }
 
     if (action === "remove") {
       // Remove from live config only (for additive mode apps like OpenCode/OpenClaw)
@@ -795,6 +1175,41 @@ function App() {
   const handleDuplicateProvider = async (provider: Provider) => {
     const newSortIndex =
       provider.sortIndex !== undefined ? provider.sortIndex + 1 : undefined;
+
+    // 远端目标：复制到该目标自己的 SSOT（本机 DB 不参与）
+    if (remoteTargetId) {
+      const copyKey = generateUniqueProviderCopyKey(
+        provider.id,
+        Object.keys(providers),
+      );
+      const duplicated: Provider = {
+        ...provider,
+        id: copyKey,
+        name: `${provider.name} copy`,
+        sortIndex: newSortIndex,
+        createdAt: Date.now(),
+      } as Provider;
+      try {
+        const view = await addRemoteProvider(
+          remoteTargetId,
+          sharedFeatureApp,
+          duplicated,
+          true,
+          remoteContainerId || undefined,
+        );
+        setRemoteProvidersCache(view);
+        toast.success(
+          t("notifications.providerDuplicated", {
+            defaultValue: "供应商复制成功",
+          }),
+          { closeButton: true },
+        );
+      } catch (error) {
+        console.error("[App] Failed to duplicate remote provider:", error);
+        toast.error(extractErrorMessage(error), { closeButton: true });
+      }
+      return;
+    }
 
     const duplicatedProvider: Omit<Provider, "id" | "createdAt"> & {
       providerKey?: string;
@@ -1014,6 +1429,10 @@ function App() {
               onOpenChange={() => setCurrentView("providers")}
               onImportSuccess={handleImportSuccess}
               defaultTab={settingsDefaultTab}
+              autoImportDefault={autoImportDefault}
+              onAutoImportDefaultChange={handleAutoImportDefaultChange}
+              remoteFeatureEnabled={remoteFeatureEnabled}
+              onRemoteFeatureEnabledChange={handleRemoteFeatureEnabledChange}
             />
           );
         case "prompts":
@@ -1023,6 +1442,8 @@ function App() {
               open={true}
               onOpenChange={() => setCurrentView("providers")}
               appId={sharedFeatureApp}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
               onInteractionBlockedChange={setPromptManagementBusy}
               onNavigationBlockedChange={setPromptNavigationBusy}
               onPrimaryActionChange={setPromptPrimaryAction}
@@ -1035,22 +1456,22 @@ function App() {
             <UnifiedSkillsPanel
               ref={unifiedSkillsPanelRef}
               onOpenDiscovery={handleOpenSkillsDiscovery}
+              currentApp={sharedFeatureApp}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
               onInteractionBlockedChange={setSkillsManagementBusy}
               onNavigationBlockedChange={setSkillsNavigationBusy}
               onCheckUpdatesStateChange={setSkillsCheckUpdatesState}
-              currentApp={
-                sharedFeatureApp === "openclaw" ? "claude" : sharedFeatureApp
-              }
             />
           );
         case "skillsDiscovery":
           return (
             <SkillsPage
               ref={skillsPageRef}
-              initialApp={
-                sharedFeatureApp === "openclaw" ? "claude" : sharedFeatureApp
-              }
+              initialApp={sharedFeatureApp}
               onSourceChange={setSkillsDiscoverySource}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "mcp":
@@ -1058,6 +1479,8 @@ function App() {
             <UnifiedMcpPanel
               ref={mcpPanelRef}
               onOpenChange={() => setCurrentView("providers")}
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
               onInteractionBlockedChange={setMcpManagementBusy}
             />
           );
@@ -1071,22 +1494,46 @@ function App() {
               <UniversalProviderPanel />
             </div>
           );
+        case "remote":
+          return (
+            <RemoteHostsPanel
+              ref={remoteHostsPanelRef}
+              app={sharedFeatureApp}
+            />
+          );
 
         case "sessions":
           return (
             <SessionManagerPage
-              key={sharedFeatureApp}
+              key={`${sharedFeatureApp}-${remoteTargetId}-${remoteContainerId}`}
               appId={sharedFeatureApp}
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId || undefined}
             />
           );
         case "workspace":
           return <WorkspaceFilesPanel />;
         case "openclawEnv":
-          return <EnvPanel />;
+          return (
+            <EnvPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         case "openclawTools":
-          return <ToolsPanel />;
+          return (
+            <ToolsPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         case "openclawAgents":
-          return <AgentsDefaultsPanel />;
+          return (
+            <AgentsDefaultsPanel
+              remoteTargetId={remoteTargetId || undefined}
+              remoteContainerId={remoteContainerId || undefined}
+            />
+          );
         default:
           return (
             <div className="px-6 flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -1102,19 +1549,67 @@ function App() {
                   >
                     <ProviderList
                       providers={providers}
-                      currentProviderId={currentProviderId}
+                      currentProviderId={effectiveCurrentProviderId}
                       appId={activeApp}
                       isLoading={isLoading}
                       isProxyRunning={currentAppUsesProxy && isProxyRunning}
                       isProxyTakeover={
-                        isProxyRunning && isCurrentAppTakeoverActive
+                        remoteTargetId || remoteContainerId
+                          ? Boolean(
+                              remoteProvidersQuery.data?.routeProxyEnabled,
+                            )
+                          : isProxyRunning && isCurrentAppTakeoverActive
+                      }
+                      isSwitching={
+                        remoteTargetId
+                          ? remoteSwitchMutation.isPending
+                          : undefined
+                      }
+                      remoteTargetId={remoteTargetId}
+                      remoteContainerId={remoteContainerId}
+                      remoteLiveIds={
+                        remoteTargetId
+                          ? remoteProvidersQuery.data?.liveIds
+                          : undefined
+                      }
+                      remoteLoadingLabel={
+                        remoteTargetId ? (
+                          <>
+                            {t("remote.readingConfigPrefix", {
+                              defaultValue: "正在读取 ",
+                            })}
+                            <span className="font-medium text-primary">
+                              {t(`apps.${sharedFeatureApp}`)}
+                            </span>
+                            {t("remote.readingConfigSuffix", {
+                              defaultValue: " 配置…",
+                            })}
+                          </>
+                        ) : undefined
+                      }
+                      remoteError={
+                        remoteTargetId
+                          ? targetKnownOffline
+                            ? t("remote.hostOffline", {
+                                defaultValue:
+                                  "主机当前离线（探活未通过），点重试可重新探测",
+                              })
+                            : remoteProvidersQuery.error
+                              ? extractErrorMessage(remoteProvidersQuery.error)
+                              : undefined
+                          : undefined
+                      }
+                      onRetryRemote={
+                        remoteTargetId
+                          ? () => {
+                              // 清除离线标记 → 查询重新启用 → 真正重新探测/连接
+                              retryRemoteTarget();
+                              void remoteProvidersQuery.refetch();
+                            }
+                          : undefined
                       }
                       activeProviderId={activeProviderId}
-                      onSwitch={
-                        activeApp === "pi"
-                          ? handleEnablePiProvider
-                          : switchProvider
-                      }
+                      onSwitch={handleProviderSwitch}
                       onEdit={(provider) => {
                         setEditingProvider(provider);
                       }}
@@ -1146,11 +1641,17 @@ function App() {
                       }
                       onCreate={() => setIsAddOpen(true)}
                       onSetAsDefault={
-                        activeApp === "openclaw"
-                          ? setAsDefaultModel
-                          : activeApp === "hermes"
-                            ? switchProvider
-                            : undefined
+                        remoteTargetId
+                          ? activeApp === "hermes"
+                            ? handleProviderSwitch
+                            : activeApp === "openclaw"
+                              ? handleRemoteSetAsDefault
+                              : undefined
+                          : activeApp === "openclaw"
+                            ? setAsDefaultModel
+                            : activeApp === "hermes"
+                              ? switchProvider
+                              : undefined
                       }
                     />
                   </motion.div>
@@ -1314,6 +1815,8 @@ function App() {
                     })}
                   {currentView === "sessions" && t("sessionManager.title")}
                   {currentView === "workspace" && t("workspace.title")}
+                  {currentView === "remote" &&
+                    t("remote.title", { defaultValue: "远程主机" })}
                   {currentView === "openclawEnv" && t("openclaw.env.title")}
                   {currentView === "openclawTools" && t("openclaw.tools.title")}
                   {currentView === "openclawAgents" &&
@@ -1342,12 +1845,15 @@ function App() {
                 >
                   <Settings className="w-4 h-4" />
                 </Button>
-                <UpdateBadge
-                  onClick={() => {
-                    setSettingsDefaultTab("about");
-                    setCurrentView("settings");
-                  }}
-                />
+                {/* 新版本入口（上游 UpdateBadge）：默认显示，可在设置→通用关闭 */}
+                {settingsData?.showUpdateBadge !== false && (
+                  <UpdateBadge
+                    onClick={() => {
+                      setSettingsDefaultTab("about");
+                      setCurrentView("settings");
+                    }}
+                  />
+                )}
                 {isCurrentAppTakeoverActive && (
                   <Button
                     variant="ghost"
@@ -1375,7 +1881,57 @@ function App() {
                   className="flex shrink-0 items-center gap-1.5"
                   style={{ WebkitAppRegion: "no-drag" } as any}
                 >
-                  {activeApp === "claude-desktop" ? (
+                  {remoteContainerId ? (
+                    <RemoteRouteToggle
+                      container
+                      host={servers.find((s) => s.id === remoteTargetId)}
+                      activeApp={activeApp}
+                      appForApi={sharedFeatureApp}
+                      containerId={remoteContainerId}
+                      onUpdated={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
+                        void queryClient.invalidateQueries({
+                          queryKey: [
+                            "remoteProviders",
+                            h.id,
+                            remoteContainerId || "__host__",
+                            activeApp,
+                          ],
+                        });
+                      }}
+                      onHostRefreshed={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
+                      }}
+                    />
+                  ) : remoteTargetId ? (
+                    <RemoteRouteToggle
+                      host={servers.find((s) => s.id === remoteTargetId)}
+                      activeApp={activeApp}
+                      appForApi={sharedFeatureApp}
+                      onUpdated={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
+                        void queryClient.invalidateQueries({
+                          queryKey: [
+                            "remoteProviders",
+                            h.id,
+                            "__host__",
+                            activeApp,
+                          ],
+                        });
+                      }}
+                      onHostRefreshed={(h) => {
+                        setServers((prev) =>
+                          prev.map((s) => (s.id === h.id ? h : s)),
+                        );
+                      }}
+                    />
+                  ) : activeApp === "claude-desktop" ? (
                     <ClaudeDesktopRouteToggle />
                   ) : proxyAppId ? (
                     <>
@@ -1406,6 +1962,7 @@ function App() {
                   activeApp={activeApp}
                   onSwitch={setActiveApp}
                   visibleApps={visibleApps}
+                  hideApps={remoteTargetId ? ["claude-desktop"] : undefined}
                 />
               )}
             </div>
@@ -1455,6 +2012,28 @@ function App() {
                     </Button>
                   </>
                 )}
+                {currentView === "remote" && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => remoteHostsPanelRef.current?.openAdd()}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Plus className="w-4 h-4 mr-2" />
+                      {t("remote.add", { defaultValue: "添加远程主机" })}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setBatchApplyOpen(true)}
+                      className="hover:bg-black/5 dark:hover:bg-white/5"
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      {t("batchApply.title")}
+                    </Button>
+                  </>
+                )}
                 {currentView === "skills" && (
                   <>
                     <Button
@@ -1482,18 +2061,19 @@ function App() {
                         ? t("skills.checkingUpdates")
                         : t("skills.checkUpdates")}
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={skillsManagementBusy}
-                      onClick={() =>
-                        unifiedSkillsPanelRef.current?.openRestoreFromBackup()
-                      }
-                      className="hover:bg-black/5 disabled:opacity-100 dark:hover:bg-white/5"
-                    >
-                      <History className="w-4 h-4 mr-2" />
-                      {t("skills.restoreFromBackup.button")}
-                    </Button>
+                    {!remoteTargetId && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          unifiedSkillsPanelRef.current?.openRestoreFromBackup()
+                        }
+                        className="hover:bg-black/5 dark:hover:bg-white/5"
+                      >
+                        <History className="w-4 h-4 mr-2" />
+                        {t("skills.restoreFromBackup.button")}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1610,20 +2190,40 @@ function App() {
                               >
                                 <LayoutDashboard className="w-4 h-4" />
                               </Button>
-                              {hasMcpSupport && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("mcp")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("mcp.title")}
+                              >
+                                <McpIcon size={16} />
+                              </Button>
+                              {remoteAvailableForApp && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => setCurrentView("mcp")}
+                                  onClick={() => setCurrentView("remote")}
                                   className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
-                                  title={t("mcp.title")}
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
                                 >
-                                  <McpIcon size={16} />
+                                  <Server className="flex-shrink-0 w-4 h-4" />
                                 </Button>
                               )}
                             </>
                           ) : activeApp === "openclaw" ? (
                             <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("skills")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("skills.manage")}
+                              >
+                                <Wrench className="w-4 h-4" />
+                              </Button>
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -1669,6 +2269,28 @@ function App() {
                               >
                                 <History className="w-4 h-4" />
                               </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setCurrentView("mcp")}
+                                className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                title={t("mcp.title")}
+                              >
+                                <McpIcon size={16} />
+                              </Button>
+                              {remoteAvailableForApp && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCurrentView("remote")}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
+                                >
+                                  <Server className="flex-shrink-0 w-4 h-4" />
+                                </Button>
+                              )}
                             </>
                           ) : (
                             <>
@@ -1711,7 +2333,7 @@ function App() {
                               >
                                 <History className="flex-shrink-0 w-4 h-4" />
                               </Button>
-                              {hasMcpSupport && (
+                              {activeApp !== "pi" && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
@@ -1720,6 +2342,19 @@ function App() {
                                   title={t("mcp.title")}
                                 >
                                   <McpIcon size={16} />
+                                </Button>
+                              )}
+                              {remoteAvailableForApp && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setCurrentView("remote")}
+                                  className="text-muted-foreground hover:text-foreground hover:bg-black/5 dark:hover:bg-white/5 w-8 px-2"
+                                  title={t("remote.title", {
+                                    defaultValue: "远程主机",
+                                  })}
+                                >
+                                  <Server className="flex-shrink-0 w-4 h-4" />
                                 </Button>
                               )}
                             </>
@@ -1749,14 +2384,130 @@ function App() {
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
-        {renderContent()}
+        {/* 设置页/远程主机管理页不需要目标选择器/远端状态栏：设置里无切换场景，
+            远程主机面板管理的是全部主机（不针对当前目标），显示了反而误导。
+            远端功能关闭时整条目标选择器/远端状态栏隐藏，还原原生 cc-switch。 */}
+        {currentView !== "settings" &&
+          currentView !== "remote" &&
+          remoteAvailableForApp && (
+            <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/30 px-6 py-2 text-sm backdrop-blur-sm">
+              <TargetBreadcrumb
+                remoteTargetId={remoteTargetId}
+                remoteContainerId={remoteContainerId}
+                setRemoteTargetId={(value) => {
+                  setRemoteTargetId(value);
+                  // 切主机同步清空旧容器列表（handleSelectHost 只清 containerId，
+                  // 不清列表，导致下拉在拉取完成前显示上一台主机的容器）
+                  setContainers([]);
+                }}
+                setRemoteContainerId={setRemoteContainerId}
+                servers={servers}
+                containers={containers}
+                containersLoading={containersLoading}
+                hostsOnline={hostsOnline}
+                onProbeHosts={probeHosts}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setBatchApplyOpen(true)}
+                className="hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                {t("remote.batchApply", { defaultValue: "批量应用" })}
+              </Button>
+              {currentInstalled === true || currentInstalled === null ? (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs",
+                    currentInstalled === true
+                      ? "bg-emerald-500/15 text-emerald-600"
+                      : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {currentInstalled === true
+                    ? `${t(`apps.${sharedFeatureApp}`)} ${t(
+                        "remote.cliInstalledBadge",
+                        { defaultValue: "已安装" },
+                      )}`
+                    : t("remote.cliDetectFailed", {
+                        defaultValue: "安装状态检测中/未知",
+                      })}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-0.5">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-600">
+                    {`⚠ ${t(`apps.${sharedFeatureApp}`)} ${t(
+                      "remote.cliNotInstalledBadge",
+                      { defaultValue: "未安装" },
+                    )}`}
+                  </span>
+                  <span className="select-none text-amber-600/60 text-lg leading-none">
+                    ·
+                  </span>
+                  <InstallCommandPopover
+                    command={
+                      (remoteTargetId
+                        ? APP_INSTALL_CMDS[sharedFeatureApp]?.remote
+                        : APP_INSTALL_CMDS[sharedFeatureApp]?.local) ?? ""
+                    }
+                  />
+                </span>
+              )}
+              {remoteTargetId && (
+                <span className="text-xs text-muted-foreground">
+                  {t("remote.targetActiveHint", {
+                    defaultValue:
+                      "供应商 / MCP / Prompts / Skills / 会话 作用于该主机",
+                  })}
+                </span>
+              )}
+              <button
+                onClick={refreshInstallStatus}
+                title={t("remote.refreshStatusTitle")}
+                className="ml-auto inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t("remote.refreshStatus")}
+              </button>
+            </div>
+          )}
+        <div className="flex-1 min-h-0 flex flex-col pt-2">
+          {renderContent()}
+        </div>
       </main>
+
+      {/* 批量应用 Provider 面板：入口A（目标选择器栏）/ 入口B（远程主机管理页）共用 */}
+      {/* 批量应用 Provider 面板：Provider 候选池固定取「本机 DB 的供应商」，
+          不随当前目标（远端/容器）变——广播就是用本机这份标准配置推到各远端。
+          ===== 如何改「Provider 池来源」=====
+          当前来源 = 本机 useProvidersQuery（data?.providers）。若未来想改成从其它源取
+          （如当前目标、某份配置文件），改这里的 providers 取值即可，后端广播逻辑不变。 */}
+      {remoteAvailableForApp && (
+        <BatchApplyPanel
+          open={batchApplyOpen}
+          onOpenChange={setBatchApplyOpen}
+          availableApps={APP_IDS.filter((a) => visibleApps[a] && a !== "claude-desktop")}
+          app={sharedFeatureApp}
+          onAppChange={setBatchApplyApp}
+          hosts={servers}
+          providers={batchApplyProviders.data?.providers ?? {}}
+          defaultProviderId={batchApplyProviders.data?.currentProviderId || undefined}
+        />
+      )}
 
       <AddProviderDialog
         open={isAddOpen}
         onOpenChange={setIsAddOpen}
         appId={activeApp}
-        onSubmit={addProvider}
+        onSubmit={remoteTargetId ? handleAddRemoteProvider : addProvider}
+        remoteExistingKeys={
+          remoteTargetId
+            ? [
+                ...Object.keys(remoteProvidersQuery.data?.providers ?? {}),
+                ...(remoteProvidersQuery.data?.liveIds ?? []),
+              ]
+            : undefined
+        }
       />
 
       <EditProviderDialog
@@ -1770,6 +2521,17 @@ function App() {
         onSubmit={handleEditProvider}
         appId={activeApp}
         isProxyTakeover={isCurrentAppTakeoverActive}
+        remoteLiveIds={
+          remoteTargetId ? remoteProvidersQuery.data?.liveIds : undefined
+        }
+        remoteExistingKeys={
+          remoteTargetId
+            ? [
+                ...Object.keys(remoteProvidersQuery.data?.providers ?? {}),
+                ...(remoteProvidersQuery.data?.liveIds ?? []),
+              ]
+            : undefined
+        }
       />
 
       {effectiveUsageProvider && (

@@ -20,6 +20,10 @@ const skillsPanelMocks = vi.hoisted(() => ({
   openDiscovery: vi.fn(),
 }));
 
+// 集成测试渲染整个 App（含窗口状态同步等副作用），全量并行时较慢，
+// 放宽默认超时避免 CPU 争抢导致的误报。
+vi.setConfig({ testTimeout: 30000 });
+
 vi.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccessMock(...args),

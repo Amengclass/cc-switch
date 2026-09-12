@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+
+import { toast } from "sonner";
 import { type AppId } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
@@ -7,11 +9,20 @@ import PiPromptPanel, { type PromptPrimaryAction } from "./PiPromptPanel";
 import PromptFormPanel from "./PromptFormPanel";
 import { PromptLibrary } from "./PromptLibrary";
 import { ConfirmDialog } from "../ConfirmDialog";
+import {
+  listRemotePrompts,
+  saveRemotePrompts,
+  type RemotePrompt,
+} from "@/lib/api/remote";
 
 interface PromptPanelProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   appId: AppId;
+  /** 选中远端目标时，Prompts 直接编辑该主机 ~/.claude/CLAUDE.md */
+  remoteTargetId?: string;
+  /** 目标细化到 Docker 容器时，编辑容器内 ~/.claude/CLAUDE.md */
+  remoteContainerId?: string;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
   onPrimaryActionChange?: (action: PromptPrimaryAction) => void;
@@ -31,6 +42,8 @@ const StandardPromptPanel = React.forwardRef<
     {
       open,
       appId,
+      remoteTargetId,
+      remoteContainerId,
       onInteractionBlockedChange,
       onNavigationBlockedChange,
       onPrimaryActionChange,
@@ -38,6 +51,9 @@ const StandardPromptPanel = React.forwardRef<
     ref,
   ) => {
     const { t } = useTranslation();
+    // 远端目标下走远端 prompts 管理（所有 app，后端按 app 映射 live 提示词文件）
+    const isRemote = Boolean(remoteTargetId);
+
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
@@ -56,14 +72,42 @@ const StandardPromptPanel = React.forwardRef<
     const overlayOpenRef = React.useRef(false);
     const externalReloadQueuedRef = React.useRef(false);
 
-    const {
-      prompts,
-      loading,
-      reload,
-      savePrompt,
-      deletePrompt,
-      toggleEnabled,
-    } = usePromptActions(appId);
+    // 本地：使用 DB hook
+    const localActions = usePromptActions(appId);
+    // 远端：自行管理状态
+    const [remoteLoading, setRemoteLoading] = useState(false);
+    const [remotePrompts, setRemotePrompts] = useState<
+      Record<string, RemotePrompt>
+    >({});
+
+    const loadRemote = useCallback(async () => {
+      if (!remoteTargetId) return;
+      setRemoteLoading(true);
+      try {
+        const list = await listRemotePrompts(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          appId,
+        );
+        const map: Record<string, RemotePrompt> = {};
+        list.forEach((p) => {
+          map[p.id] = p;
+        });
+        setRemotePrompts(map);
+      } catch (e) {
+        toast.error(String(e));
+      } finally {
+        setRemoteLoading(false);
+      }
+    }, [remoteTargetId, remoteContainerId]);
+
+    const prompts = isRemote ? remotePrompts : localActions.prompts;
+    const loading = isRemote ? remoteLoading : localActions.loading;
+    const savePrompt = localActions.savePrompt;
+    const deletePrompt = localActions.deletePrompt;
+    const toggleEnabled = localActions.toggleEnabled;
+
+    const reload = isRemote ? loadRemote : localActions.reload;
     const reloadRef = React.useRef(reload);
     reloadRef.current = reload;
 
@@ -150,7 +194,6 @@ const StandardPromptPanel = React.forwardRef<
           void runExternalReload();
         }
       };
-
       window.addEventListener("prompt-imported", handlePromptImported);
       return () => {
         window.removeEventListener("prompt-imported", handlePromptImported);
@@ -195,14 +238,33 @@ const StandardPromptPanel = React.forwardRef<
         onConfirm: async () => {
           if (!beginWrite()) return;
           try {
-            const refreshed = await deletePrompt(id);
-            if (refreshed === false) {
-              externalReloadQueuedRef.current = true;
+            if (isRemote && remoteTargetId) {
+              const list = Object.values(remotePrompts).filter(
+                (p) => p.id !== id,
+              );
+              await saveRemotePrompts(
+                remoteTargetId,
+                list,
+                remoteContainerId || undefined,
+                appId,
+              );
+              // 同步更新前端状态
+              setRemotePrompts((prev) => {
+                const next = { ...prev };
+                delete next[id];
+                return next;
+              });
+              toast.success(t("prompts.deleteSuccess"), { closeButton: true });
+            } else {
+              const refreshed = await deletePrompt(id);
+              if (refreshed === false) {
+                externalReloadQueuedRef.current = true;
+              }
             }
             overlayOpenRef.current = false;
             setConfirmDialog(null);
-          } catch {
-            // Error handled by hook
+          } catch (e) {
+            toast.error(String(e));
           } finally {
             endWrite();
           }
@@ -213,6 +275,56 @@ const StandardPromptPanel = React.forwardRef<
     const handleToggle = async (id: string, enabled: boolean) => {
       if (!beginWrite()) return;
       try {
+        if (isRemote && remoteTargetId) {
+          // 远端：乐观更新 + 写回远端 CLAUDE.md
+          const prev = { ...remotePrompts };
+          // 乐观更新：立即改 UI
+          if (enabled) {
+            const updated: Record<string, RemotePrompt> = {};
+            Object.keys(remotePrompts).forEach((k) => {
+              updated[k] = { ...remotePrompts[k], enabled: k === id };
+            });
+            setRemotePrompts(updated);
+          } else {
+            setRemotePrompts((p) => ({
+              ...p,
+              [id]: { ...p[id], enabled: false },
+            }));
+          }
+          try {
+            const list = Object.values(
+              enabled
+                ? Object.keys(remotePrompts).reduce<
+                    Record<string, RemotePrompt>
+                  >((acc, k) => {
+                    acc[k] = { ...remotePrompts[k], enabled: k === id };
+                    return acc;
+                  }, {})
+                : {
+                    ...remotePrompts,
+                    [id]: { ...remotePrompts[id], enabled: false },
+                  },
+            );
+            await saveRemotePrompts(
+              remoteTargetId,
+              list,
+              remoteContainerId || undefined,
+              appId,
+            );
+            toast.success(
+              enabled
+                ? t("prompts.enableSuccess")
+                : t("prompts.disableSuccess"),
+              { closeButton: true },
+            );
+          } catch (e) {
+            setRemotePrompts(prev); // 回滚
+            toast.error(
+              enabled ? t("prompts.enableFailed") : t("prompts.disableFailed"),
+            );
+          }
+          return;
+        }
         const refreshed = await toggleEnabled(id, enabled);
         if (refreshed === false) {
           externalReloadQueuedRef.current = true;
@@ -230,6 +342,41 @@ const StandardPromptPanel = React.forwardRef<
     ) => {
       if (!beginWrite()) return false;
       try {
+        if (isRemote && remoteTargetId) {
+          const list = Object.values(remotePrompts);
+          if (editingId) {
+            const idx = list.findIndex((p) => p.id === editingId);
+            if (idx >= 0) {
+              list[idx] = {
+                ...list[idx],
+                ...prompt,
+                id: editingId,
+                updatedAt: Date.now(),
+              };
+            }
+          } else {
+            list.push({
+              ...prompt,
+              id,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            });
+          }
+          await saveRemotePrompts(
+            remoteTargetId,
+            list,
+            remoteContainerId || undefined,
+            appId,
+          );
+          // 同步更新前端状态
+          const map: Record<string, RemotePrompt> = {};
+          list.forEach((p) => {
+            map[p.id] = p;
+          });
+          setRemotePrompts(map);
+          toast.success(t("prompts.saveSuccess"), { closeButton: true });
+          return true;
+        }
         const refreshed = await savePrompt(id, prompt);
         if (refreshed === false) {
           externalReloadQueuedRef.current = true;
@@ -253,8 +400,8 @@ const StandardPromptPanel = React.forwardRef<
       }
     };
 
-    const promptEntries = Object.entries(prompts);
-    const enabledPrompt = promptEntries.find(([, prompt]) => prompt.enabled);
+    const promptEntries = useMemo(() => Object.entries(prompts), [prompts]);
+    const enabledPrompt = promptEntries.find(([_, p]) => p.enabled);
 
     return (
       <div className="flex flex-col flex-1 min-h-0 px-6">
@@ -316,6 +463,8 @@ const PromptPanel = React.forwardRef<PromptPanelHandle, PromptPanelProps>(
         <PiPromptPanel
           ref={ref}
           open={props.open}
+          remoteTargetId={props.remoteTargetId}
+          remoteContainerId={props.remoteContainerId}
           onInteractionBlockedChange={props.onInteractionBlockedChange}
           onNavigationBlockedChange={props.onNavigationBlockedChange}
           onPrimaryActionChange={props.onPrimaryActionChange}

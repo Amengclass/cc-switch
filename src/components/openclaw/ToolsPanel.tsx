@@ -29,10 +29,15 @@ interface ListItem {
   value: string;
 }
 
-const ToolsPanel: React.FC = () => {
+interface ToolsPanelProps {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}
+
+const ToolsPanel: React.FC<ToolsPanelProps> = ({ remoteTargetId, remoteContainerId }) => {
   const { t } = useTranslation();
-  const { data: toolsData, isLoading } = useOpenClawTools();
-  const saveToolsMutation = useSaveOpenClawTools();
+  const { data: toolsData, isLoading } = useOpenClawTools(remoteTargetId, remoteContainerId);
+  const saveToolsMutation = useSaveOpenClawTools(remoteTargetId, remoteContainerId);
   const [config, setConfig] = useState<OpenClawToolsConfig>({});
   const [allowList, setAllowList] = useState<ListItem[]>([]);
   const [denyList, setDenyList] = useState<ListItem[]>([]);

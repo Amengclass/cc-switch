@@ -188,6 +188,51 @@ pub async fn query_usage(
     .await
 }
 
+/// 用调用方提供的 provider 执行其通用 JS 用量脚本（不读数据库）。
+/// 本机 `query_usage` 从 SQLite 读 provider 后走这里的 execute；远端场景
+/// provider 直接来自远端 SSOT，共用这份执行逻辑。
+pub async fn execute_usage_for_provider(
+    provider: &crate::provider::Provider,
+    app_type: &AppType,
+) -> Result<UsageResult, AppError> {
+    let usage_script = provider
+        .meta
+        .as_ref()
+        .and_then(|m| m.usage_script.as_ref())
+        .ok_or_else(|| {
+            AppError::localized(
+                "provider.usage.script.missing",
+                "未配置用量查询脚本",
+                "Usage script is not configured",
+            )
+        })?;
+    if !usage_script.enabled {
+        return Err(AppError::localized(
+            "provider.usage.disabled",
+            "用量查询未启用",
+            "Usage query is disabled",
+        ));
+    }
+
+    let (api_key, base_url) = resolve_script_credentials(
+        app_type,
+        provider,
+        usage_script.api_key.as_deref(),
+        usage_script.base_url.as_deref(),
+    );
+
+    execute_and_format_usage_result(
+        &usage_script.code,
+        &api_key,
+        &base_url,
+        usage_script.timeout.unwrap_or(10),
+        usage_script.access_token.as_deref(),
+        usage_script.user_id.as_deref(),
+        usage_script.template_type.as_deref(),
+    )
+    .await
+}
+
 /// Test usage script (using temporary script content, not saved)
 #[allow(clippy::too_many_arguments)]
 pub async fn test_usage_script(

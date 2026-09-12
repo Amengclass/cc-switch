@@ -104,7 +104,8 @@ fn scan_sessions_sqlite() -> Vec<SessionMeta> {
     sessions
 }
 
-fn sqlite_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMeta> {
+/// 纯映射：helper 返回的会话行 JSON → SessionMeta（本机/远端共用）。
+pub(crate) fn sqlite_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMeta> {
     let obj = row.as_object()?;
 
     let session_id = obj.get("id").and_then(Value::as_str)?.to_string();
@@ -227,6 +228,27 @@ pub fn load_messages_sqlite(source: &str) -> Result<Vec<SessionMessage>, String>
     }
 
     Ok(messages)
+}
+
+/// 纯映射：helper 返回的消息行 JSON（列 role/content/created_at）→ SessionMessage（远端共用）。
+pub(crate) fn sqlite_row_to_message(row: &Value) -> Option<SessionMessage> {
+    let role = row.get("role").and_then(Value::as_str).unwrap_or("");
+    if role.is_empty() {
+        return None;
+    }
+    let content = row.get("content").and_then(Value::as_str).unwrap_or("");
+    if content.trim().is_empty() {
+        return None;
+    }
+    let ts = row
+        .get("created_at")
+        .and_then(Value::as_i64)
+        .and_then(|v| parse_timestamp_to_ms(&Value::Number(v.into())));
+    Some(SessionMessage {
+        role: role.to_string(),
+        content: content.to_string(),
+        ts,
+    })
 }
 
 /// Delete a session from the Hermes SQLite database.

@@ -12,6 +12,8 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod floating;
+mod fsops;
 mod gemini_config;
 mod gemini_mcp;
 mod grok_config;
@@ -20,9 +22,10 @@ mod init_status;
 mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
+mod magic;
 mod mcp;
 mod model_capabilities;
-mod openclaw_config;
+pub mod openclaw_config;
 mod opencode_config;
 mod panic_hook;
 mod pi_config;
@@ -30,6 +33,7 @@ mod prompt;
 mod prompt_files;
 mod provider;
 mod proxy;
+mod remote;
 mod services;
 mod session_manager;
 mod settings;
@@ -408,6 +412,9 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         // 拦截窗口关闭：根据设置决定是否最小化到托盘
         .on_window_event(|window, event| {
+            // 增强层窗口事件（悬浮窗菜单失焦收起 / 球拖动落盘）—— 见 magic 模块
+            crate::magic::on_window_event(window, event);
+
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 数据库版本过新的恢复模式下没有托盘可唤回，关闭即退出，避免应用隐身后台
                 let in_db_recovery = crate::init_status::get_init_error()
@@ -445,6 +452,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
+                // 排除悬浮窗（球/面板/菜单）避免被恢复成历史错误尺寸——见 magic::DENIED_WINDOW_LABELS
+                .with_denylist(&crate::magic::DENIED_WINDOW_LABELS)
                 .build(),
         )
         .setup(|app| {
@@ -1201,6 +1210,9 @@ pub fn run() {
                 }
             }
 
+            // 启动后预热用量缓存（悬浮窗 / 托盘首次展示即有余量数据）—— 见 magic 模块
+            crate::magic::warm_usage_cache(app);
+
             // 异常退出恢复 + 代理状态自动恢复
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -1365,6 +1377,9 @@ pub fn run() {
                 }
             }
 
+            // 悬浮窗：开启时创建悬浮球窗口（独立于主窗口，轻量模式仍可工作）—— 见 magic 模块
+            crate::magic::ensure_floating(app.handle(), settings.enable_floating_window);
+
 
             Ok(())
         })
@@ -1467,10 +1482,18 @@ pub fn run() {
             commands::list_pi_prompt_templates,
             commands::upsert_pi_prompt_template,
             commands::delete_pi_prompt_template,
+            // Pi remote prompt file + template commands
+            remote::commands::get_remote_pi_prompt_file,
+            remote::commands::replace_remote_pi_prompt_file,
+            remote::commands::delete_remote_pi_prompt_file,
+            remote::commands::list_remote_pi_prompt_templates,
+            remote::commands::upsert_remote_pi_prompt_template,
+            remote::commands::delete_remote_pi_prompt_template,
             // Pi native provider and session views
             commands::get_pi_current_state,
             commands::update_pi_provider_usage_script,
             commands::get_pi_session_discovery,
+            commands::get_pi_live_provider_ids,
             // Profile management (项目配置方案)
             commands::list_profiles,
             commands::create_profile,
@@ -1623,6 +1646,71 @@ pub fn run() {
             commands::probe_tool_installations,
             // Provider terminal
             commands::open_provider_terminal,
+            // Remote host management (SSH)
+            remote::commands::list_remote_hosts,
+            remote::commands::save_remote_host,
+            remote::commands::delete_remote_host,
+            remote::commands::test_remote_connection,
+            remote::commands::test_remote_connection_info,
+            remote::commands::set_remote_openclaw_default_model,
+            remote::commands::get_remote_openclaw_default_model,
+            remote::commands::get_remote_openclaw_env,
+            remote::commands::set_remote_openclaw_env,
+            remote::commands::get_remote_openclaw_tools,
+            remote::commands::set_remote_openclaw_tools,
+            remote::commands::get_remote_openclaw_agents_defaults,
+            remote::commands::set_remote_openclaw_agents_defaults,
+            remote::commands::get_remote_hermes_model_config,
+            remote::commands::set_remote_route_proxy_app,
+            remote::commands::probe_hosts_online,
+            remote::commands::test_remote_provider_connection,
+            remote::commands::remove_remote_provider_from_live,
+            remote::commands::clear_remote_provider_record,
+            remote::commands::read_remote_settings,
+            remote::commands::switch_remote_provider,
+            remote::commands::broadcast_switch_provider,
+        remote::commands::reapply_remote_provider,
+            remote::commands::scan_remote_env_conflicts,
+            remote::commands::clean_remote_env_conflicts,
+            remote::commands::list_remote_sessions,
+            remote::commands::list_remote_sessions_detailed,
+            remote::commands::list_remote_sessions_all,
+            remote::commands::get_remote_session_messages,
+            remote::commands::delete_remote_session,
+            remote::commands::get_remote_providers,
+            remote::commands::query_remote_provider_usage,
+            remote::commands::stream_check_remote_provider,
+            remote::commands::add_remote_provider,
+            remote::commands::update_remote_provider,
+            remote::commands::delete_remote_provider,
+            remote::commands::update_remote_provider_sort_order,
+            remote::commands::update_remote_provider_meta,
+            remote::commands::get_remote_current_provider,
+            remote::commands::check_remote_cli_installed,
+            remote::commands::check_local_cli_installed,
+            remote::commands::read_remote_mcp_servers,
+            remote::commands::read_remote_mcp_json,
+            remote::commands::upsert_remote_mcp_server,
+            remote::commands::delete_remote_mcp_server,
+            remote::commands::toggle_remote_mcp_app,
+            remote::commands::bulk_toggle_remote_mcp_app,
+            remote::commands::import_remote_mcp_from_apps,
+            remote::commands::read_remote_prompt,
+            remote::commands::write_remote_prompt,
+            remote::commands::list_remote_prompts,
+            remote::commands::save_remote_prompts,
+            remote::commands::list_remote_skills,
+            remote::commands::delete_remote_skill,
+            remote::commands::install_remote_skills_from_zip,
+            remote::commands::install_remote_skill_from_dir,
+            remote::commands::install_remote_skill_from_discoverable,
+            remote::commands::update_remote_skill,
+            remote::commands::check_remote_skill_updates,
+            remote::commands::scan_remote_unmanaged_skills,
+            remote::commands::import_remote_skill,
+            remote::commands::toggle_remote_skill_app,
+            remote::commands::bulk_toggle_remote_skill_app,
+            remote::commands::list_docker_containers,
             // Universal Provider management
             commands::get_universal_providers,
             commands::get_universal_provider,
@@ -1666,6 +1754,27 @@ pub fn run() {
             commands::scan_local_proxies,
             // Window theme control
             commands::set_window_theme,
+            // Floating window (加速球)
+            floating::get_floating_window_data,
+            floating::get_floating_ball_detail,
+            floating::get_floating_ball_target,
+            floating::floating_set_pin_app,
+            floating::floating_record_active_app,
+            floating::floating_refresh_usage,
+            floating::floating_set_remote_takeover,
+            floating::floating_set_remote_context,
+            floating::show_floating_panel,
+            floating::hide_floating_panel,
+            floating::floating_set_hover,
+            floating::set_floating_ball_position,
+            floating::open_main_window,
+            floating::disable_floating_window,
+            floating::floating_drag_begin,
+            floating::floating_drag_end,
+            floating::floating_expand_from_strip,
+            floating::show_floating_context_menu,
+            floating::hide_floating_menu,
+            floating::floating_open_settings,
             // Generic managed auth commands
             commands::auth_start_login,
             commands::auth_poll_for_account,
@@ -1880,6 +1989,9 @@ pub fn run() {
 /// 确保 Claude Code/Codex/Gemini 的配置不会处于损坏状态。
 /// 使用 stop_with_restore_keep_state 保留 settings 表中的代理状态，下次启动时自动恢复。
 pub async fn cleanup_before_exit(app_handle: &tauri::AppHandle) {
+    // 悬浮球位置最后落盘一次（防抖任务可能还没跑完）
+    crate::floating::save_ball_position_now(app_handle);
+
     if let Some(state) = app_handle.try_state::<store::AppState>() {
         let proxy_service = &state.proxy_service;
 
@@ -1965,7 +2077,18 @@ async fn restore_proxy_state_on_startup(state: &store::AppState) {
     let apps_to_restore = enabled_proxy_apps_on_startup(&state.db).await;
 
     if apps_to_restore.is_empty() {
-        log::debug!("启动时无需恢复代理状态");
+        // 本机无接管要恢复；但远端可能有「远端接管」意图（route_proxy_apps /
+        // route_proxy_container_apps 非空）——重启后开关显示开、代理却没跑，
+        // 流心不亮且远端连不上。此处按意图拉起代理进程（隧道由下次取连接时
+        // sync_route_tunnel 对账自动建立，无需在此主动建）。
+        if crate::remote::commands::any_route_consumer(state).await {
+            log::info!("检测到远端接管意图，启动代理服务");
+            if let Err(e) = state.proxy_service.start().await {
+                log::error!("按远端接管意图启动代理服务失败: {e}");
+            }
+        } else {
+            log::debug!("启动时无需恢复代理状态");
+        }
         return;
     }
 

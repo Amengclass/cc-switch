@@ -22,6 +22,7 @@ import SubscriptionQuotaFooter from "@/components/SubscriptionQuotaFooter";
 import CopilotQuotaFooter from "@/components/CopilotQuotaFooter";
 import CodexOauthQuotaFooter from "@/components/CodexOauthQuotaFooter";
 import XaiOauthQuotaFooter from "@/components/XaiOauthQuotaFooter";
+import { useSettings } from "@/hooks/useSettings";
 import { PROVIDER_TYPES, TEMPLATE_TYPES } from "@/config/constants";
 import { isHermesReadOnlyProvider } from "@/config/hermesProviderPresets";
 import { ProviderHealthBadge } from "@/components/providers/ProviderHealthBadge";
@@ -52,6 +53,10 @@ interface ProviderCardProps {
   provider: Provider;
   isCurrent: boolean;
   appId: AppId;
+  /** 远端目标：提供时余量查询改走远端 SSOT（见 useUsageQuery） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined） */
+  remoteContainerId?: string;
   isInConfig?: boolean; // OpenCode: 是否已添加到 opencode.json
   isOmo?: boolean;
   isOmoSlim?: boolean;
@@ -67,6 +72,8 @@ interface ProviderCardProps {
   onTest?: (provider: Provider) => void;
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
+  /** 远程切换进行中：禁用切换按钮防连点 */
+  isSwitching?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管，切换为热切换）
   dragHandleProps?: DragHandleProps;
@@ -169,6 +176,8 @@ export function ProviderCard({
   provider,
   isCurrent,
   appId,
+  remoteTargetId,
+  remoteContainerId,
   isInConfig = true,
   isOmo = false,
   isOmoSlim = false,
@@ -184,6 +193,7 @@ export function ProviderCard({
   onTest,
   onOpenTerminal,
   isTesting,
+  isSwitching,
   isProxyRunning,
   isProxyTakeover = false,
   dragHandleProps,
@@ -230,7 +240,7 @@ export function ProviderCard({
   // OMO and OMO Slim share the same card behavior
   const isAnyOmo = isOmo || isOmoSlim;
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
-  const isAdditiveMode = (appId === "opencode" && !isAnyOmo) || appId === "pi";
+  const isAdditiveMode = isAdditiveAppId(appId) && (appId !== "opencode" || !isAnyOmo);
 
   const { data: health } = useProviderHealth(
     provider.id,
@@ -268,6 +278,8 @@ export function ProviderCard({
   const isBoundCodexOfficial = codexOfficialIdentity === "managed_account";
   const usageEnabled =
     provider.meta?.usage_script?.enabled ?? isBoundCodexOfficial;
+  const { settings } = useSettings();
+  const quotaInline = (settings?.quotaDisplayMode ?? "compact") === "compact";
   const isOfficial = isOfficialProvider(provider, appId);
   const supportsOfficialSubscription =
     isOfficial && ["claude", "codex", "gemini", "grokbuild"].includes(appId);
@@ -319,6 +331,8 @@ export function ProviderCard({
   const { data: usage } = useUsageQuery(provider.id, appId, {
     enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage,
     autoQueryInterval,
+    remoteTargetId,
+    remoteContainerId,
   });
 
   const isTokenPlan =
@@ -329,10 +343,13 @@ export function ProviderCard({
   const [isExpanded, setIsExpanded] = useState(false);
 
   useEffect(() => {
-    if (hasMultiplePlans) {
+    // 紧凑模式下强制收起，展开模式下多套餐自动展开
+    if (!quotaInline && hasMultiplePlans) {
       setIsExpanded(true);
+    } else if (quotaInline) {
+      setIsExpanded(false);
     }
-  }, [hasMultiplePlans]);
+  }, [hasMultiplePlans, quotaInline]);
 
   const handleOpenWebsite = () => {
     if (!isClickableUrl) {
@@ -604,14 +621,14 @@ export function ProviderCard({
               {isCopilot ? (
                 <CopilotQuotaFooter
                   meta={provider.meta}
-                  inline={true}
+                  inline={quotaInline}
                   isCurrent={isCurrent}
                 />
               ) : isCodexOauth ? (
                 !isBoundCodexOfficial || usageEnabled ? (
                   <CodexOauthQuotaFooter
                     meta={provider.meta}
-                    inline={true}
+                    inline={quotaInline}
                     isCurrent={isCurrent}
                     autoQueryInterval={
                       isBoundCodexOfficial
@@ -623,30 +640,31 @@ export function ProviderCard({
               ) : isXaiOauth ? (
                 <XaiOauthQuotaFooter
                   meta={provider.meta}
-                  inline={true}
+                  inline={quotaInline}
                   isCurrent={isCurrent}
                 />
               ) : isOfficial ? (
                 officialSubscriptionEnabled ? (
                   <SubscriptionQuotaFooter
                     appId={appId}
-                    inline={true}
+                    inline={quotaInline}
                     isCurrent={isCurrent}
                     autoQueryInterval={
                       provider.meta?.usage_script?.autoQueryInterval ?? 0
                     }
                   />
                 ) : null
-              ) : hasMultiplePlans ? (
+              ) : !quotaInline ? (
+                // 展开模式：显示套餐摘要
                 <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
                   <span className="font-medium">
-                    {t("usage.multiplePlans", {
-                      count: usage?.data?.length || 0,
-                      defaultValue: `${usage?.data?.length || 0} 个套餐`,
+                    {t("usage.subscriptionQuota", {
+                      defaultValue: "套餐用量",
                     })}
                   </span>
                 </div>
               ) : (
+                // 紧凑模式：直接显示 inline 格式
                 <UsageFooter
                   provider={provider}
                   providerId={provider.id}
@@ -654,10 +672,13 @@ export function ProviderCard({
                   usageEnabled={usageEnabled}
                   isCurrent={isCurrent}
                   isInConfig={isInConfig}
-                  inline={true}
+                  inline={quotaInline}
+                  remoteTargetId={remoteTargetId}
+                  remoteContainerId={remoteContainerId}
                 />
               )}
-              {hasMultiplePlans && (
+              {/* 展开按钮：仅展开模式显示，紧凑模式完全隐藏 */}
+              {!quotaInline && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -686,6 +707,7 @@ export function ProviderCard({
               isCurrent={isCurrent}
               isInConfig={isInConfig}
               isTesting={isTesting}
+              isSwitching={isSwitching}
               isProxyTakeover={isProxyTakeover}
               isOfficialBlockedByProxy={isOfficialBlockedByProxy}
               isReadOnly={isHermesReadOnly}
@@ -737,8 +759,9 @@ export function ProviderCard({
         </div>
       </div>
 
-      {isExpanded && hasMultiplePlans && (
-        <div className="mt-4 pt-4 border-t border-border-default">
+      {/* 展开区域：仅展开模式显示 */}
+      {isExpanded && !quotaInline && (
+        <div className="mt-1 pt-1 border-t border-border-default">
           <UsageFooter
             provider={provider}
             providerId={provider.id}
@@ -746,7 +769,9 @@ export function ProviderCard({
             usageEnabled={usageEnabled}
             isCurrent={isCurrent}
             isInConfig={isInConfig}
-            inline={false}
+            inline={quotaInline}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
           />
         </div>
       )}

@@ -53,6 +53,8 @@ use std::sync::Mutex;
 
 /// 当前 Schema 版本号
 /// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
+/// 当前 Schema 版本号
+/// 每次修改表结构时递增，并在 schema.rs 中添加相应的迁移逻辑
 pub(crate) const SCHEMA_VERSION: i32 = 18;
 
 /// 安全地序列化 JSON，避免 unwrap panic
@@ -179,6 +181,7 @@ impl Database {
         }
         let conn = Connection::open(db_path).map_err(|e| AppError::Database(e.to_string()))?;
         let version = Self::get_user_version(&conn)?;
+        // 高于当前 schema 版本的才是来自更高版本应用的库
         Ok((version > SCHEMA_VERSION).then_some(version))
     }
 

@@ -13,6 +13,7 @@ import {
 } from "@/lib/query/proxy";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { getAppLabel } from "@/config/appConfig";
+import type { ProxyTakeoverStatus } from "@/types/proxy";
 
 /**
  * 代理服务状态管理
@@ -116,6 +117,24 @@ export function useProxyStatus() {
   const setTakeoverForAppMutation = useMutation({
     mutationFn: ({ appType, enabled }: { appType: string; enabled: boolean }) =>
       proxyApi.setProxyTakeoverForApp(appType, enabled),
+    // 乐观更新：点击瞬间即把目标值写入 takeoverStatus 缓存。
+    // 不这么做的话，悬浮球/面板要等 mutation 返回（后端写 live 配置，数百 ms）
+    // → invalidate → refetch → state 更新 → 才推送快照，用户感知为「开关点了半天
+    // 悬浮窗才变色」。这里立即反映意图，失败再回滚。
+    onMutate: async ({ appType, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: proxyKeys.takeoverStatus });
+      const previous =
+        queryClient.getQueryData<ProxyTakeoverStatus>(
+          proxyKeys.takeoverStatus,
+        );
+      if (previous) {
+        queryClient.setQueryData<ProxyTakeoverStatus>(
+          proxyKeys.takeoverStatus,
+          { ...previous, [appType]: enabled },
+        );
+      }
+      return { previous };
+    },
     onSuccess: (_data, variables) => {
       const appLabel = getAppLabel(variables.appType);
 
@@ -134,7 +153,18 @@ export function useProxyStatus() {
       queryClient.invalidateQueries({ queryKey: proxyKeys.status });
       queryClient.invalidateQueries({ queryKey: proxyKeys.takeoverStatus });
     },
-    onError: (error: Error) => {
+    onError: (
+      error: Error,
+      _variables,
+      context: { previous?: ProxyTakeoverStatus } | undefined,
+    ) => {
+      // 回滚乐观更新，避免「界面显示已接管但实际失败」
+      if (context?.previous) {
+        queryClient.setQueryData(
+          proxyKeys.takeoverStatus,
+          context.previous,
+        );
+      }
       const detail =
         extractErrorMessage(error) ||
         t("common.unknown", { defaultValue: "未知错误" });

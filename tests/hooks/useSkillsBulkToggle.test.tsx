@@ -17,6 +17,8 @@ const restoreBackupMock = vi.hoisted(() => vi.fn());
 const uninstallMock = vi.hoisted(() => vi.fn());
 const deleteBackupMock = vi.hoisted(() => vi.fn());
 const updateSkillMock = vi.hoisted(() => vi.fn());
+const toggleRemoteSkillAppMock = vi.hoisted(() => vi.fn());
+const bulkToggleRemoteSkillAppMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/skills", () => ({
   skillsApi: {
@@ -26,6 +28,11 @@ vi.mock("@/lib/api/skills", () => ({
     deleteBackup: deleteBackupMock,
     updateSkill: updateSkillMock,
   },
+}));
+
+vi.mock("@/lib/api/remote", () => ({
+  toggleRemoteSkillApp: toggleRemoteSkillAppMock,
+  bulkToggleRemoteSkillApp: bulkToggleRemoteSkillAppMock,
 }));
 
 function createWrapper(queryClient: QueryClient) {
@@ -43,6 +50,75 @@ describe("Skills management mutation hooks", () => {
     uninstallMock.mockReset();
     deleteBackupMock.mockReset();
     updateSkillMock.mockReset();
+    toggleRemoteSkillAppMock.mockReset();
+    bulkToggleRemoteSkillAppMock.mockReset();
+  });
+
+  it("routes bulk toggles to the remote bulk command and its query key", async () => {
+    bulkToggleRemoteSkillAppMock.mockResolvedValue({
+      succeeded: ["alpha", "beta"],
+      failed: [],
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(
+      () => useBulkToggleSkillApp("host-1", "container-1"),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        ids: ["alpha", "beta"],
+        app: "claude",
+        enabled: true,
+      });
+    });
+
+    expect(toggleAppMock).not.toHaveBeenCalled();
+    expect(toggleRemoteSkillAppMock).not.toHaveBeenCalled();
+    expect(bulkToggleRemoteSkillAppMock).toHaveBeenCalledWith(
+      "host-1",
+      ["alpha", "beta"],
+      "claude",
+      true,
+      "container-1",
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["skills", "installed", "remote", "host-1", "container-1"],
+    });
+  });
+
+  it("forwards per-item failures from the remote bulk command", async () => {
+    bulkToggleRemoteSkillAppMock.mockResolvedValue({
+      succeeded: ["alpha"],
+      failed: [{ item: "beta", error: "boom" }],
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    });
+    const { result } = renderHook(
+      () => useBulkToggleSkillApp("host-1"),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    let outcome!: {
+      succeeded: string[];
+      failed: Array<{ item: string; error: unknown }>;
+    };
+    await act(async () => {
+      outcome = await result.current.mutateAsync({
+        ids: ["alpha", "beta"],
+        app: "claude",
+        enabled: true,
+      });
+    });
+
+    expect(outcome).toEqual({
+      succeeded: ["alpha"],
+      failed: [{ item: "beta", error: "boom" }],
+    });
   });
 
   it("stays pending until the refreshed skill list is available", async () => {

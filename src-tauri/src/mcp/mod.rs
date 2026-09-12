@@ -10,12 +10,14 @@
 //! - `gemini` - Gemini MCP 同步和导入
 //! - `opencode` - OpenCode MCP 同步和导入（含 local/remote 格式转换）
 //! - `hermes` - Hermes MCP 同步和导入
+//! - `openclaw` - OpenClaw MCP 同步和导入（openclaw.json 顶层 mcp.servers）
 
 mod claude;
 mod codex;
 mod gemini;
 mod grokbuild;
 mod hermes;
+mod openclaw;
 mod opencode;
 mod validation;
 
@@ -25,7 +27,8 @@ pub use claude::{
     sync_single_server_to_claude,
 };
 pub use codex::{
-    import_from_codex, remove_server_from_codex, sync_enabled_to_codex, sync_single_server_to_codex,
+    import_from_codex, json_server_to_toml_table, remove_server_from_codex, sync_enabled_to_codex,
+    sync_single_server_to_codex,
 };
 pub use gemini::{
     import_from_gemini, remove_server_from_gemini, sync_enabled_to_gemini,
@@ -34,7 +37,15 @@ pub use gemini::{
 pub use grokbuild::{
     import_from_grokbuild, remove_server_from_grokbuild, sync_single_server_to_grokbuild,
 };
-pub use hermes::{import_from_hermes, remove_server_from_hermes, sync_single_server_to_hermes};
+pub use hermes::{
+    convert_to_hermes_format, import_from_hermes, merge_hermes_spec, remove_server_from_hermes,
+    sync_single_server_to_hermes,
+};
+pub use openclaw::{
+    convert_from_openclaw_format, convert_to_openclaw_format, import_from_openclaw,
+    remove_server_from_openclaw, sync_single_server_to_openclaw,
+};
 pub use opencode::{
-    import_from_opencode, remove_server_from_opencode, sync_single_server_to_opencode,
+    convert_to_opencode_format, import_from_opencode, remove_server_from_opencode,
+    sync_single_server_to_opencode,
 };

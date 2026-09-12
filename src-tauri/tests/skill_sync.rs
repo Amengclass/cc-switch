@@ -56,6 +56,7 @@ fn import_from_apps_respects_explicit_app_selection() {
                 opencode: true,
                 ..Default::default()
             },
+            path: None,
         }],
     )
     .expect("import skills");
@@ -96,6 +97,7 @@ fn import_from_apps_does_not_rewrite_selected_app_directory() {
                 codex: true,
                 ..Default::default()
             },
+            path: None,
         }],
     )
     .expect("import skills");

@@ -26,7 +26,7 @@ mod proxy;
 mod session_manager;
 mod settings;
 pub mod skill;
-mod stream_check;
+pub(crate) mod stream_check;
 mod subscription;
 mod sync_support;
 mod xai_oauth;

@@ -357,18 +357,138 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
     })
 }
 
+/// Parse Pi session messages from string content (used by remote path).
+/// Combines tree parsing and message extraction in one call.
+pub(crate) fn parse_messages_from_content(content: &str) -> Result<Vec<SessionMessage>, String> {
+    let lines = content.lines().map(|s| Ok::<_, String>(s.to_string()));
+    let tree = read_tree_from_lines(lines)?;
+    let lines2 = content.lines().map(|s| Ok::<_, String>(s.to_string()));
+    read_active_messages_from_lines(lines2, &tree)
+}
+
+/// Parse a Pi session from string content (used by remote path).
+pub(crate) fn parse_session_from_content(
+    source_path: &str,
+    content: &str,
+) -> Result<SessionMeta, String> {
+    let lines = content.lines().map(|s| Ok::<_, String>(s.to_string()));
+    let SessionTree {
+        header, summary, ..
+    } = read_tree_from_lines(lines)?;
+    let title = summary.explicit_name.flatten().or_else(|| {
+        summary
+            .first_user_message
+            .as_deref()
+            .map(|message| truncate_summary(message, TITLE_MAX_CHARS))
+            .filter(|message| !message.is_empty())
+            .or_else(|| {
+                header
+                    .cwd
+                    .rsplit(['/', '\\'])
+                    .next()
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+    });
+    let summary_text = summary
+        .last_message
+        .as_deref()
+        .map(|message| truncate_summary(message, 160))
+        .filter(|message| !message.is_empty());
+    Ok(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: header.id,
+        title,
+        summary: summary_text,
+        project_dir: (!header.cwd.trim().is_empty()).then(|| header.cwd.clone()),
+        created_at: header.timestamp,
+        last_active_at: summary.last_active_at.or(header.timestamp),
+        source_path: Some(source_path.to_string()),
+        resume_command: Some(format!(
+            "pi --session {}",
+            crate::session_manager::terminal::shell_escape(source_path)
+        )),
+    })
+}
+
+/// Scan Pi sessions on a remote host using FileOps (SFTP / docker exec).
+/// Mirrors the local `scan_sessions()` but reads via the FileOps trait.
+pub(crate) async fn scan_sessions_fs<F: crate::fsops::FileOps + Sync>(
+    fs: &F,
+    root: &str,
+) -> Vec<SessionMeta> {
+    let entries = match fs.read_dir(root).await {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut files: Vec<(String, String)> = Vec::new(); // (entry_name, sub_path)
+
+    // 先判断布局：entries 里有没有子目录
+    let has_dirs = entries.iter().any(|e| e.is_dir);
+
+    if has_dirs {
+        // ProjectDirectories 布局：子目录里找 .jsonl 文件
+        for entry in &entries {
+            if !entry.is_dir {
+                continue;
+            }
+            let sub_root = format!("{}/{}", root, entry.name);
+            if let Ok(sub_entries) = fs.read_dir(&sub_root).await {
+                for sub_entry in sub_entries {
+                    if sub_entry.is_dir || !sub_entry.name.ends_with(".jsonl") {
+                        continue;
+                    }
+                    let path = format!("{}/{}", sub_root, sub_entry.name);
+                    files.push((sub_entry.name, path));
+                }
+            }
+        }
+    } else {
+        // Flat 布局：直接在根目录找 .jsonl 文件
+        for entry in &entries {
+            if entry.is_dir || !entry.name.ends_with(".jsonl") {
+                continue;
+            }
+            let path = format!("{}/{}", root, entry.name);
+            files.push((entry.name.clone(), path));
+        }
+    }
+
+    let mut sessions = Vec::new();
+    for (_name, path) in files {
+        if let Some(content) = fs.read_text_optional(&path).await.unwrap_or(None) {
+            match parse_session_from_content(&path, &content) {
+                Ok(session) => sessions.push(session),
+                Err(error) => {
+                    log::debug!("Skipping invalid Pi session {}: {error}", path);
+                }
+            }
+        }
+    }
+    sessions
+}
+
 fn read_tree(path: &Path) -> Result<SessionTree, String> {
     validate_file_size(path)?;
     let reader = BufReader::new(
         File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
     );
+    read_tree_from_lines(reader.lines().map(|r| r.map_err(|e| e.to_string())))
+}
+
+/// Parse a Pi session tree from an iterator of lines.
+/// Used by both local (file) and remote (SFTP string content) paths.
+fn read_tree_from_lines<I: Iterator<Item = Result<String, String>>>(
+    lines: I,
+) -> Result<SessionTree, String> {
     let mut header = None;
     let mut parents = HashMap::<String, (Option<String>, usize)>::new();
     let mut latest_id = None;
     let mut legacy_previous_id = None;
     let mut entry_index = 0usize;
     let mut summary = SessionSummary::default();
-    for line in reader.lines() {
+    for line in lines {
         let line = line.map_err(|error| format!("Failed to read Pi session: {error}"))?;
         if line.trim().is_empty() {
             continue;
@@ -472,11 +592,20 @@ fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMe
     let reader = BufReader::new(
         File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
     );
+    read_active_messages_from_lines(reader.lines().map(|r| r.map_err(|e| e.to_string())), tree)
+}
+
+/// Parse active Pi session messages from an iterator of lines.
+/// Used by both local (file) and remote (SFTP string content) paths.
+fn read_active_messages_from_lines<I: Iterator<Item = Result<String, String>>>(
+    lines: I,
+    tree: &SessionTree,
+) -> Result<Vec<SessionMessage>, String> {
     let mut messages = Vec::new();
     let mut saw_header = false;
     let mut entry_index = 0usize;
     let mut legacy_previous_id = None;
-    for line in reader.lines() {
+    for line in lines {
         let line = line.map_err(|error| format!("Failed to read Pi session: {error}"))?;
         if line.trim().is_empty() {
             continue;

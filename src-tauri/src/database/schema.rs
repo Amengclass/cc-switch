@@ -430,6 +430,10 @@ impl Database {
             [],
         );
 
+        // 增强版自有表 / 列（P2 收敛点：全部逻辑在 remote::schema，这里只留一行调用，
+        // 使官方升级时本文件的冲突从「~90 行」压到「1 行」）
+        crate::remote::schema::ensure(conn)?;
+
         Ok(())
     }
 

@@ -315,6 +315,7 @@ pub struct UsageScript {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "teamProjectId")]
     pub team_project_id: Option<String>,
+
 }
 
 /// 用量数据

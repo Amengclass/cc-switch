@@ -358,7 +358,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
               title={t("workspace.openDirectory")}
             >
               ~/.openclaw/workspace/memory/
-              <FolderOpen className="w-3.5 h-3.5" />
+              <FolderOpen className="w-3.5 h-3.5 translate-y-[1px]" />
             </p>
             <div className="flex items-center gap-1.5">
               <Button

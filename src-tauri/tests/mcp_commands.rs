@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
 
 use serde_json::json;
 
 use cc_switch_lib::{
     get_claude_mcp_path, get_claude_mcp_status, get_claude_settings_path, get_grok_config_path,
-    import_default_config_test_hook, read_claude_mcp_config, update_settings, AppError,
-    AppSettings, AppType, McpApps, McpServer, McpService, MultiAppConfig, ProviderService,
+    import_default_config_test_hook, openclaw_config, read_claude_mcp_config, update_settings,
+    AppError, AppSettings, AppState, AppType, Database, McpApps, McpServer, McpService,
+    MultiAppConfig, ProviderService,
 };
 
 #[path = "support.rs"]
@@ -409,6 +411,7 @@ command = "echo"
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -554,6 +557,7 @@ fn set_mcp_enabled_for_codex_writes_live_config() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -620,6 +624,7 @@ fn enabling_codex_mcp_skips_when_codex_dir_missing() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -666,6 +671,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -701,6 +707,7 @@ fn upsert_mcp_server_disabling_app_removes_from_claude_live_config() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -835,6 +842,7 @@ fn enabling_gemini_mcp_skips_when_gemini_dir_missing() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -891,6 +899,7 @@ fn enabling_claude_mcp_skips_when_claude_config_absent() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -947,6 +956,7 @@ fn explicit_default_claude_dir_keeps_default_split_mcp_path() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -1004,6 +1014,7 @@ fn custom_claude_dir_writes_mcp_inside_config_dir() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -1084,6 +1095,7 @@ fn custom_claude_dir_sync_does_not_copy_default_profile() {
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -1224,6 +1236,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -1247,6 +1260,7 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
                 grokbuild: false,
                 opencode: false,
                 hermes: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,
@@ -1275,5 +1289,178 @@ fn sync_all_enabled_removes_known_disabled_but_preserves_unknown_live_entries() 
     assert!(
         servers.contains_key("external-only"),
         "live entries unknown to DB should be preserved"
+    );
+}
+
+// ========================================================================
+// OpenClaw MCP 支持（openclaw.json 顶层 mcp.servers）
+// ========================================================================
+
+#[test]
+fn upsert_openclaw_server_writes_mcp_servers_and_roundtrips() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    // 模拟 OpenClaw 已安装：存在 ~/.openclaw 目录（should_sync_openclaw_mcp gate）
+    fs::create_dir_all(home.join(".openclaw")).expect("create ~/.openclaw dir");
+
+    let state = create_test_state().expect("create test state");
+
+    // stdio 服务器：启用 Claude + OpenClaw
+    let stdio_server = McpServer {
+        id: "openclaw-fs".to_string(),
+        name: "Filesystem".to_string(),
+        server: json!({
+            "type": "stdio",
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem"],
+            "env": { "HOME": "/tmp" }
+        }),
+        apps: McpApps {
+            claude: true,
+            openclaw: true,
+            ..Default::default()
+        },
+        description: None,
+        homepage: None,
+        docs: None,
+        tags: Vec::new(),
+    };
+    McpService::upsert_server(&state, stdio_server).expect("upsert stdio server");
+
+    // http 服务器：仅启用 OpenClaw
+    let http_server = McpServer {
+        id: "openclaw-http".to_string(),
+        name: "Remote".to_string(),
+        server: json!({
+            "type": "http",
+            "url": "https://example.com/mcp",
+            "headers": { "Authorization": "Bearer xxx" }
+        }),
+        apps: McpApps {
+            openclaw: true,
+            ..Default::default()
+        },
+        description: None,
+        homepage: None,
+        docs: None,
+        tags: Vec::new(),
+    };
+    McpService::upsert_server(&state, http_server).expect("upsert http server");
+
+    // 验证 openclaw.json 写入：顶层 mcp.servers（openclaw.json 为 JSON5 格式，
+    // 用 openclaw_config::get_mcp_servers 读取，避免手写 JSON5 解析）
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
+
+    assert_eq!(servers.len(), 2, "both servers written to openclaw.json");
+
+    // stdio 条目：command/args/env，无 type 字段
+    let fs_entry = servers
+        .get("openclaw-fs")
+        .expect("stdio server present in mcp.servers");
+    assert_eq!(
+        fs_entry.get("command").and_then(|v| v.as_str()),
+        Some("npx")
+    );
+    assert_eq!(
+        fs_entry.get("args").and_then(|v| v.as_array()),
+        Some(
+            &serde_json::json!(["-y", "@modelcontextprotocol/server-filesystem"])
+                .as_array()
+                .cloned()
+                .unwrap()
+        )
+    );
+    assert!(
+        fs_entry.get("type").is_none(),
+        "OpenClaw format has no type field"
+    );
+
+    // http 条目：url + transport（streamable-http）
+    let http_entry = servers
+        .get("openclaw-http")
+        .expect("http server present in mcp.servers");
+    assert_eq!(
+        http_entry.get("url").and_then(|v| v.as_str()),
+        Some("https://example.com/mcp")
+    );
+    assert_eq!(
+        http_entry.get("transport").and_then(|v| v.as_str()),
+        Some("streamable-http")
+    );
+    assert!(http_entry.get("type").is_none());
+
+    // 导入回读：用独立内存 DB 验证 openclaw.json 的条目能作为新服务器导入，
+    // 且 apps.openclaw 标记启用（Database::init 是共享文件库，upsert 已写入，
+    // 用 memory 库避免把已存在服务器判为"非新增"导致计数为 0）
+    let import_state = AppState::new(Arc::new(Database::memory().expect("create memory db")));
+    let count = McpService::import_from_openclaw(&import_state).expect("import from openclaw");
+    assert_eq!(count, 2, "both servers imported");
+    let servers = import_state
+        .db
+        .get_all_mcp_servers()
+        .expect("get all mcp servers");
+    assert!(servers.contains_key("openclaw-fs"));
+    assert!(servers.contains_key("openclaw-http"));
+    assert!(
+        servers.get("openclaw-fs").expect("fs server").apps.openclaw,
+        "fs server openclaw app enabled after import"
+    );
+    let fs_server = servers.get("openclaw-fs").expect("fs server");
+    assert_eq!(
+        fs_server.server.get("type").and_then(|v| v.as_str()),
+        Some("stdio"),
+        "imported stdio entry back to unified type"
+    );
+    let http_server = servers.get("openclaw-http").expect("http server");
+    assert_eq!(
+        http_server.server.get("type").and_then(|v| v.as_str()),
+        Some("http"),
+        "imported streamable-http entry back to unified http type"
+    );
+}
+
+#[test]
+fn toggle_openclaw_server_enables_and_removes_live_entry() {
+    let _guard = test_mutex().lock().expect("acquire test mutex");
+    reset_test_fs();
+    let home = ensure_test_home();
+    // 模拟 OpenClaw 已安装：存在 ~/.openclaw 目录（should_sync_openclaw_mcp gate）
+    fs::create_dir_all(home.join(".openclaw")).expect("create ~/.openclaw dir");
+
+    let state = create_test_state().expect("create test state");
+
+    let server = McpServer {
+        id: "openclaw-toggle".to_string(),
+        name: "Toggle".to_string(),
+        server: json!({
+            "type": "stdio",
+            "command": "node",
+            "args": ["server.js"]
+        }),
+        apps: McpApps::default(),
+        description: None,
+        homepage: None,
+        docs: None,
+        tags: Vec::new(),
+    };
+    McpService::upsert_server(&state, server).expect("upsert server");
+
+    // 启用 OpenClaw
+    McpService::toggle_app(&state, "openclaw-toggle", AppType::OpenClaw, true)
+        .expect("enable openclaw");
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
+    assert!(
+        servers.contains_key("openclaw-toggle"),
+        "server present in mcp.servers after toggle on"
+    );
+
+    // 禁用 OpenClaw → 从 live 移除
+    McpService::toggle_app(&state, "openclaw-toggle", AppType::OpenClaw, false)
+        .expect("disable openclaw");
+    let servers = openclaw_config::get_mcp_servers().expect("read openclaw mcp servers");
+    assert!(
+        !servers.contains_key("openclaw-toggle"),
+        "server removed from mcp.servers after toggle off"
     );
 }

@@ -66,6 +66,7 @@ export interface UsageScript {
   secretAccessKey?: string; // 火山方舟 SecretAccessKey
   teamOrganizationId?: string; // 智谱团队套餐组织 ID（请求头 bigmodel-organization）
   teamProjectId?: string; // 智谱团队套餐项目 ID（请求头 bigmodel-project）
+
   codingPlanProvider?: string; // Coding Plan 供应商标识（如 "kimi", "zhipu", "minimax"）
   autoQueryInterval?: number; // 自动查询间隔（单位：分钟，0 表示禁用）
   autoIntervalMinutes?: number; // 自动查询间隔（分钟）- 别名字段
@@ -366,6 +367,22 @@ export interface Settings {
   enableClaudePluginIntegration?: boolean;
   // 跳过 Claude Code 初次安装确认（写入 ~/.claude.json 的 hasCompletedOnboarding）
   skipClaudeOnboarding?: boolean;
+  // 是否启用桌面悬浮窗（加速球）
+  enableFloatingWindow?: boolean;
+  // 悬浮窗位置（逻辑像素坐标）
+  floatingWindowPosition?: { x: number; y: number };
+  // 吸附动画时长（毫秒）；0 = 立即吸附
+  floatingSnapSpeedMs?: number;
+  // 悬浮窗是否固定当前位置（固定后不可拖动/不吸附）
+  floatingLocked?: boolean;
+  // 悬浮窗置顶显示的 app（None = 跟随最近活跃 app）
+  floatingPinApp?: string;
+  // 最近一次活跃的 app（provider-switched 更新，供球跟随）
+  floatingLastApp?: string;
+  // 悬浮窗背景/边框不透明度（0.2~1.0；设置页滑块）
+  floatingOpacity?: number;
+  // 边缘自动收起：拖到屏幕边缘松手后收起为色条
+  floatingAutoCollapse?: boolean;
   // 是否开机自启
   launchOnStartup?: boolean;
   // 静默启动（程序启动时不显示主窗口）
@@ -403,6 +420,9 @@ export interface Settings {
 
   // 主页面显示的应用（默认全部显示）
   visibleApps?: VisibleApps;
+
+  // 是否在 header 显示「有新版本」入口图标；undefined/true = 显示，false = 隐藏
+  showUpdateBadge?: boolean;
 
   // ===== 设备级目录覆盖 =====
   // 覆盖 Claude Code 配置目录（可选）
@@ -456,6 +476,10 @@ export interface Settings {
   // Windows: "cmd" | "powershell" | "wt"
   // Linux: "gnome-terminal" | "konsole" | "xfce4-terminal" | "alacritty" | "kitty" | "ghostty"
   preferredTerminal?: string;
+
+  // ===== 套餐用量显示模式 =====
+  // compact（紧凑，默认）或 expanded（展开详情）
+  quotaDisplayMode?: string;
 
   // ===== 本机自动迁移状态 =====
   localMigrations?: {

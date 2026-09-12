@@ -262,9 +262,12 @@ describe("ProviderList Component", () => {
     expect(handleDelete).toHaveBeenCalledWith(providerA);
 
     // Verify useDragSort call parameters
+    // （后两个参数是远端目标 remoteTargetId / remoteContainerId；本机场景为 undefined）
     expect(useDragSortMock).toHaveBeenCalledWith(
       { a: providerA, b: providerB },
       "claude",
+      undefined,
+      undefined,
     );
   });
 

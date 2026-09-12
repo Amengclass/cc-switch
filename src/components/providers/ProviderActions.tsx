@@ -36,6 +36,8 @@ interface ProviderActionsProps {
   isCurrent: boolean;
   isInConfig?: boolean;
   isTesting?: boolean;
+  /** 远程切换进行中：禁用主按钮防连点（本机切换毫秒级无需） */
+  isSwitching?: boolean;
   isProxyTakeover?: boolean;
   isOmo?: boolean;
   onSwitch: () => void;
@@ -78,6 +80,7 @@ export function ProviderActions({
   isCurrent,
   isInConfig = false,
   isTesting,
+  isSwitching,
   isProxyTakeover = false,
   isOmo = false,
   onSwitch,
@@ -366,21 +369,31 @@ export function ProviderActions({
       {/* disabled:pointer-events-none prevents the native title from firing,
           so the wrapper owns the explanatory tooltip and cursor. */}
       <span
-        title={buttonState.title}
+        title={
+          isSwitching
+            ? t("provider.switching", { defaultValue: "切换中…" })
+            : buttonState.title
+        }
         className={cn(
           "inline-flex",
-          buttonState.disabled && "cursor-not-allowed",
+          (buttonState.disabled || isSwitching) && "cursor-not-allowed",
         )}
       >
         <Button
           size="sm"
           variant={buttonState.variant}
           onClick={handleMainButtonClick}
-          disabled={buttonState.disabled}
+          disabled={buttonState.disabled || isSwitching}
           className={cn("w-[4.5rem] px-2.5", buttonState.className)}
         >
-          {buttonState.icon}
-          {buttonState.text}
+          {isSwitching ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            buttonState.icon
+          )}
+          {isSwitching
+            ? t("provider.switching", { defaultValue: "切换中…" })
+            : buttonState.text}
         </Button>
       </span>
 

@@ -31,7 +31,9 @@ export async function checkForUpdate(
   const { check } = await import("@tauri-apps/plugin-updater");
 
   const currentVersion = await getCurrentVersion();
+  console.log("[Update] currentVersion:", currentVersion);
   const update = await check({ timeout: opts.timeout ?? 30000 } as any);
+  console.log("[Update] check() returned:", update);
 
   if (!update) {
     return { status: "up-to-date" };

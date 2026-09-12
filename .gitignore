@@ -29,3 +29,10 @@ copilot-api
 .history
 CODEBUDDY.md
 mainWindow.js
+
+# Reasonix Desktop 本地会话元数据
+.reasonix/
+
+reasonix.toml
+ci_logs/
+ci_logs.zip

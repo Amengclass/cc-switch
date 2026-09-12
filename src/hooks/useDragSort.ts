@@ -12,9 +12,15 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { updateRemoteProviderSortOrder } from "@/lib/api/remote";
 import { isProxyAppId } from "@/config/appConfig";
 
-export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
+export function useDragSort(
+  providers: Record<string, Provider>,
+  appId: AppId,
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
@@ -76,10 +82,52 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
       }));
 
       try {
-        await providersApi.updateSortOrder(updates, appId);
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", appId],
-        });
+        if (remoteTargetId) {
+          await updateRemoteProviderSortOrder(
+            remoteTargetId,
+            appId,
+            updates,
+            remoteContainerId,
+          );
+          // 乐观更新：直接修改缓存，避免 invalidateQueries 导致的闪回
+          const remoteKey = [
+            "remoteProviders",
+            remoteTargetId,
+            remoteContainerId || "__host__",
+            appId,
+          ];
+          queryClient.setQueryData(remoteKey, (old: any) => {
+            if (!old) return old;
+            const sortMap = new Map(updates.map((u) => [u.id, u.sortIndex]));
+            return {
+              ...old,
+              providers: Object.fromEntries(
+                Object.entries(old.providers).map(([id, p]: [string, any]) => [
+                  id,
+                  sortMap.has(id) ? { ...p, sortIndex: sortMap.get(id) } : p,
+                ]),
+              ),
+            };
+          });
+        } else {
+          await providersApi.updateSortOrder(updates, appId);
+          // 乐观更新：直接修改缓存。本机缓存结构是 { providers, currentProviderId }
+          //（见 useProvidersQuery），providers 是 Record；与远端分支同构。
+          const localKey = ["providers", appId];
+          queryClient.setQueryData(localKey, (old: any) => {
+            if (!old) return old;
+            const sortMap = new Map(updates.map((u) => [u.id, u.sortIndex]));
+            return {
+              ...old,
+              providers: Object.fromEntries(
+                Object.entries(old.providers).map(([id, p]: [string, any]) => [
+                  id,
+                  sortMap.has(id) ? { ...p, sortIndex: sortMap.get(id) } : p,
+                ]),
+              ),
+            };
+          });
+        }
 
         // Routing apps derive failover order from sort_index.
         if (isProxyAppId(appId)) {

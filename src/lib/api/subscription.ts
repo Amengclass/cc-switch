@@ -18,6 +18,7 @@ export const subscriptionApi = {
     codingPlanProvider?: string,
     teamOrganizationId?: string,
     teamProjectId?: string,
+
   ): Promise<SubscriptionQuota> =>
     invoke("get_coding_plan_quota", {
       baseUrl,
@@ -27,6 +28,7 @@ export const subscriptionApi = {
       codingPlanProvider,
       teamOrganizationId,
       teamProjectId,
+
     }),
   getBalance: (
     baseUrl: string,

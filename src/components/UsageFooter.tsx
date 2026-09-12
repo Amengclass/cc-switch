@@ -4,7 +4,10 @@ import { useTranslation } from "react-i18next";
 import { type AppId } from "@/lib/api";
 import { useUsageQuery } from "@/lib/query/queries";
 import { UsageData, Provider } from "@/types";
-import { TierBadge } from "@/components/SubscriptionQuotaFooter";
+import {
+  TierBadge,
+  TIER_I18N_KEYS,
+} from "@/components/SubscriptionQuotaFooter";
 import type { QuotaTier } from "@/types/subscription";
 import { isAdditiveAppId } from "@/config/appConfig";
 
@@ -16,6 +19,10 @@ interface UsageFooterProps {
   isCurrent: boolean; // 是否为当前激活的供应商
   isInConfig?: boolean; // OpenCode: 是否已添加到配置
   inline?: boolean; // 是否内联显示（在按钮左侧）
+  /** 远端目标：提供时余量查询改走远端 SSOT（见 useUsageQuery） */
+  remoteTargetId?: string;
+  /** 远端容器（宿主机为 undefined） */
+  remoteContainerId?: string;
 }
 
 /** UsageData → QuotaTier 转换（Token Plan 使用） */
@@ -51,10 +58,14 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   isCurrent,
   isInConfig = false,
   inline = false,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
-  const isTokenPlan =
-    provider.meta?.usage_script?.templateType === "token_plan";
+  // 检查是否为 plan 类型（token_plan 或 OpenCode Go）
+  const isPlan =
+    provider.meta?.usage_script?.templateType === "token_plan" ||
+    provider.meta?.usage_script?.codingPlanProvider === "opencode_go";
 
   // 统一的用量查询（自动查询仅对当前激活的供应商启用）
   // 累加模式：使用 isInConfig 代替 isCurrent
@@ -72,6 +83,8 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   } = useUsageQuery(providerId, appId, {
     enabled: usageEnabled,
     autoQueryInterval,
+    remoteTargetId,
+    remoteContainerId,
   });
 
   // 🆕 定期更新当前时间，用于刷新相对时间显示
@@ -141,8 +154,16 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   // 无数据时不显示
   if (usageDataList.length === 0) return null;
 
-  // ── Token Plan：订阅风格内联渲染（百分比徽章 + 倒计时） ──
-  if (isTokenPlan && inline) {
+  // 检查是否有 tier 信息（planName + total/used 才算真正的 tier；纯余额查询如
+  // DeepSeek 只有 planName="CNY" + remaining，不应走进 tier 分支）
+  const hasTierInfo = usageDataList.some(
+    (d) =>
+      (d.planName && (d.total != null || d.used != null)) ||
+      (d.extra && d.extra.startsWith("{")),
+  );
+
+  // ── Token Plan 或有 tier 信息：订阅风格内联渲染（百分比徽章 + 倒计时） ──
+  if ((isPlan || hasTierInfo) && inline) {
     return (
       <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap flex-shrink-0">
         {/* 第一行：查询时间 + 刷新 */}
@@ -313,6 +334,36 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
 
 // ── 通用用量组件 ────────────────────────────────────────────
 
+/** 格式化 ISO 日期字符串为倒计时 + 可读时间 */
+function formatResetInfo(
+  isoStr: string,
+  showMinutes = true,
+): { countdown: string; date: string } {
+  try {
+    const date = new Date(isoStr);
+    if (isNaN(date.getTime())) return { countdown: "", date: isoStr };
+    const diffMs = date.getTime() - Date.now();
+    const diffSec = Math.max(0, Math.floor(diffMs / 1000));
+    const days = Math.floor(diffSec / 86400);
+    const hours = Math.floor((diffSec % 86400) / 3600);
+    const minutes = Math.floor((diffSec % 3600) / 60);
+    let countdown = "";
+    if (days > 0) countdown += `${days}d`;
+    if (hours > 0) countdown += `${hours}h`;
+    if (showMinutes) countdown += `${minutes.toString().padStart(2, "0")}m`;
+    const month = date.getMonth() + 1;
+    const day = date.getDate();
+    const h = date.getHours().toString().padStart(2, "0");
+    const m = date.getMinutes().toString().padStart(2, "0");
+    return {
+      countdown,
+      date: `${month.toString().padStart(2, "0")}/${day.toString().padStart(2, "0")} ${h}:${m}`,
+    };
+  } catch {
+    return { countdown: "", date: isoStr };
+  }
+}
+
 // 单个套餐数据展示组件
 const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
   const { t } = useTranslation();
@@ -342,7 +393,8 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
             className={`font-medium truncate block ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
             title={planName}
           >
-            💰 {planName}
+            💰{" "}
+            {TIER_I18N_KEYS[planName] ? t(TIER_I18N_KEYS[planName]) : planName}
           </span>
         ) : (
           <span className="opacity-50">—</span>
@@ -354,14 +406,22 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
         className="text-xs text-gray-500 dark:text-gray-400 min-w-0 flex items-center gap-2"
         style={{ width: "30%" }}
       >
-        {extra && (
-          <span
-            className={`truncate ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
-            title={extra}
-          >
-            {extra}
-          </span>
-        )}
+        {extra &&
+          (() => {
+            const { countdown, date } = formatResetInfo(
+              extra,
+              planName === "five_hour",
+            );
+            return (
+              <span
+                className={`text-xs text-gray-500 dark:text-gray-400 tabular-nums flex items-center gap-1 ${isExpired ? "text-red-500 dark:text-red-400" : ""}`}
+                title={extra}
+              >
+                <Clock size={10} className="flex-shrink-0" />
+                {countdown} {date}
+              </span>
+            );
+          })()}
         {isExpired && (
           <span className="text-red-500 dark:text-red-400 font-medium text-[10px] px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 rounded flex-shrink-0">
             {invalidMessage || t("usage.invalid")}
@@ -371,38 +431,53 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
 
       {/* 用量信息：45% */}
       <div
-        className="flex items-center justify-end gap-2 text-xs flex-shrink-0"
+        className="flex items-center justify-end gap-2 text-xs flex-shrink-0 whitespace-nowrap"
         style={{ width: "45%" }}
       >
         {/* 总额度 */}
         {total !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.total")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
+            <span
+              className="tabular-nums text-gray-600 dark:text-gray-400"
+              style={{ minWidth: "4ch", textAlign: "right" }}
+            >
               {total === -1 ? "∞" : total.toFixed(2)}
             </span>
-            <span className="text-gray-400 dark:text-gray-600">|</span>
-          </>
+            <span className="text-gray-500 dark:text-gray-400">%</span>
+            <span className="text-gray-500 dark:text-gray-400">|</span>
+          </span>
         )}
 
-        {/* 已用额度 */}
+        {/* 已用额度 - 突出显示 */}
         {used !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.used")}
             </span>
-            <span className="tabular-nums text-gray-600 dark:text-gray-400">
-              {used.toFixed(2)}
+            <span
+              className={`font-semibold tabular-nums ${
+                isExpired
+                  ? "text-red-500 dark:text-red-400"
+                  : used > (total || used) * 0.9
+                    ? "text-red-500 dark:text-red-400"
+                    : used > (total || used) * 0.7
+                      ? "text-orange-500 dark:text-orange-400"
+                      : "text-green-600 dark:text-green-400"
+              }`}
+              style={{ minWidth: "4ch", textAlign: "right" }}
+            >
+              {used.toFixed(2)}%
             </span>
-            <span className="text-gray-400 dark:text-gray-600">|</span>
-          </>
+            <span className="text-gray-500 dark:text-gray-400">|</span>
+          </span>
         )}
 
-        {/* 剩余额度 - 突出显示 */}
+        {/* 剩余额度 - 状态色 */}
         {remaining !== undefined && (
-          <>
+          <span className="inline-flex items-center gap-1">
             <span className="text-gray-500 dark:text-gray-400">
               {t("usage.remaining")}
             </span>
@@ -415,12 +490,12 @@ const UsagePlanItem: React.FC<{ data: UsageData }> = ({ data }) => {
                     : "text-green-600 dark:text-green-400"
               }`}
             >
-              {remaining.toFixed(2)}
+              {remaining.toFixed(2)}%
             </span>
-          </>
+          </span>
         )}
 
-        {unit && (
+        {unit && unit !== "%" && (
           <span className="text-gray-500 dark:text-gray-400">{unit}</span>
         )}
       </div>

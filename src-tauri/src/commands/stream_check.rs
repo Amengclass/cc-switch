@@ -28,12 +28,8 @@ pub async fn stream_check_provider(
         .get(&provider_id)
         .ok_or_else(|| AppError::Message(format!("供应商 {provider_id} 不存在")))?;
 
-    // Copilot 端点是动态的（随 OAuth token 解析），需预先取出 host 再探测；
-    // 其余供应商传 None，由服务层从 settings_config 提取 base_url。无需鉴权。
-    let base_url_override = resolve_copilot_base_url_override(provider, &copilot_state).await?;
     let result =
-        StreamCheckService::check_with_retry(&app_type, provider, &config, base_url_override)
-            .await?;
+        check_provider_connectivity(&app_type, provider, &config, copilot_state.inner()).await?;
 
     // 记录日志
     let _ =
@@ -42,6 +38,22 @@ pub async fn stream_check_provider(
             .save_stream_check_log(&provider_id, &provider.name, app_type.as_str(), &result);
 
     Ok(result)
+}
+
+/// 对单个 provider 执行本机连通性检查（provider 由调用方提供，不读 DB）。
+/// 本机 `stream_check_provider` 与本机网络下的远端场景共用——远端场景由
+/// `stream_check_remote_provider` 从远端 SSOT 取 provider 后调用，测的仍是
+/// 本机到 API 的网络（用户关心的是本机能否连上该 API）。
+pub(crate) async fn check_provider_connectivity(
+    app_type: &AppType,
+    provider: &crate::provider::Provider,
+    config: &StreamCheckConfig,
+    copilot_state: &CopilotAuthState,
+) -> Result<StreamCheckResult, AppError> {
+    // Copilot 端点是动态的（随 OAuth token 解析），需预先取出 host 再探测；
+    // 其余供应商传 None，由服务层从 settings_config 提取 base_url。无需鉴权。
+    let base_url_override = resolve_copilot_base_url_override(provider, copilot_state).await?;
+    StreamCheckService::check_with_retry(app_type, provider, config, base_url_override).await
 }
 
 /// 批量连通性检查
@@ -85,7 +97,7 @@ pub async fn stream_check_all_providers(
         }
 
         let base_url_override =
-            resolve_copilot_base_url_override(&provider, &copilot_state).await?;
+            resolve_copilot_base_url_override(&provider, copilot_state.inner()).await?;
         let result =
             StreamCheckService::check_with_retry(&app_type, &provider, &config, base_url_override)
                 .await
@@ -130,7 +142,7 @@ pub fn save_stream_check_config(
 /// `is_full_url` 的供应商已是完整地址，无需解析。
 async fn resolve_copilot_base_url_override(
     provider: &crate::provider::Provider,
-    copilot_state: &State<'_, CopilotAuthState>,
+    copilot_state: &CopilotAuthState,
 ) -> Result<Option<String>, AppError> {
     let is_copilot = is_copilot_provider(provider);
     let is_full_url = provider

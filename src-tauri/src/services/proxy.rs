@@ -1364,7 +1364,8 @@ impl ProxyService {
             .await
             .map_err(|e| format!("检查接管状态失败: {e}"))?;
 
-        if !any_enabled {
+        // 本机无接管，也可能仍有远端接管意图（远端 live 依赖本机代理进程）——见 remote::hooks
+        if !any_enabled && !crate::remote::hooks::has_route_intent(&self.db) {
             let _ = self.db.set_live_takeover_active(false).await;
 
             if self.is_running().await {
@@ -1784,6 +1785,9 @@ impl ProxyService {
             .delete_all_live_backups()
             .await
             .map_err(|e| format!("删除备份失败: {e}"))?;
+
+        // 5.1 清除所有远端主机的「远端接管」意图 —— 见 remote::hooks
+        crate::remote::hooks::clear_route_intents(&self.db);
 
         // 6. 重置健康状态（让健康徽章恢复为正常）
         self.db

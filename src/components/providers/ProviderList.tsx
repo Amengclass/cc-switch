@@ -11,9 +11,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, Search, X } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw, Search, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,15 +23,14 @@ import type { AppId } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { useDragSort } from "@/hooks/useDragSort";
-import {
-  useOpenClawLiveProviderIds,
-  useOpenClawDefaultModel,
-} from "@/hooks/useOpenClaw";
-import {
-  useHermesLiveProviderIds,
-  useHermesModelConfig,
-} from "@/hooks/useHermes";
+import { useOpenClawDefaultModel } from "@/hooks/useOpenClaw";
+import { useHermesModelConfig } from "@/hooks/useHermes";
 import { useStreamCheck } from "@/hooks/useStreamCheck";
+import { streamCheckRemoteProvider } from "@/lib/api/connectivity-check";
+import {
+  getRemoteOpenClawDefaultModel,
+  getRemoteHermesModelConfig,
+} from "@/lib/api/remote";
 import { ProviderCard } from "@/components/providers/ProviderCard";
 import { ProviderEmptyState } from "@/components/providers/ProviderEmptyState";
 import {
@@ -68,6 +68,19 @@ interface ProviderListProps {
   isLoading?: boolean;
   isProxyRunning?: boolean; // 代理服务运行状态
   isProxyTakeover?: boolean; // 代理接管模式（Live配置已被接管）
+  /** 远程切换进行中：禁用切换按钮防连点 */
+  isSwitching?: boolean;
+  /** 远程目标：非空时「测试」按钮改为在远端探测连通性 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+  /** 远端目标下的 live 供应商 ID 集合（来自 get_remote_providers 返回，additive 按钮态用） */
+  remoteLiveIds?: string[];
+  /** 远端加载文案（仅远端目标首次加载时显示；本机不传）。支持带高亮的 JSX */
+  remoteLoadingLabel?: ReactNode;
+  /** 远端加载失败的错误信息（非空时显示错误分支 + 重试） */
+  remoteError?: string;
+  /** 远端加载失败的重试回调 */
+  onRetryRemote?: () => void;
   activeProviderId?: string; // 代理当前实际使用的供应商 ID（用于故障转移模式下标注绿色边框）
   onSetAsDefault?: (provider: Provider, modelId?: string) => void; // OpenClaw: set as default model
 }
@@ -90,55 +103,133 @@ export function ProviderList({
   isLoading = false,
   isProxyRunning = false,
   isProxyTakeover = false,
+  isSwitching = false,
   activeProviderId,
   onSetAsDefault,
+  remoteTargetId,
+  remoteContainerId,
+  remoteLiveIds,
+  remoteLoadingLabel,
+  remoteError,
+  onRetryRemote,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(appId);
   const { sortedProviders, sensors, handleDragEnd } = useDragSort(
     providers,
     appId,
+    remoteTargetId,
+    remoteContainerId,
   );
 
-  const { data: opencodeLiveIds } = useQuery({
+  const { data: opencodeLiveIds } = useQuery<string[]>({
     queryKey: ["opencodeLiveProviderIds"],
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode",
+    // 远端目标下 live ID 集来自 get_remote_providers 返回（remoteLiveIds prop），
+    // 避免本机查询与远端重复（per-target 独立）
+    enabled: appId === "opencode" && !remoteTargetId,
   });
 
   // OpenClaw: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: openclawLiveIds } = useOpenClawLiveProviderIds(
-    appId === "openclaw",
-  );
+  const { data: openclawLiveIds } = useQuery<string[]>({
+    queryKey: ["openclaw", "liveProviderIds"],
+    queryFn: () => providersApi.getOpenClawLiveProviderIds(),
+    enabled: appId === "openclaw" && !remoteTargetId,
+  });
 
   // Hermes: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
-  const { data: hermesLiveIds } = useHermesLiveProviderIds(appId === "hermes");
+  const { data: hermesLiveIds } = useQuery<string[]>({
+    queryKey: ["hermes", "liveProviderIds"],
+    queryFn: () => providersApi.getHermesLiveProviderIds(),
+    enabled: appId === "hermes" && !remoteTargetId,
+  });
+
+  // Pi: 查询 live 配置中的供应商 ID 列表，用于判断 isInConfig
+  const { data: piLiveIds } = useQuery<string[]>({
+    queryKey: ["pi", "liveProviderIds"],
+    queryFn: () => providersApi.getPiLiveProviderIds(),
+    enabled: appId === "pi" && !remoteTargetId,
+  });
 
   // Hermes: 读取当前 model.provider，用于判断哪个供应商是"当前激活"（高亮）
-  const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
+  // 远端目标下必须读远端 config.yaml（本机命令读本机文件会读到错误数据）——
+  // 否则远端「设为默认 / 切换」后按钮态不刷新。container 归一化：宿主机目标
+  // 时 remoteContainerId 是 ""，须转 undefined 走宿主机路径。
+  const { data: localHermesModelConfig } = useHermesModelConfig(
+    appId === "hermes" && !remoteTargetId,
+  );
+  const { data: remoteHermesModelConfig } = useQuery({
+    // 第三位统一用 `remoteContainerId || "__host__"`（宿主机归一化为 "__host__"），
+    // 与 remoteMutations 失效时的 `vars.container || "__host__"` 逐字一致——
+    // react-query partialMatchKey 要求逐元素匹配，宿主机下 remoteContainerId 是 ""
+    // 而 mutation 的 vars.container 是 undefined，两者不一致会导致失效落空。
+    queryKey: [
+      "remoteHermesModelConfig",
+      remoteTargetId,
+      remoteContainerId || "__host__",
+    ],
+    queryFn: () =>
+      getRemoteHermesModelConfig(
+        remoteTargetId!,
+        remoteContainerId || undefined,
+      ),
+    enabled: appId === "hermes" && Boolean(remoteTargetId),
+  });
+  const hermesModelConfig = remoteTargetId
+    ? remoteHermesModelConfig
+    : localHermesModelConfig;
   const hermesCurrentProviderId = hermesModelConfig?.provider;
 
-  // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes）
+  // 判断供应商是否已添加到配置（累加模式应用：OpenCode/OpenClaw/Hermes/Pi）
   const isProviderInConfig = useCallback(
     (providerId: string): boolean => {
+      // 远端目标：live ID 集来自 get_remote_providers 返回（remoteLiveIds prop）
+      const liveIds = remoteTargetId ? (remoteLiveIds ?? []) : undefined;
       if (appId === "opencode") {
-        return opencodeLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? opencodeLiveIds)?.includes(providerId) ?? false;
       }
       if (appId === "openclaw") {
-        return openclawLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? openclawLiveIds)?.includes(providerId) ?? false;
       }
       if (appId === "hermes") {
-        return hermesLiveIds?.includes(providerId) ?? false;
+        return (liveIds ?? hermesLiveIds)?.includes(providerId) ?? false;
+      }
+      if (appId === "pi") {
+        return (liveIds ?? piLiveIds)?.includes(providerId) ?? false;
       }
       return true; // 其他应用始终返回 true
     },
-    [appId, opencodeLiveIds, openclawLiveIds, hermesLiveIds],
+    [
+      appId,
+      remoteTargetId,
+      remoteLiveIds,
+      opencodeLiveIds,
+      openclawLiveIds,
+      hermesLiveIds,
+      piLiveIds,
+    ],
   );
 
   // OpenClaw: query default model to determine which provider is default
-  const { data: openclawDefaultModel } = useOpenClawDefaultModel(
-    appId === "openclaw",
+  // 远端场景使用远端 API，本机场景使用本机 API
+  const { data: localOpenclawDefaultModel } = useOpenClawDefaultModel(
+    appId === "openclaw" && !remoteTargetId,
   );
+  const { data: remoteOpenclawDefaultModel } = useQuery({
+    queryKey: ["remoteOpenclawDefaultModel", remoteTargetId, remoteContainerId],
+    queryFn: () =>
+      // 宿主机目标时 remoteContainerId 是 ""（App 传原始值），必须归一化为
+      // undefined 走宿主机路径；否则后端 Option<String> 收到 Some("") 会进
+      // DockerExecFileOps 的空容器名校验 → 查询报错 → 「设为默认」按钮态读不到。
+      getRemoteOpenClawDefaultModel(
+        remoteTargetId!,
+        remoteContainerId || undefined,
+      ),
+    enabled: appId === "openclaw" && Boolean(remoteTargetId),
+  });
+  const openclawDefaultModel = remoteTargetId
+    ? remoteOpenclawDefaultModel
+    : localOpenclawDefaultModel;
 
   const isProviderDefaultModel = useCallback(
     (providerId: string): boolean => {
@@ -223,11 +314,62 @@ export function ProviderList({
   );
 
   // 连通性检查不发真实请求、无封号/计费风险，直接执行（无需确认弹窗）。
+  // 远端目标下 provider 定义从远端 SSOT 读取，但连通性检查仍在本机执行
+  // （测本机到 API 的网络，与本机场景一致）——用户关心的是本机能否连上该 API。
   const handleTest = useCallback(
     (provider: Provider) => {
+      if (remoteTargetId) {
+        void (async () => {
+          try {
+            const result = await streamCheckRemoteProvider(
+              remoteTargetId,
+              remoteContainerId,
+              appId,
+              provider.id,
+            );
+            if (result.status === "operational") {
+              toast.success(
+                t("streamCheck.reachable", {
+                  providerName: provider.name,
+                  responseTimeMs: result.responseTimeMs,
+                  defaultValue: `${provider.name} 连通正常 (${result.responseTimeMs}ms)`,
+                }),
+                { closeButton: true },
+              );
+            } else if (result.status === "degraded") {
+              toast.warning(
+                t("streamCheck.reachableSlow", {
+                  providerName: provider.name,
+                  responseTimeMs: result.responseTimeMs,
+                  defaultValue: `${provider.name} 连通但较慢 (${result.responseTimeMs}ms)`,
+                }),
+              );
+            } else {
+              toast.error(
+                t("streamCheck.unreachable", {
+                  providerName: provider.name,
+                  message: result.message,
+                  defaultValue: `${provider.name} 无法连通: ${result.message}`,
+                }),
+                {
+                  description: t("streamCheck.unreachableHint", {
+                    defaultValue:
+                      "无法建立连接（DNS / 连接 / TLS / 超时）。请检查 base_url 与网络。",
+                  }),
+                  duration: 8000,
+                  closeButton: true,
+                },
+              );
+            }
+          } catch (error) {
+            toast.error(extractErrorMessage(error), { closeButton: true });
+          }
+        })();
+        return;
+      }
       checkProvider(provider.id, provider.name);
     },
-    [checkProvider],
+    [checkProvider, remoteTargetId, remoteContainerId, appId, t],
   );
 
   // Import current live config as default provider
@@ -401,12 +543,46 @@ export function ProviderList({
   if (isLoading) {
     return (
       <div className="space-y-3">
+        {remoteLoadingLabel && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <span>{remoteLoadingLabel}</span>
+          </div>
+        )}
         {[0, 1, 2].map((index) => (
           <div
             key={index}
             className="w-full border border-dashed rounded-lg h-28 border-muted-foreground/40 bg-muted/40"
           />
         ))}
+      </div>
+    );
+  }
+
+  // 远端目标加载失败：明确报错 + 重试（而非误显示空状态）
+  if (remoteError) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+        <div className="flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-5 w-5 shrink-0" />
+          <p className="text-sm font-medium">
+            {t("remote.loadError", { defaultValue: "无法连接远端" })}
+          </p>
+        </div>
+        <p className="max-w-md break-all text-xs text-muted-foreground">
+          {remoteError}
+        </p>
+        {onRetryRemote && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onRetryRemote}
+            className="mt-1"
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            {t("common.retry", { defaultValue: "重试" })}
+          </Button>
+        )}
       </div>
     );
   }
@@ -418,7 +594,10 @@ export function ProviderList({
         <ProviderEmptyState
           appId={appId}
           onCreate={appId === "pi" ? undefined : onCreate}
+          // 远端目标下导入按钮置灰：导入语义是读本机 live 配置，远端目标下
+          // 会读到错误数据（应读远端 live）；待远端导入实现后再启用。
           onImport={appId === "pi" ? undefined : () => importMutation.mutate()}
+          importDisabled={Boolean(remoteTargetId)}
         />
       </div>
     );
@@ -459,8 +638,10 @@ export function ProviderList({
                 provider={provider}
                 isCurrent={isCurrent}
                 appId={appId}
+                remoteTargetId={remoteTargetId}
+                remoteContainerId={remoteContainerId}
                 isInConfig={
-                  appId === "pi"
+                  appId === "pi" && !remoteTargetId
                     ? isPiProviderInConfig(provider)
                     : isProviderInConfig(provider.id)
                 }
@@ -478,6 +659,7 @@ export function ProviderList({
                 onOpenTerminal={onOpenTerminal}
                 onTest={handleTest}
                 isTesting={isChecking(provider.id)}
+                isSwitching={isSwitching}
                 isProxyRunning={supportsFailover && isProxyRunning}
                 isProxyTakeover={supportsFailover && isProxyTakeover}
                 isAutoFailoverEnabled={isFailoverModeActive}
@@ -620,6 +802,8 @@ interface SortableProviderCardProps {
   provider: Provider;
   isCurrent: boolean;
   appId: AppId;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   isInConfig: boolean;
   isOmo: boolean;
   isOmoSlim: boolean;
@@ -635,6 +819,7 @@ interface SortableProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   isTesting: boolean;
+  isSwitching?: boolean;
   isProxyRunning: boolean;
   isProxyTakeover: boolean;
   isAutoFailoverEnabled: boolean;
@@ -653,6 +838,8 @@ function SortableProviderCard({
   provider,
   isCurrent,
   appId,
+  remoteTargetId,
+  remoteContainerId,
   isInConfig,
   isOmo,
   isOmoSlim,
@@ -668,6 +855,7 @@ function SortableProviderCard({
   onOpenTerminal,
   onTest,
   isTesting,
+  isSwitching,
   isProxyRunning,
   isProxyTakeover,
   isAutoFailoverEnabled,
@@ -700,6 +888,8 @@ function SortableProviderCard({
         provider={provider}
         isCurrent={isCurrent}
         appId={appId}
+        remoteTargetId={remoteTargetId}
+        remoteContainerId={remoteContainerId}
         isInConfig={isInConfig}
         isOmo={isOmo}
         isOmoSlim={isOmoSlim}
@@ -717,6 +907,7 @@ function SortableProviderCard({
         onOpenTerminal={onOpenTerminal}
         onTest={onTest}
         isTesting={isTesting}
+        isSwitching={isSwitching}
         isProxyRunning={isProxyRunning}
         isProxyTakeover={isProxyTakeover}
         dragHandleProps={{

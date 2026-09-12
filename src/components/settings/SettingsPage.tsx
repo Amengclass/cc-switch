@@ -37,10 +37,12 @@ import { settingsApi } from "@/lib/api";
 import { LanguageSettings } from "@/components/settings/LanguageSettings";
 import { ThemeSettings } from "@/components/settings/ThemeSettings";
 import { WindowSettings } from "@/components/settings/WindowSettings";
+import { FloatingWindowSettings } from "@/components/settings/FloatingWindowSettings";
 import { AppVisibilitySettings } from "@/components/settings/AppVisibilitySettings";
 import { SkillStorageLocationSettings } from "@/components/settings/SkillStorageLocationSettings";
 import { SkillSyncMethodSettings } from "@/components/settings/SkillSyncMethodSettings";
 import { TerminalSettings } from "@/components/settings/TerminalSettings";
+import { QuotaDisplaySettings } from "@/components/settings/QuotaDisplaySettings";
 import { DirectorySettings } from "@/components/settings/DirectorySettings";
 import { ImportExportSection } from "@/components/settings/ImportExportSection";
 import { BackupListSection } from "@/components/settings/BackupListSection";
@@ -50,6 +52,7 @@ import { ProxyTabContent } from "@/components/settings/ProxyTabContent";
 import { ConnectivityCheckConfigPanel } from "@/components/usage/ConnectivityCheckConfigPanel";
 import { UsageDashboard } from "@/components/usage/UsageDashboard";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
+import { RemoteProviderSettings } from "@/components/settings/RemoteProviderSettings";
 import { AuthCenterPanel } from "@/components/settings/AuthCenterPanel";
 import { CodexAuthSettings } from "@/components/settings/CodexAuthSettings";
 import { useInstalledSkills } from "@/hooks/useSkills";
@@ -63,6 +66,12 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
   onImportSuccess?: () => void | Promise<void>;
   defaultTab?: string;
+  /** 远端非 additive 面板是否每次自动读入当前 live 配置（default 卡） */
+  autoImportDefault?: boolean;
+  onAutoImportDefaultChange?: (next: boolean) => void;
+  /** 远端功能总开关：关 = 还原原生 cc-switch */
+  remoteFeatureEnabled?: boolean;
+  onRemoteFeatureEnabledChange?: (next: boolean) => void;
 }
 
 export function SettingsPage({
@@ -70,6 +79,10 @@ export function SettingsPage({
   onOpenChange,
   onImportSuccess,
   defaultTab = "general",
+  autoImportDefault = true,
+  onAutoImportDefaultChange,
+  remoteFeatureEnabled = true,
+  onRemoteFeatureEnabledChange,
 }: SettingsDialogProps) {
   const { t } = useTranslation();
   const {
@@ -281,6 +294,24 @@ export function SettingsPage({
                     <WindowSettings
                       settings={settings}
                       onChange={handleAutoSave}
+                    />
+                    <FloatingWindowSettings
+                      settings={settings}
+                      onChange={handleAutoSave}
+                    />
+                    <RemoteProviderSettings
+                      featureEnabled={remoteFeatureEnabled}
+                      onFeatureEnabledChange={(next) =>
+                        onRemoteFeatureEnabledChange?.(next)
+                      }
+                      value={autoImportDefault}
+                      onChange={(next) => onAutoImportDefaultChange?.(next)}
+                    />
+                    <QuotaDisplaySettings
+                      value={settings.quotaDisplayMode ?? "compact"}
+                      onChange={(mode) =>
+                        handleAutoSave({ quotaDisplayMode: mode })
+                      }
                     />
                     <TerminalSettings
                       value={settings.preferredTerminal}
