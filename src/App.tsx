@@ -2369,7 +2369,7 @@ function App() {
                               >
                                 <History className="flex-shrink-0 w-4 h-4" />
                               </Button>
-                              {activeApp !== "pi" && (
+                              {hasMcpSupport && (
                                 <Button
                                   variant="ghost"
                                   size="sm"
