@@ -240,6 +240,7 @@ export function ProviderCard({
   // OMO and OMO Slim share the same card behavior
   const isAnyOmo = isOmo || isOmoSlim;
   const handleDisableAnyOmo = isOmoSlim ? onDisableOmoSlim : onDisableOmo;
+  // 累加模式应用（含 mcode / openclaw / hermes / pi）；opencode 的 OMO 变体除外
   const isAdditiveMode = isAdditiveAppId(appId) && (appId !== "opencode" || !isAnyOmo);
 
   const { data: health } = useProviderHealth(
@@ -328,8 +329,12 @@ export function ProviderCard({
     ? provider.meta?.usage_script?.autoQueryInterval || 0
     : 0;
 
+  // 脚本用量只在「已启用 + 非官方 + 非官方订阅模板」时才查询；展开判定必须复用同一谓词，
+  // 因为禁用的 React Query observer 仍会返回同 key 的旧缓存。
+  const scriptUsageActive =
+    usageEnabled && !isOfficial && !isOfficialSubscriptionUsage;
   const { data: usage } = useUsageQuery(provider.id, appId, {
-    enabled: usageEnabled && !isOfficial && !isOfficialSubscriptionUsage,
+    enabled: scriptUsageActive,
     autoQueryInterval,
     remoteTargetId,
     remoteContainerId,
@@ -337,8 +342,13 @@ export function ProviderCard({
 
   const isTokenPlan =
     provider.meta?.usage_script?.templateType === "token_plan";
+  // 官方订阅的额度窗口不能按普通多套餐展开；缓存残留的旧脚本结果同样不认。
   const hasMultiplePlans =
-    usage?.success && usage.data && usage.data.length > 1 && !isTokenPlan;
+    scriptUsageActive &&
+    !isTokenPlan &&
+    usage?.success &&
+    usage.data &&
+    usage.data.length > 1;
 
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -368,7 +378,7 @@ export function ProviderCard({
     ? isCurrent
     : appId === "openclaw"
       ? Boolean(isDefaultModel)
-      : appId === "opencode" || appId === "pi"
+      : appId === "opencode" || appId === "pi" || appId === "mcode"
         ? false
         : isAutoFailoverEnabled
           ? activeProviderId === provider.id
@@ -721,7 +731,7 @@ export function ProviderCard({
                 // (category === "official") 一律隐藏：它们 base_url 故意留空、走客户端
                 // 默认/OAuth 端点，cc-switch 没有可靠的探测目标（尤其 Claude Desktop
                 // 官方是原生 1P 模式，根本不在请求路径上）。
-                onTest && provider.category !== "official"
+                onTest && appId !== "mcode" && provider.category !== "official"
                   ? () => onTest(provider)
                   : undefined
               }

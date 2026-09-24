@@ -8,6 +8,8 @@ use crate::services::skill::SkillStore;
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct McpApps {
     #[serde(default)]
+    pub mcode: bool,
+    #[serde(default)]
     pub claude: bool,
     #[serde(default)]
     pub codex: bool,
@@ -34,6 +36,7 @@ impl McpApps {
             AppType::OpenCode => self.opencode,
             AppType::OpenClaw => self.openclaw,
             AppType::Hermes => self.hermes,
+            AppType::Mcode => self.mcode,
             AppType::Pi => false, // Pi core has no native MCP registry.
             AppType::ClaudeDesktop => false,
         }
@@ -49,6 +52,7 @@ impl McpApps {
             AppType::OpenCode => self.opencode = enabled,
             AppType::OpenClaw => self.openclaw = enabled,
             AppType::Hermes => self.hermes = enabled,
+            AppType::Mcode => self.mcode = enabled,
             AppType::Pi => {}            // Pi core has no native MCP registry.
             AppType::ClaudeDesktop => {} // Claude Desktop 3P provider config doesn't support MCP here
         }
@@ -72,6 +76,9 @@ impl McpApps {
         if self.opencode {
             apps.push(AppType::OpenCode);
         }
+        if self.mcode {
+            apps.push(AppType::Mcode);
+        }
         if self.openclaw {
             apps.push(AppType::OpenClaw);
         }
@@ -90,12 +97,15 @@ impl McpApps {
             && !self.opencode
             && !self.openclaw
             && !self.hermes
+            && !self.mcode
     }
 }
 
 /// Skill 应用启用状态（标记 Skill 应用到哪些客户端）
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct SkillApps {
+    #[serde(default)]
+    pub mcode: bool,
     #[serde(default)]
     pub claude: bool,
     #[serde(default)]
@@ -126,6 +136,7 @@ impl SkillApps {
             AppType::OpenClaw => self.openclaw,
             AppType::Hermes => self.hermes,
             AppType::Pi => self.pi,
+            AppType::Mcode => self.mcode,
             AppType::ClaudeDesktop => false,
         }
     }
@@ -141,6 +152,7 @@ impl SkillApps {
             AppType::OpenClaw => self.openclaw = enabled,
             AppType::Hermes => self.hermes = enabled,
             AppType::Pi => self.pi = enabled,
+            AppType::Mcode => self.mcode = enabled,
             AppType::ClaudeDesktop => {} // Claude Desktop 3P profiles don't use CC Switch skill sync
         }
     }
@@ -163,6 +175,9 @@ impl SkillApps {
         if self.opencode {
             apps.push(AppType::OpenCode);
         }
+        if self.mcode {
+            apps.push(AppType::Mcode);
+        }
         if self.openclaw {
             apps.push(AppType::OpenClaw);
         }
@@ -184,6 +199,7 @@ impl SkillApps {
             && !self.opencode
             && !self.openclaw
             && !self.hermes
+            && !self.mcode
             && !self.pi
     }
 
@@ -404,6 +420,7 @@ pub enum AppType {
     OpenClaw,
     Hermes,
     Pi,
+    Mcode,
 }
 
 impl AppType {
@@ -418,6 +435,7 @@ impl AppType {
             AppType::OpenClaw => "openclaw",
             AppType::Hermes => "hermes",
             AppType::Pi => "pi",
+            AppType::Mcode => "mcode",
         }
     }
 
@@ -429,7 +447,7 @@ impl AppType {
     pub fn is_additive_mode(&self) -> bool {
         matches!(
             self,
-            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes | AppType::Pi
+            AppType::OpenCode | AppType::OpenClaw | AppType::Hermes | AppType::Pi | AppType::Mcode
         )
     }
 
@@ -452,6 +470,7 @@ impl AppType {
             AppType::OpenClaw,
             AppType::Hermes,
             AppType::Pi,
+            AppType::Mcode,
         ]
         .into_iter()
     }
@@ -472,6 +491,7 @@ impl FromStr for AppType {
             "openclaw" => Ok(AppType::OpenClaw),
             "hermes" => Ok(AppType::Hermes),
             "pi" => Ok(AppType::Pi),
+            "mcode" => Ok(AppType::Mcode),
             other => Err(AppError::localized(
                 "unsupported_app",
                 format!("不支持的应用标识: '{other}'。可选值: claude, claude-desktop, codex, gemini, grokbuild, opencode, openclaw, hermes, pi。"),
@@ -515,7 +535,7 @@ impl CommonConfigSnippets {
             AppType::OpenCode => self.opencode.as_ref(),
             AppType::OpenClaw => self.openclaw.as_ref(),
             AppType::Hermes => self.hermes.as_ref(),
-            AppType::Pi => None,
+            AppType::Pi | AppType::Mcode => None,
         }
     }
 
@@ -530,7 +550,7 @@ impl CommonConfigSnippets {
             AppType::OpenCode => self.opencode = snippet,
             AppType::OpenClaw => self.openclaw = snippet,
             AppType::Hermes => self.hermes = snippet,
-            AppType::Pi => {}
+            AppType::Pi | AppType::Mcode => {}
         }
     }
 }
@@ -856,7 +876,7 @@ impl MultiAppConfig {
             AppType::Hermes => &mut config.prompts.hermes.prompts,
             // Pi was added after prompts moved to SQLite. Keeping it out of
             // this legacy config avoids a second, unused prompt state.
-            AppType::Pi => return Ok(false),
+            AppType::Pi | AppType::Mcode => return Ok(false),
         };
 
         prompts.insert(id, prompt);
@@ -900,7 +920,7 @@ impl MultiAppConfig {
                 AppType::OpenCode => &self.mcp.opencode.servers,
                 AppType::OpenClaw => continue, // OpenClaw didn't exist in v3.6.x, skip
                 AppType::Hermes => continue,   // Hermes didn't exist in v3.6.x, skip
-                AppType::Pi => continue,       // Pi didn't exist in v3.6.x, skip
+                AppType::Pi | AppType::Mcode => continue, // Pi didn't exist in v3.6.x, skip
             };
 
             for (id, entry) in old_servers {

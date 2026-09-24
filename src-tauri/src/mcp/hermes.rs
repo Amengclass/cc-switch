@@ -319,6 +319,7 @@ pub fn import_from_hermes(config: &mut MultiAppConfig) -> Result<usize, AppError
                         opencode: false,
                         openclaw: false,
                         hermes: true,
+                        mcode: false,
                     },
                     description: None,
                     homepage: None,

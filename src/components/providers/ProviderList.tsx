@@ -185,6 +185,8 @@ export function ProviderList({
     (providerId: string): boolean => {
       // 远端目标：live ID 集来自 get_remote_providers 返回（remoteLiveIds prop）
       const liveIds = remoteTargetId ? (remoteLiveIds ?? []) : undefined;
+      if (appId === "mcode")
+        return providers[providerId]?.meta?.liveConfigManaged === true;
       if (appId === "opencode") {
         return (liveIds ?? opencodeLiveIds)?.includes(providerId) ?? false;
       }
@@ -207,6 +209,7 @@ export function ProviderList({
       openclawLiveIds,
       hermesLiveIds,
       piLiveIds,
+      providers,
     ],
   );
 
@@ -596,7 +599,11 @@ export function ProviderList({
           onCreate={appId === "pi" ? undefined : onCreate}
           // 远端目标下导入按钮置灰：导入语义是读本机 live 配置，远端目标下
           // 会读到错误数据（应读远端 live）；待远端导入实现后再启用。
-          onImport={appId === "pi" ? undefined : () => importMutation.mutate()}
+          onImport={
+            appId === "pi" || appId === "mcode"
+              ? undefined
+              : () => importMutation.mutate()
+          }
           importDisabled={Boolean(remoteTargetId)}
         />
       </div>

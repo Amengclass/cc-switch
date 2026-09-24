@@ -379,6 +379,7 @@ command = "say"
                 opencode: false,
                 openclaw: false,
                 hermes: false,
+                mcode: false,
             },
             description: None,
             homepage: None,

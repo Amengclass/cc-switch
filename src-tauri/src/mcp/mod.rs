@@ -49,3 +49,5 @@ pub use opencode::{
     convert_to_opencode_format, import_from_opencode, remove_server_from_opencode,
     sync_single_server_to_opencode,
 };
+
+pub(crate) mod mcode;
