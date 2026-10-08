@@ -5,7 +5,14 @@
 //!
 //! 里程碑:M1 骨架(类型 + 模块声明)→ M2 连接/读配置 → M3 切换写回 → M4 env 清理 → M5 远程会话。
 
-pub mod codex;
+// ===== 方案 A 临时态：仅保留 claude 供应商切换链路所需的模块 =====
+//
+// 下面这些模块的「面板命令」已在 commands.rs 里桩掉（TODO(方案②移植)），
+// 它们本身又依赖官方 v4.0.4 里没暴露的纯函数 / 私有实现，故先不参与编译。
+// 正经移植时逐个恢复：把 unimplemented 的调用换成官方新抽象（live::project /
+// live::patch / mode::controller）或我们自带的转换器。
+//
+// pub mod codex;
 pub mod commands;
 pub mod connection;
 #[cfg(target_os = "windows")]
@@ -14,22 +21,22 @@ pub mod current;
 pub mod docker;
 pub mod effect;
 pub mod env_clean;
-pub mod gemini;
-pub mod grok;
-pub mod hermes;
-pub mod hooks;
-pub mod mcp;
-pub mod mcode;
-pub mod openclaw;
-pub mod opencode;
-pub mod pi;
-pub mod prompt;
+// pub mod gemini;
+// pub mod grok;
+// pub mod hermes;
+// pub mod hooks;
+// pub mod mcp;
+// pub mod mcode;
+// pub mod openclaw;
+// pub mod opencode;
+// pub mod pi;
+// pub mod prompt;
 pub mod providers;
 pub mod schema;
-pub mod sessions;
+// pub mod sessions;
 pub mod settings;
 pub mod sftp_io;
-pub mod skill;
+// pub mod skill;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

@@ -809,146 +809,16 @@ pub async fn apply_remote_provider_to_live(
                 warnings: Vec::new(),
             })
         }
-        "codex" => {
-            let settings = if route_proxy {
-                // 走本机路由：base_url 指向远端隧道（宿主机=127.0.0.1；容器=网关 IP），
-                // 复用本机同一变换 apply_codex_official_proxy_route，保持与本机一致。
-                let mut s = provider.settings_config.clone();
-                if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base
-                        .as_deref()
-                        .unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
-                    let routed = crate::codex_config::apply_codex_official_proxy_route(
-                        config,
-                        &format!("http://{base}:{port}/v1"),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    s["config"] = serde_json::json!(routed);
-                }
-                s
-            } else {
-                provider.settings_config.clone()
-            };
-            crate::remote::codex::apply_codex_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &settings,
-                provider.category.as_deref(),
-                crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
-            )
-            .await
-        }
-        "grokbuild" => {
-            let settings = if route_proxy {
-                // 走本机路由：直接复用本机代理接管的同一变换
-                // （base_url 指向远端隧道：宿主机=127.0.0.1；容器=网关 IP +
-                // api_key 占位 + api_backend=responses），与本机产物逐字段一致。
-                let mut s = provider.settings_config.clone();
-                if let Some(config) = s.get("config").and_then(|v| v.as_str()) {
-                    let base = route_base
-                        .as_deref()
-                        .unwrap_or(crate::remote::connection::REMOTE_TUNNEL_LISTEN_ADDR);
-                    let routed = crate::grok_config::apply_proxy_takeover(
-                        config,
-                        &format!("http://{base}:{port}/grokbuild/v1"),
-                        &crate::proxy::remote_route::remote_token_for(session.host_id()),
-                    )
-                    .map_err(|e| e.to_string())?;
-                    s["config"] = serde_json::json!(routed);
-                }
-                s
-            } else {
-                provider.settings_config.clone()
-            };
-            crate::remote::grok::apply_grok_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &settings,
-                provider.category.as_deref(),
-            )
-            .await
-        }
-        "gemini" => {
-            crate::remote::gemini::apply_gemini_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                provider,
-                route_proxy,
-                route_base.as_deref(),
-                port,
-                session.host_id(),
-            )
-            .await
-        }
-        "opencode" => {
-            crate::remote::opencode::apply_opencode_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await
-        }
-        "openclaw" => {
-            crate::remote::openclaw::apply_openclaw_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await
-        }
-        "hermes" => {
-            crate::remote::hermes::apply_hermes_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await
-        }
-        "pi" => {
-            crate::remote::pi::apply_pi_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await
-        }
-        "mcode" => {
-            crate::remote::mcode::apply_mcode_provider_settings(
-                session,
-                container,
-                home,
-                host_name,
-                &provider.name,
-                &provider.settings_config,
-                &provider.id,
-            )
-            .await
+        "codex" | "grokbuild" | "gemini" | "opencode" | "openclaw" | "hermes" | "pi"
+        | "mcode" => {
+            // TODO(方案②移植): 这些应用的远端写入待移植。
+            // 官方 v4.0.4 里对应的配置模块（codex_config / gemini_config /
+            // opencode_config / openclaw_config / hermes_config / pi_config /
+            // mcode_config）都绑死本地 fs，且内部保序写入器是私有的；
+            // 方案②要求用官方 live::project + live::patch（纯函数）或我们自带的
+            // 转换器重做，而不是像旧版那样往官方文件里塞函数。
+            // 目前只有 claude 走通了新路（见本函数 "claude" 分支）。
+            Err(format!("远端切换暂不支持应用 {app}（当前版本仅支持 claude）"))
         }
         other => Err(format!("远程切换暂不支持应用: {other}")),
     }?;

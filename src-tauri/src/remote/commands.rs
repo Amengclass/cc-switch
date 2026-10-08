@@ -1362,25 +1362,14 @@ async fn switch_remote_provider_target(
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
-    // 切换整文件覆盖了该 app 的 live（codex/gemini/grok 的 MCP 与 live 同文件），
-    // 对齐本机 McpService::sync_enabled_for_app：把远端 SSOT 中已启用的 MCP
-    // 重新投影回 live，避免切换后 MCP 失效。失败降级为警告（投影自愈：
-    // 下次切换 / 任一 MCP 启停都会重新投影），不阻断已成功的切换。
-    let reproject = match container {
-        Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
-            Ok(ops) => crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await,
-            Err(e) => Err(e),
-        },
-        None => {
-            let ops = crate::fsops::RemoteSftpFileOps {
-                sftp: &session.sftp,
-            };
-            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, app).await
-        }
-    };
-    if let Err(e) = reproject {
-        log::warn!("[remote] 切换 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}");
-    }
+    // 「切换后重投影远端 MCP」本意：codex/gemini/grok 的 MCP 与 live 同文件，
+    // 整文件覆盖 live 后要把远端 SSOT 里已启用的 MCP 重新投影回去。
+    //
+    // 方案 A 临时态：该重投影依赖 remote::mcp（其面板命令已桩掉、模块暂停编译）。
+    // claude 不受影响 —— 它的 MCP 在独立文件（~/.claude.json），切换 live 不碰它；
+    // 其余应用的远端切换当前也未放开（见 providers.rs 的未移植分支）。
+    // TODO(方案②移植): 恢复 remote::mcp 后接回本段。
+    log::debug!("[remote] 跳过切换后 MCP 重投影（方案 A 临时态，app={app}）");
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
     revert_route_switch_on_tunnel_failure(state, &report, host_id, container, app).await;
@@ -1571,22 +1560,12 @@ pub async fn reapply_remote_provider(
         log::warn!("[remote] 重新应用后持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
-    // MCP 投影（与 switch 一致，避免整文件覆盖后 MCP 失效），失败降级为警告
-    let reproject = match container.as_deref() {
-        Some(c) => match crate::remote::docker::DockerExecFileOps::new(&session.channel, c) {
-            Ok(ops) => crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await,
-            Err(e) => Err(e),
-        },
-        None => {
-            let ops = crate::fsops::RemoteSftpFileOps {
-                sftp: &session.sftp,
-            };
-            crate::remote::mcp::reproject_remote_mcp_for_app(&ops, &home, &app).await
-        }
-    };
-    if let Err(e) = reproject {
-        log::warn!("[remote] 重新应用 {app} 后重投影远端 MCP 失败（将在下次 MCP 操作时自愈）: {e}");
-    }
+    // 「切换 / 重新应用后重投影远端 MCP」：codex/gemini/grok 的 MCP 与 live 同文件，
+    // 整文件覆盖后要把远端 SSOT 里已启用的 MCP 投影回去。
+    // 方案 A 临时态：依赖 remote::mcp（面板已桩掉、模块暂停编译），此处跳过。
+    // claude 的 MCP 在独立文件（~/.claude.json），本就不受影响。
+    // TODO(方案②移植): 恢复 remote::mcp 后接回本段。
+    log::debug!("[remote] 跳过重新应用后的 MCP 重投影（方案 A 临时态，app={app}）");
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
     revert_route_switch_on_tunnel_failure(&state, &report, &host_id, container.as_deref(), &app)
@@ -1823,14 +1802,11 @@ async fn resolve_remote_current_provider_id(
     let app_type =
         crate::app_config::AppType::from_str(app).map_err(|_| format!("未知应用类型: {app}"))?;
     for p in &ssot.providers {
-        // 远端 live 里存的是「生效配置」——即合并通用配置片段后的结果，
-        // 与 switch_remote_provider 写入时一致。因此这里必须用同一份生效配置的
-        // base_url 去比对，否则开启了通用配置的供应商永远匹配不上，编辑推送会被跳过。
-        let effective =
-            crate::services::provider::live::build_effective_settings_with_common_config(
-                &state.db, &app_type, p,
-            )
-            .map_err(|e| e.to_string())?;
+        // 远端 live 里存的就是供应商自己的 settings_config —— 官方 v4.0.4 已废弃
+        // 「回填 / 合并通用配置片段」（见 official services/provider/claude_direct.rs
+        // 的模块文档：「用户的设置本来就留在 live 里」），所以这里直接拿它比对即可，
+        // 不再另算一份「生效配置」。
+        let effective = p.settings_config.clone();
         let local_base = match app {
             "codex" => effective
                 .get("config")
@@ -1941,21 +1917,14 @@ pub async fn list_remote_sessions(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<Vec<crate::remote::sessions::RemoteSessionInfo>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::sessions::list_remote_sessions(&target, &host.default_home()).await
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 远端会话列表。官方 v4.0.4 的 session_manager 解析函数绑死本地
+    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
+    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
+    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
+    Err("远端会话列表尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
-/// 复用本机 `session_manager` 的解析逻辑，列出远端会话的**完整元数据**（标题/摘要/时间等）。
-/// 通过 `FileOps` + 共享的 `scan_sessions_fs` 实现「一套逻辑、本机/远端/容器三套数据源」。
-/// `app`：claude / grokbuild 已支持；其余待扩展（hermes/opencode 含 SQLite 主存储，暂不支持）。
 #[tauri::command]
 pub async fn list_remote_sessions_detailed(
     state: State<'_, AppState>,
@@ -1963,220 +1932,26 @@ pub async fn list_remote_sessions_detailed(
     container: Option<String>,
     app: String,
 ) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let home = host.default_home();
-    let root = match app.as_str() {
-        "claude" => format!("{home}/.claude/projects"),
-        "grokbuild" => format!("{home}/.grok/sessions"),
-        "codex" => format!("{home}/.codex"),
-        "gemini" => format!("{home}/.gemini/tmp"),
-        "openclaw" => format!("{home}/.openclaw/agents"),
-        "pi" => format!("{home}/.pi/agent/sessions"),
-        "hermes" | "opencode" => home.clone(),
-        other => {
-            return Err(format!("远程会话管理暂不支持应用 {other}"));
-        }
-    };
-
-    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 查询（复用本机 provider SQL）
-    if app == "hermes" || app == "opencode" {
-        let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
-        let (db, sql) = if app == "hermes" {
-            (
-                format!("{home}/.hermes/state.db"),
-                "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500".to_string(),
-            )
-        } else {
-            (
-                format!("{home}/.local/share/opencode/opencode.db"),
-                "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC"
-                    .to_string(),
-            )
-        };
-        return match run_sqlite_helper(
-            &session,
-            container.as_deref(),
-            &helper,
-            "query",
-            &db,
-            &sql,
-            &[],
-        )
-        .await
-        {
-            Ok(v) => {
-                let rows = v
-                    .get("rows")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                let mut out = Vec::new();
-                for row in rows {
-                    let meta = if app == "hermes" {
-                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
-                            &row,
-                            &format!("sqlite:{db}"),
-                        )
-                    } else {
-                        crate::session_manager::providers::opencode::opencode_row_to_session_meta(
-                            &row, &db,
-                        )
-                    };
-                    if let Some(m) = meta {
-                        out.push(m);
-                    }
-                }
-                Ok(out)
-            }
-            Err(e) => {
-                // db 不存在（该 app 在远端从未使用）→ 视为空列表
-                if e.contains("unable to open") || e.contains("open db") {
-                    Ok(Vec::new())
-                } else {
-                    Err(e)
-                }
-            }
-        };
-    }
-
-    Ok(match app.as_str() {
-        "claude" => {
-            crate::session_manager::providers::claude::scan_sessions_fs(&target, &root).await
-        }
-        "grokbuild" => {
-            crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, &root).await
-        }
-        "codex" => crate::session_manager::providers::codex::scan_sessions_fs(&target, &root).await,
-        "gemini" => {
-            crate::session_manager::providers::gemini::scan_sessions_fs(&target, &root).await
-        }
-        "openclaw" => {
-            crate::session_manager::providers::openclaw::scan_sessions_fs(&target, &root).await
-        }
-        "pi" => {
-            crate::session_manager::providers::pi::scan_sessions_fs(&target, &root).await
-        }
-        _ => unreachable!(),
-    })
+    // TODO(方案②移植): 远端会话元数据。官方 v4.0.4 的 session_manager 解析函数绑死本地
+    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
+    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
+    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
+    Err("远端会话元数据尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
-/// 列出远端所有 app 的会话（对齐本机 sessionsApi.list()）。
-/// 一次连接，并行扫描 8 个 app，合并返回。任一 app 失败不阻塞其他。
 #[tauri::command]
 pub async fn list_remote_sessions_all(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
 ) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let home = host.default_home();
-
-    // 6 个文件源 app，并行扫描
-    let file_apps: Vec<(&str, String)> = vec![
-        ("claude", format!("{home}/.claude/projects")),
-        ("grokbuild", format!("{home}/.grok/sessions")),
-        ("codex", format!("{home}/.codex")),
-        ("gemini", format!("{home}/.gemini/tmp")),
-        ("openclaw", format!("{home}/.openclaw/agents")),
-        ("pi", format!("{home}/.pi/agent/sessions")),
-    ];
-
-    let mut all_sessions: Vec<crate::session_manager::SessionMeta> = Vec::new();
-
-    // 文件源：逐个扫描（SFTP 复用同一连接）
-    for (app, root) in &file_apps {
-        let sessions = match *app {
-            "claude" => {
-                crate::session_manager::providers::claude::scan_sessions_fs(&target, root).await
-            }
-            "grokbuild" => {
-                crate::session_manager::providers::grokbuild::scan_sessions_fs(&target, root).await
-            }
-            "codex" => {
-                crate::session_manager::providers::codex::scan_sessions_fs(&target, root).await
-            }
-            "gemini" => {
-                crate::session_manager::providers::gemini::scan_sessions_fs(&target, root).await
-            }
-            "openclaw" => {
-                crate::session_manager::providers::openclaw::scan_sessions_fs(&target, root).await
-            }
-            "pi" => {
-                crate::session_manager::providers::pi::scan_sessions_fs(&target, root).await
-            }
-            _ => unreachable!(),
-        };
-        all_sessions.extend(sessions);
-    }
-
-    // 2 个 SQLite 源（hermes / opencode）
-    let hermes_db = format!("{home}/.hermes/state.db");
-    let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
-    let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
-    let opencode_sql = "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
-
-    if let Ok(helper) =
-        ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await
-    {
-        let sqlite_apps: Vec<(&str, &str, &str)> = vec![
-            ("hermes", &hermes_db, hermes_sql),
-            ("opencode", &opencode_db, opencode_sql),
-        ];
-        for (app, db, sql) in &sqlite_apps {
-            if let Ok(v) = run_sqlite_helper(
-                &session,
-                container.as_deref(),
-                &helper,
-                "query",
-                db,
-                sql,
-                &[],
-            )
-            .await
-            {
-                let rows = v
-                    .get("rows")
-                    .and_then(Value::as_array)
-                    .cloned()
-                    .unwrap_or_default();
-                for row in rows {
-                    let meta = if *app == "hermes" {
-                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
-                            &row,
-                            &format!("sqlite:{db}"),
-                        )
-                    } else {
-                        crate::session_manager::providers::opencode::opencode_row_to_session_meta(
-                            &row, db,
-                        )
-                    };
-                    if let Some(m) = meta {
-                        all_sessions.push(m);
-                    }
-                }
-            }
-            // db 不存在 → 跳过，不报错
-        }
-    }
-
-    Ok(all_sessions)
+    // TODO(方案②移植): 远端全部会话。官方 v4.0.4 的 session_manager 解析函数绑死本地
+    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
+    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
+    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
+    Err("远端全部会话尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
-/// 读取远端会话消息（复用本机各 provider 的纯解析；`app` 决定解析器）。
 #[tauri::command]
 pub async fn get_remote_session_messages(
     state: State<'_, AppState>,
@@ -2186,148 +1961,13 @@ pub async fn get_remote_session_messages(
     container: Option<String>,
     app: String,
 ) -> Result<Vec<crate::session_manager::SessionMessage>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let home = host.default_home();
-
-    // hermes / opencode：SQLite，经远端 sqlite-helper 查询
-    if app == "hermes" || app == "opencode" {
-        let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
-        if app == "hermes" {
-            let db = format!("{home}/.hermes/state.db");
-            let sql =
-                "SELECT role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC";
-            let v = run_sqlite_helper(
-                &session,
-                container.as_deref(),
-                &helper,
-                "query",
-                &db,
-                sql,
-                &[session_id.as_str()],
-            )
-            .await?;
-            let rows = v
-                .get("rows")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            return Ok(rows
-                .iter()
-                .filter_map(crate::session_manager::providers::hermes::sqlite_row_to_message)
-                .collect());
-        }
-        // opencode：message + part 两表，query-all 一次取两个结果集
-        let db = format!("{home}/.local/share/opencode/opencode.db");
-        let sql = "SELECT id, time_created, data FROM message WHERE session_id = ?1 ORDER BY time_created ASC; SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY time_created ASC";
-        let v = run_sqlite_helper(
-            &session,
-            container.as_deref(),
-            &helper,
-            "query-all",
-            &db,
-            sql,
-            &[session_id.as_str()],
-        )
-        .await?;
-        let rowsets = v
-            .get("rowsets")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let message_rows = rowsets
-            .first()
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        let part_rows = rowsets
-            .get(1)
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        return Ok(
-            crate::session_manager::providers::opencode::assemble_opencode_messages(
-                &message_rows,
-                &part_rows,
-            ),
-        );
-    }
-
-    match app.as_str() {
-        "claude" => {
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            Ok(
-                crate::session_manager::providers::claude::parse_messages_from_lines(
-                    content.lines().map(|s| s.to_string()),
-                ),
-            )
-        }
-        "grokbuild" => {
-            // 列表里 source_path 是 summary.json，消息在同目录 chat_history.jsonl
-            let chat_path = format!(
-                "{}/chat_history.jsonl",
-                source_path.trim_end_matches("/summary.json")
-            );
-            let content = target
-                .read_text_optional(&chat_path)
-                .await?
-                .unwrap_or_default();
-            Ok(
-                crate::session_manager::providers::grokbuild::parse_messages_from_lines(
-                    content.lines().map(|s| s.to_string()),
-                ),
-            )
-        }
-        "codex" => {
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            Ok(
-                crate::session_manager::providers::codex::parse_messages_from_lines(
-                    content.lines().map(|s| s.to_string()),
-                ),
-            )
-        }
-        "gemini" => {
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            crate::session_manager::providers::gemini::parse_messages_from_json_text(&content)
-        }
-        "openclaw" => {
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            Ok(
-                crate::session_manager::providers::openclaw::parse_messages_from_lines(
-                    content.lines().map(|s| s.to_string()),
-                ),
-            )
-        }
-        "pi" => {
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            crate::session_manager::providers::pi::parse_messages_from_content(&content)
-        }
-        other => Err(format!("远程会话管理暂不支持应用 {other}")),
-    }
+    // TODO(方案②移植): 远端会话消息。官方 v4.0.4 的 session_manager 解析函数绑死本地
+    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
+    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
+    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
+    Err("远端会话消息尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
-/// 删除远端会话（per-app 校验 + 删除），通过 FileOps 实现。
 #[tauri::command]
 pub async fn delete_remote_session(
     state: State<'_, AppState>,
@@ -2337,213 +1977,11 @@ pub async fn delete_remote_session(
     container: Option<String>,
     app: String,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-
-    match app.as_str() {
-        "claude" => {
-            // 校验 session_id 与远端文件匹配（复用本机解析）
-            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
-            let meta = crate::session_manager::providers::claude::parse_session_meta_from_lines(
-                &source_path,
-                &head,
-                &tail,
-            )
-            .ok_or_else(|| format!("无法解析远端会话元数据: {source_path}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-
-            // 删除主文件 + sidecar 目录（同名无 .jsonl 后缀）
-            let sidecar = source_path
-                .strip_suffix(".jsonl")
-                .unwrap_or(&source_path)
-                .to_string();
-            if target.exists(&sidecar).await {
-                if target.is_dir(&sidecar).await {
-                    target.remove_dir_all(&sidecar).await?;
-                } else {
-                    target.remove_file(&sidecar).await?;
-                }
-            }
-            target.remove_file(&source_path).await?;
-            Ok(true)
-        }
-        "grokbuild" => {
-            // source_path 是 summary.json：读文本校验 id，然后删整个会话目录
-            let text = target
-                .read_text_optional(&source_path)
-                .await?
-                .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
-            let meta = crate::session_manager::providers::grokbuild::parse_summary_text(
-                &text,
-                &source_path,
-            )
-            .ok_or_else(|| format!("无法解析远端 Grok Build 会话: {source_path}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-            let session_dir = source_path.trim_end_matches("/summary.json").to_string();
-            target.remove_dir_all(&session_dir).await?;
-            Ok(true)
-        }
-        "codex" => {
-            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
-            let meta = crate::session_manager::providers::codex::parse_session_meta_from_lines(
-                &source_path,
-                &head,
-                &tail,
-                &std::collections::HashMap::new(),
-            )
-            .ok_or_else(|| format!("无法解析远端 Codex 会话元数据: {source_path}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-            target.remove_file(&source_path).await?;
-            Ok(true)
-        }
-        "gemini" => {
-            let text = target
-                .read_text_optional(&source_path)
-                .await?
-                .ok_or_else(|| format!("远端会话文件不存在: {source_path}"))?;
-            let meta = crate::session_manager::providers::gemini::parse_session_from_json_text(
-                &source_path,
-                &text,
-            )
-            .ok_or_else(|| format!("无法解析远端 Gemini 会话: {source_path}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-            target.remove_file(&source_path).await?;
-            Ok(true)
-        }
-        "openclaw" => {
-            let (head, tail) = target.read_head_tail_lines(&source_path, 10, 30).await?;
-            let meta = crate::session_manager::providers::openclaw::parse_session_from_lines(
-                &source_path,
-                &head,
-                &tail,
-                None,
-            )
-            .ok_or_else(|| format!("无法解析远端 OpenClaw 会话: {source_path}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-            // 同步清理 sessions.json 索引（对齐本机 prune_sessions_index）
-            let sessions_dir = source_path.trim_end_matches(&format!("/{}.jsonl", meta.session_id));
-            let index_path = format!("{sessions_dir}/sessions.json");
-            if let Ok(Some(index_text)) = target.read_text_optional(&index_path).await {
-                let mut index: serde_json::Map<String, Value> =
-                    serde_json::from_str(&index_text).unwrap_or_default();
-                index.retain(|_, entry| {
-                    let same_id =
-                        entry.get("sessionId").and_then(Value::as_str) == Some(session_id.as_str());
-                    let same_file = entry.get("sessionFile").and_then(Value::as_str)
-                        == Some(source_path.as_str());
-                    !(same_id || same_file)
-                });
-                if let Ok(json) = serde_json::to_string_pretty(&index) {
-                    let _ = target.write_text_atomic(&index_path, &json).await;
-                }
-            }
-            target.remove_file(&source_path).await?;
-            Ok(true)
-        }
-        "hermes" | "opencode" => {
-            let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
-            let (db, sql) = if app == "hermes" {
-                (
-                    format!("{home}/.hermes/state.db"),
-                    "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
-                )
-            } else {
-                (
-                    format!("{home}/.local/share/opencode/opencode.db"),
-                    "DELETE FROM part WHERE session_id = ?1; DELETE FROM message WHERE session_id = ?1; DELETE FROM session WHERE id = ?1;",
-                )
-            };
-            // 写入前先校验会话存在（helper write 在事务内，删除 0 行也 ok；
-            // 对齐本机 delete_sqlite 的先校验语义）
-            let check_sql = if app == "hermes" {
-                "SELECT id FROM sessions WHERE id = ?1"
-            } else {
-                "SELECT id FROM session WHERE id = ?1"
-            };
-            let v = run_sqlite_helper(
-                &session,
-                container.as_deref(),
-                &helper,
-                "query",
-                &db,
-                check_sql,
-                &[session_id.as_str()],
-            )
-            .await?;
-            let exists = v
-                .get("rows")
-                .and_then(Value::as_array)
-                .map(|r| !r.is_empty())
-                .unwrap_or(false);
-            if !exists {
-                return Err(format!("远端会话不存在: {session_id}"));
-            }
-            run_sqlite_helper(
-                &session,
-                container.as_deref(),
-                &helper,
-                "write",
-                &db,
-                sql,
-                &[session_id.as_str()],
-            )
-            .await?;
-            Ok(true)
-        }
-        "pi" => {
-            // Pi 会话是单个 JSONL 文件：读内容校验 session_id，然后删除文件
-            let content = target
-                .read_text_optional(&source_path)
-                .await?
-                .unwrap_or_default();
-            let meta = crate::session_manager::providers::pi::parse_session_from_content(
-                &source_path,
-                &content,
-            )
-            .map_err(|e| format!("无法解析远端 Pi 会话: {e}"))?;
-            if meta.session_id != session_id {
-                return Err(format!(
-                    "会话 ID 不匹配: 期望 {session_id}, 实际 {}",
-                    meta.session_id
-                ));
-            }
-            target.remove_file(&source_path).await?;
-            Ok(true)
-        }
-        other => Err(format!("远程会话管理暂不支持应用 {other}")),
-    }
+    // TODO(方案②移植): 远端会话删除。官方 v4.0.4 的 session_manager 解析函数绑死本地
+    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
+    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
+    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
+    Err("远端会话删除尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 列出远端 MCP 服务器（完整 McpServer，读 SSOT ~/.cc-switch/mcp.json）。
@@ -2552,16 +1990,10 @@ pub async fn read_remote_mcp_servers(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<Vec<crate::remote::mcp::RemoteMcpServer>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::list_remote_mcp_servers(&target, &host.default_home()).await
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 读取远端 `~/.claude.json` 的**完整内容**（供编辑/展示）。
@@ -2571,15 +2003,9 @@ pub async fn read_remote_mcp_json(
     host_id: String,
     container: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::read_remote_mcp_json(&target, &host.default_home()).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 新增/更新远端 MCP 服务器：写 SSOT + 同步 apps 启用的各 live 配置。
@@ -2587,19 +2013,12 @@ pub async fn read_remote_mcp_json(
 pub async fn upsert_remote_mcp_server(
     state: State<'_, AppState>,
     host_id: String,
-    server: crate::remote::mcp::RemoteMcpServer,
+    server: serde_json::Value,
     container: Option<String>,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::upsert_remote_mcp_server(&target, &host.default_home(), &server).await?;
-    Ok(true)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 从远端删除一个 MCP 服务器：删 SSOT + 从所有启用的 live 配置移除。
@@ -2610,15 +2029,9 @@ pub async fn delete_remote_mcp_server(
     id: String,
     container: Option<String>,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::delete_remote_mcp_server(&target, &host.default_home(), &id).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 切换远端 MCP 服务器在指定 app 的启用状态（改 SSOT + 同步/移除该 app live）。
@@ -2631,17 +2044,9 @@ pub async fn toggle_remote_mcp_app(
     enabled: bool,
     container: Option<String>,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::toggle_remote_mcp_app(&target, &host.default_home(), &id, &app, enabled)
-        .await?;
-    Ok(true)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 批量切换多个 MCP 服务器在某应用：一次连接内改完 SSOT 与 live。
@@ -2654,22 +2059,9 @@ pub async fn bulk_toggle_remote_mcp_app(
     enabled: bool,
     container: Option<String>,
 ) -> Result<crate::remote::RemoteBulkToggleResult, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::bulk_toggle_remote_mcp_app(
-        &target,
-        &host.default_home(),
-        &ids,
-        &app,
-        enabled,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 从远端各 CLI live 配置导入 MCP 到 SSOT，返回新导入数量。
@@ -2679,15 +2071,9 @@ pub async fn import_remote_mcp_from_apps(
     host_id: String,
     container: Option<String>,
 ) -> Result<usize, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::mcp::import_remote_mcp_from_apps(&target, &host.default_home()).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 读取远端 live 提示词文件内容（文件缺失返回空字符串）。
@@ -2698,15 +2084,9 @@ pub async fn read_remote_prompt(
     container: Option<String>,
     app: String,
 ) -> Result<String, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::read_remote_prompt(&target, &host.default_home(), &app).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 将内容整文件原子写回远端 live 提示词文件。
@@ -2718,17 +2098,9 @@ pub async fn write_remote_prompt(
     container: Option<String>,
     app: String,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::write_remote_prompt(&target, &host.default_home(), &app, &content)
-        .await?;
-    Ok(true)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 列出远端 prompts.json 中的提示词列表。
@@ -2739,15 +2111,9 @@ pub async fn list_remote_prompts(
     container: Option<String>,
     app: String,
 ) -> Result<Vec<crate::prompt::Prompt>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::read_remote_prompts(&target, &host.default_home(), &app).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 保存（新增/更新）远端提示词列表，并同步启用项到 live 提示词文件。
@@ -2759,17 +2125,9 @@ pub async fn save_remote_prompts(
     container: Option<String>,
     app: String,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::write_remote_prompts(&target, &host.default_home(), &app, &prompts)
-        .await?;
-    Ok(true)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 // ========================================================================
@@ -2784,15 +2142,9 @@ pub async fn get_remote_pi_prompt_file(
     container: Option<String>,
     kind: crate::services::pi_prompt_files::PiPromptFileKind,
 ) -> Result<crate::services::pi_prompt_files::PiPromptFileSnapshot, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::read_remote_pi_file(&target, &host.default_home(), kind).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 写远端 Pi 系统指令文件（带 revision 冲突检测）。
@@ -2805,22 +2157,9 @@ pub async fn replace_remote_pi_prompt_file(
     #[allow(non_snake_case)] expectedRevision: String,
     content: String,
 ) -> Result<crate::services::pi_prompt_files::PiPromptFileSnapshot, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::write_remote_pi_file(
-        &target,
-        &host.default_home(),
-        kind,
-        &expectedRevision,
-        &content,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 删除远端 Pi 系统指令文件。
@@ -2832,21 +2171,9 @@ pub async fn delete_remote_pi_prompt_file(
     kind: crate::services::pi_prompt_files::PiPromptFileKind,
     #[allow(non_snake_case)] expectedRevision: String,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::delete_remote_pi_file(
-        &target,
-        &host.default_home(),
-        kind,
-        &expectedRevision,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 列出远端 Pi 模板。
@@ -2856,15 +2183,9 @@ pub async fn list_remote_pi_prompt_templates(
     host_id: String,
     container: Option<String>,
 ) -> Result<Vec<crate::services::pi_prompt_files::PiPromptTemplate>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::list_remote_pi_templates(&target, &host.default_home()).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 创建/更新远端 Pi 模板。
@@ -2878,23 +2199,9 @@ pub async fn upsert_remote_pi_prompt_template(
     #[allow(non_snake_case)] expectedRevision: String,
     content: String,
 ) -> Result<crate::services::pi_prompt_files::PiPromptTemplate, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::upsert_remote_pi_template(
-        &target,
-        &host.default_home(),
-        &slug,
-        originalSlug.as_deref(),
-        &expectedRevision,
-        &content,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 删除远端 Pi 模板。
@@ -2906,21 +2213,9 @@ pub async fn delete_remote_pi_prompt_template(
     slug: String,
     #[allow(non_snake_case)] expectedRevision: String,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::prompt::delete_remote_pi_template(
-        &target,
-        &host.default_home(),
-        &slug,
-        &expectedRevision,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 列出远端 `~/.claude/skills/` 下的已安装技能目录。
@@ -2929,16 +2224,10 @@ pub async fn list_remote_skills(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<Vec<crate::remote::skill::RemoteSkillEntry>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::skill::list_remote_skills(&target, &host.default_home()).await
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 删除远端 SSOT 中的技能（目录 + symlink + skills.json）。
@@ -2949,22 +2238,9 @@ pub async fn delete_remote_skill(
     name: String,
     container: Option<String>,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::skill::delete_remote_skill(
-        &target,
-        Some(&session.channel),
-        container.as_deref(),
-        &host.default_home(),
-        &name,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 切换远端技能在某应用的启用状态（更新 skills.json + 增删 symlink）。
@@ -2977,31 +2253,9 @@ pub async fn toggle_remote_skill_app(
     enabled: bool,
     container: Option<String>,
 ) -> Result<bool, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let use_copy =
-        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    let result = crate::remote::skill::bulk_toggle_remote_skill_app(
-        &target,
-        &session.channel,
-        container.as_deref(),
-        &host.default_home(),
-        std::slice::from_ref(&name),
-        &app,
-        enabled,
-        use_copy,
-    )
-    .await?;
-    match result.failed.into_iter().next() {
-        Some(failure) => Err(failure.error),
-        None => Ok(true),
-    }
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 批量切换多个远端技能在某应用的启用状态（一次连接 + 一次 exec）。
@@ -3014,27 +2268,9 @@ pub async fn bulk_toggle_remote_skill_app(
     enabled: bool,
     container: Option<String>,
 ) -> Result<crate::remote::RemoteBulkToggleResult, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let use_copy =
-        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    crate::remote::skill::bulk_toggle_remote_skill_app(
-        &target,
-        &session.channel,
-        container.as_deref(),
-        &host.default_home(),
-        &ids,
-        &app,
-        enabled,
-        use_copy,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 fn shell_q_rs(s: &str) -> String {
@@ -3053,65 +2289,10 @@ pub async fn install_remote_skills_from_zip(
     zip_path: String,
     container: Option<String>,
     app: String,
-) -> Result<Vec<crate::remote::skill::RemoteSkillRecord>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-
-    // 解压 + 上传到 SSOT
-    let installed = crate::remote::skill::install_remote_skills_from_zip_generic(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-        &host.default_home(),
-        &zip_path,
-    )
-    .await?;
-
-    // 对每个新安装的技能：写 skills.json + 创建 symlink，同时收集完整记录
-    let ssot_dir = crate::remote::skill::remote_ssot_path(&host.default_home());
-    let mut records =
-        crate::remote::skill::read_remote_skills_json(&target, &host.default_home()).await?;
-    let mut apps = crate::remote::skill::RemoteSkillApps::default();
-    apps.set_enabled(&app, true);
-    let use_copy =
-        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    let mut result: Vec<crate::remote::skill::RemoteSkillRecord> = Vec::new();
-
-    for name in &installed {
-        let skill_dir = format!("{ssot_dir}/{name}");
-        let (display_name, description) =
-            crate::remote::skill::read_skill_md_meta_static(&target, &skill_dir).await;
-        let record = crate::remote::skill::build_remote_skill_record(
-            name,
-            display_name,
-            description,
-            None,
-            None,
-            None,
-            None,
-            apps.clone(),
-        );
-        records.push(record.clone());
-        result.push(record);
-        crate::remote::skill::sync_remote_skill_links(
-            &session.channel,
-            container.as_deref(),
-            &host.default_home(),
-            name,
-            &apps,
-            use_copy,
-        )
-        .await?;
-    }
-
-    crate::remote::skill::write_remote_skills_json(&target, &host.default_home(), &records).await?;
-    Ok(result)
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 从「发现技能」列表把一个技能安装到远端。
@@ -3125,112 +2306,10 @@ pub async fn install_remote_skill_from_discoverable(
     skill: crate::services::skill::DiscoverableSkill,
     container: Option<String>,
     app: String,
-) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let root = host.default_home();
-    let channel = &session.channel;
-    let container_ref = container.as_deref();
-
-    // 1. 安装目录名 = directory 最后一段（对齐本机 sanitize_install_name）。
-    let install_name = crate::remote::skill::sanitize_name(
-        skill
-            .directory
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or(&skill.directory),
-    );
-    if install_name.is_empty() {
-        return Err("无效的技能目录名".to_string());
-    }
-
-    // 2. 冲突检测（对齐本机 install 的 DB 检查：同仓库更新启用，不同仓库报错）。
-    let mut records = crate::remote::skill::read_remote_skills_json(&target, &root).await?;
-    let mut apps = crate::remote::skill::RemoteSkillApps::default();
-    apps.set_enabled(&app, true);
-    if let Some(existing) = records
-        .iter()
-        .find(|r| r.directory.eq_ignore_ascii_case(&install_name))
-    {
-        let same_repo = existing.repo_owner.as_deref() == Some(skill.repo_owner.as_str())
-            && existing.repo_name.as_deref() == Some(skill.repo_name.as_str());
-        if !same_repo {
-            return Err(format!(
-                "远端已存在同名技能目录 {install_name}（来自 {}/{}），请先卸载或选择其他仓库",
-                existing.repo_owner.as_deref().unwrap_or("unknown"),
-                existing.repo_name.as_deref().unwrap_or("unknown")
-            ));
-        }
-        // 复制记录再改，避免可变借用横跨 sync/write 导致借用冲突。
-        let mut updated = existing.clone();
-        updated.apps = apps.clone();
-        updated.updated_at = chrono::Utc::now().timestamp_millis();
-        let use_copy =
-            crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-        crate::remote::skill::sync_remote_skill_links(
-            channel,
-            container_ref,
-            &root,
-            &install_name,
-            &updated.apps,
-            use_copy,
-        )
-        .await?;
-        crate::remote::skill::write_remote_skills_json(&target, &root, &records).await?;
-        return Ok(updated);
-    }
-
-    // 3. 本机下载仓库 + 解析技能源目录（与本地 install 同一实现，含路径安全校验）。
-    let service = crate::services::skill::SkillService::new();
-    // _temp_guard 保持存活直到上传完成（作用域末尾才释放），防止下载目录被提前回收。
-    let (_temp_guard, _canonical_temp, source_dir, _used_branch) = service
-        .download_and_resolve_skill_source(&skill)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 4. 上传远端 SSOT。
-    let ssot_dir = crate::remote::skill::remote_ssot_path(&root);
-    let remote_dir = format!("{ssot_dir}/{install_name}");
-    crate::remote::skill::upload_dir_via_tar(channel, container_ref, &source_dir, &remote_dir)
-        .await?;
-
-    // 5. 写 skills.json 记录 + 建链接。
-    let description = if skill.description.is_empty() {
-        None
-    } else {
-        Some(skill.description.clone())
-    };
-    let record = crate::remote::skill::build_remote_skill_record(
-        &install_name,
-        Some(skill.name.clone()),
-        description,
-        Some(skill.repo_owner.clone()),
-        Some(skill.repo_name.clone()),
-        Some(skill.repo_branch.clone()),
-        skill.readme_url.clone(),
-        apps.clone(),
-    );
-    records.push(record.clone());
-    let use_copy =
-        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    crate::remote::skill::sync_remote_skill_links(
-        channel,
-        container_ref,
-        &root,
-        &install_name,
-        &apps,
-        use_copy,
-    )
-    .await?;
-    crate::remote::skill::write_remote_skills_json(&target, &root, &records).await?;
-
-    Ok(record)
+) -> Result<serde_json::Value, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 从本地单个技能目录直接上传到远端 `~/.claude/skills/`（递归）。
@@ -3242,40 +2321,9 @@ pub async fn install_remote_skill_from_dir(
     local_path: String,
     container: Option<String>,
 ) -> Result<String, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-
-    let local_path = std::path::Path::new(&local_path);
-    let dir_name = local_path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .ok_or_else(|| "无法确定技能目录名".to_string())?;
-    let install_name = crate::remote::skill::sanitize_name(&dir_name);
-    if install_name.is_empty() {
-        return Err("技能目录名无效".to_string());
-    }
-
-    let skills_root = crate::remote::skill::remote_ssot_path(&host.default_home());
-    let remote_dir = format!("{skills_root}/{install_name}");
-
-    // 检查是否已存在（宿主机 SFTP）
-    let fs = crate::fsops::RemoteSftpFileOps {
-        sftp: &session.sftp,
-    };
-    let existing = crate::remote::skill::list_remote_skills(&fs, &host.default_home()).await?;
-    if existing.iter().any(|e| e.name == install_name) {
-        return Err(format!("远端已存在技能 {install_name}，请先删除再导入"));
-    }
-
-    crate::remote::skill::upload_dir_via_tar(
-        &session.channel,
-        container.as_deref(),
-        local_path,
-        &remote_dir,
-    )
-    .await?;
-    Ok(install_name)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 更新远端某个 Skill：从该 Skill 的 GitHub 仓库重新下载最新版，
@@ -3286,23 +2334,10 @@ pub async fn update_remote_skill(
     host_id: String,
     skill_id: String,
     container: Option<String>,
-) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::skill::update_remote_skill_impl(
-        &target,
-        &session.channel,
-        container.as_deref(),
-        &host.default_home(),
-        &skill_id,
-    )
-    .await
+) -> Result<serde_json::Value, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 检查远端某个目标上各 Skill 是否有更新（对齐本机 `check_updates`）。
@@ -3313,15 +2348,9 @@ pub async fn check_remote_skill_updates(
     host_id: String,
     container: Option<String>,
 ) -> Result<Vec<crate::services::skill::SkillUpdateInfo>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    crate::remote::skill::check_remote_skill_updates_impl(&target, &host.default_home()).await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 在远端文件系统上扫描未管理的技能目录（远端「导入已有」的扫描阶段）。
@@ -3332,18 +2361,10 @@ pub async fn scan_remote_unmanaged_skills(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<Vec<crate::remote::skill::RemoteUnmanagedSkill>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let root = host.default_home();
-
-    if let Some(ref c) = container {
-        return scan_container_unmanaged_skills(&session.channel, c, &root).await;
-    }
-
-    let target = crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, None)?;
-    crate::remote::skill::scan_remote_unmanaged_skills(&target, &root).await
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 远端未托管 Skills 扫描尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端未托管 Skills 扫描尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 容器内批量扫描：一个 shell 脚本一趟 exec 收完所有源目录。
@@ -3351,122 +2372,10 @@ async fn scan_container_unmanaged_skills(
     channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
     container: &str,
     root: &str,
-) -> Result<Vec<crate::remote::skill::RemoteUnmanagedSkill>, String> {
-    // 已管理技能：读 skills.json
-    let json_path = crate::remote::skill::remote_skills_json_path(root);
-    let managed_json = crate::remote::connection::exec_command(
-        channel,
-        &format!(
-            "docker exec {} sh -c {}",
-            container,
-            shell_q_rs(&format!("cat {} 2>/dev/null", shell_q_rs(&json_path)))
-        ),
-    )
-    .await
-    .unwrap_or_default();
-    let managed: std::collections::HashSet<String> = if managed_json.trim().is_empty() {
-        Default::default()
-    } else {
-        serde_json::from_str::<Vec<crate::remote::skill::RemoteSkillRecord>>(&managed_json)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| r.directory)
-            .collect()
-    };
-
-    // 源目录列表
-    let sources: [(&str, &str); 8] = [
-        ("cc-switch", ".cc-switch/skills"),
-        ("claude", ".claude/skills"),
-        ("codex", ".codex/skills"),
-        ("gemini", ".gemini/skills"),
-        ("grokbuild", ".grok/skills"),
-        ("opencode", ".config/opencode/skills"),
-        ("openclaw", ".openclaw/workspace/skills"),
-        ("hermes", ".hermes/skills"),
-    ];
-
-    let mut unmanaged: std::collections::HashMap<
-        String,
-        crate::remote::skill::RemoteUnmanagedSkill,
-    > = Default::default();
-
-    for (label, app_rel) in &sources {
-        let src = format!("{root}/{app_rel}");
-        let script = format!(
-            "for d in {src}/*/; do name=$(basename \"$d\"); case \"$name\" in .*) continue ;; esac; if [ -f \"$d/SKILL.md\" ]; then echo CCSW_NAME:$name; echo CCSW_PATH:$d; cat \"$d/SKILL.md\"; echo CCSW_END; fi; done",
-        );
-        let out = crate::remote::connection::exec_command(
-            channel,
-            &format!("docker exec {} sh -c {}", container, shell_q_rs(&script)),
-        )
-        .await
-        .unwrap_or_default();
-
-        // 解析输出
-        for block in out.split("CCSW_END") {
-            let block = block.trim();
-            if block.is_empty() {
-                continue;
-            }
-            let dir = block
-                .lines()
-                .find(|l| l.starts_with("CCSW_NAME:"))
-                .map(|l| l.trim_start_matches("CCSW_NAME:").to_string());
-            let dir = match dir {
-                Some(d) => d,
-                None => continue,
-            };
-            if managed.contains(&dir) {
-                continue;
-            }
-            let dir_path = block
-                .lines()
-                .find(|l| l.starts_with("CCSW_PATH:"))
-                .map(|l| l.trim_start_matches("CCSW_PATH:").trim().to_string())
-                .unwrap_or_default();
-
-            // 解析 SKILL.md 内容中的 YAML frontmatter
-            let filtered: Vec<&str> = block
-                .lines()
-                .filter(|l| !l.starts_with("CCSW_NAME:") && !l.starts_with("CCSW_PATH:"))
-                .collect();
-            let content = filtered.join("\n");
-            let parts: Vec<&str> = content.trim().splitn(3, "---").collect();
-            let (display_name, description) = if parts.len() >= 3 {
-                match serde_yaml::from_str::<serde_json::Value>(parts[1].trim()) {
-                    Ok(meta) => (
-                        meta.get("name")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
-                        meta.get("description")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
-                    ),
-                    Err(_) => (None, None),
-                }
-            } else {
-                (None, None)
-            };
-            let name = display_name.unwrap_or_else(|| dir.clone());
-            let label_str = label.to_string();
-            unmanaged
-                .entry(dir.clone())
-                .and_modify(|s| s.found_in.push(label_str.clone()))
-                .or_insert(crate::remote::skill::RemoteUnmanagedSkill {
-                    directory: dir,
-                    name,
-                    description,
-                    found_in: vec![label_str.clone()],
-                    path: dir_path,
-                });
-        }
-    }
-
-    let mut out: Vec<crate::remote::skill::RemoteUnmanagedSkill> =
-        unmanaged.into_values().collect();
-    out.sort_by(|a, b| a.directory.cmp(&b.directory));
-    Ok(out)
+) -> Result<Vec<serde_json::Value>, String> {
+    // TODO(方案②移植): 容器未托管 Skills 扫描尚未移植（调用方已桩掉，本函数为死代码）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("容器未托管 Skills 扫描尚未移植（调用方已桩掉，本函数为死代码）".to_string())
 }
 
 /// 在远端将技能目录复制到 SSOT → 更新 skills.json → 创建链接（symlink 或 copy，取决于本机设置）。
@@ -3478,30 +2387,10 @@ pub async fn import_remote_skill(
     name: String,
     container: Option<String>,
     app: String,
-) -> Result<crate::remote::skill::RemoteSkillRecord, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let mut apps = crate::remote::skill::RemoteSkillApps::default();
-    apps.set_enabled(&app, true);
-    let use_copy =
-        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
-    crate::remote::skill::import_remote_skill_local(
-        &target,
-        &session.channel,
-        container.as_deref(),
-        &host.default_home(),
-        &source_path,
-        &name,
-        &apps,
-        use_copy,
-    )
-    .await
+) -> Result<serde_json::Value, String> {
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 清理远端 shell 配置中的冲突环境变量（注释 + .bak 备份）。
@@ -3511,18 +2400,9 @@ pub async fn clean_remote_env_conflicts(
     host_id: String,
     container: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-    let home = host.default_home();
-    let conflicts = crate::remote::env_clean::scan_remote_env_conflicts(&target, &home).await?;
-    let cleaned = crate::remote::env_clean::clean_remote_env_conflicts(&target, &conflicts).await?;
-    Ok(json!({ "cleaned": cleaned, "total": conflicts.len() }))
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 列出远端主机上的 Docker 容器（`docker ps` 解析），供「目标 = 容器」选择。
@@ -3636,25 +2516,9 @@ pub async fn set_remote_openclaw_default_model(
     container: Option<String>,
     default_model: serde_json::Value,
 ) -> Result<(), String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    // 读远端 openclaw.json（JSON5；不存在/空 → 默认骨架起步）
-    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
-    let source = read.as_deref();
-
-    let new_text =
-        crate::openclaw_config::set_default_model_preserve_format(source, &default_model)
-            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
-
-    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
-    session
-        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
-        .await?;
-    Ok(())
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 获取远端 OpenClaw 的默认模型（对齐本机 `openclawApi.getDefaultModel`）。
@@ -3665,25 +2529,9 @@ pub async fn get_remote_openclaw_default_model(
     host_id: String,
     container: Option<String>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let merged: serde_json::Value = match session
-        .read_remote_text(&config_path, container.as_deref())
-        .await?
-    {
-        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
-        None => json!({}),
-    };
-    let default_model = merged
-        .get("agents")
-        .and_then(|a| a.get("defaults"))
-        .and_then(|d| d.get("model"))
-        .cloned();
-    Ok(default_model)
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 // ============================================================================
@@ -3697,23 +2545,9 @@ pub async fn get_remote_openclaw_env(
     host_id: String,
     container: Option<String>,
 ) -> Result<crate::openclaw_config::OpenClawEnvConfig, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let merged: serde_json::Value = match session
-        .read_remote_text(&config_path, container.as_deref())
-        .await?
-    {
-        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
-        None => json!({}),
-    };
-
-    let env_value = merged.get("env").cloned().unwrap_or_else(|| json!({}));
-    serde_json::from_value(env_value)
-        .map_err(|e| format!("解析远端 OpenClaw env 配置失败: {e}"))
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 设置远端 OpenClaw 的 env 配置（对齐本机 `openclawApi.setEnv`）。
@@ -3724,26 +2558,9 @@ pub async fn set_remote_openclaw_env(
     container: Option<String>,
     env: crate::openclaw_config::OpenClawEnvConfig,
 ) -> Result<(), String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
-    let source = read.as_deref();
-
-    let env_value = serde_json::to_value(&env)
-        .map_err(|e| format!("序列化 env 配置失败: {e}"))?;
-    let new_text =
-        crate::openclaw_config::set_section_preserve_format(source, "env", &env_value)
-            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
-
-    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
-    session
-        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
-        .await?;
-    Ok(())
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 获取远端 OpenClaw 的 tools 配置（对齐本机 `openclawApi.getTools`）。
@@ -3753,23 +2570,9 @@ pub async fn get_remote_openclaw_tools(
     host_id: String,
     container: Option<String>,
 ) -> Result<crate::openclaw_config::OpenClawToolsConfig, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let merged: serde_json::Value = match session
-        .read_remote_text(&config_path, container.as_deref())
-        .await?
-    {
-        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
-        None => json!({}),
-    };
-
-    let tools_value = merged.get("tools").cloned().unwrap_or_else(|| json!({}));
-    serde_json::from_value(tools_value)
-        .map_err(|e| format!("解析远端 OpenClaw tools 配置失败: {e}"))
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 设置远端 OpenClaw 的 tools 配置（对齐本机 `openclawApi.setTools`）。
@@ -3780,26 +2583,9 @@ pub async fn set_remote_openclaw_tools(
     container: Option<String>,
     tools: crate::openclaw_config::OpenClawToolsConfig,
 ) -> Result<(), String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
-    let source = read.as_deref();
-
-    let tools_value = serde_json::to_value(&tools)
-        .map_err(|e| format!("序列化 tools 配置失败: {e}"))?;
-    let new_text =
-        crate::openclaw_config::set_section_preserve_format(source, "tools", &tools_value)
-            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
-
-    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
-    session
-        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
-        .await?;
-    Ok(())
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 获取远端 OpenClaw 的 agents.defaults 配置（对齐本机 `openclawApi.getAgentsDefaults`）。
@@ -3809,34 +2595,9 @@ pub async fn get_remote_openclaw_agents_defaults(
     host_id: String,
     container: Option<String>,
 ) -> Result<Option<crate::openclaw_config::OpenClawAgentsDefaults>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let merged: serde_json::Value = match session
-        .read_remote_text(&config_path, container.as_deref())
-        .await?
-    {
-        Some(t) => json5::from_str(&t).unwrap_or_else(|_| json!({})),
-        None => json!({}),
-    };
-
-    let defaults_value = merged
-        .get("agents")
-        .and_then(|a| a.get("defaults"))
-        .cloned();
-
-    match defaults_value {
-        Some(v) => {
-            let defaults: crate::openclaw_config::OpenClawAgentsDefaults =
-                serde_json::from_value(v)
-                    .map_err(|e| format!("解析远端 OpenClaw agents.defaults 失败: {e}"))?;
-            Ok(Some(defaults))
-        }
-        None => Ok(None),
-    }
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 设置远端 OpenClaw 的 agents.defaults 配置（对齐本机 `openclawApi.setAgentsDefaults`）。
@@ -3847,28 +2608,9 @@ pub async fn set_remote_openclaw_agents_defaults(
     container: Option<String>,
     defaults: crate::openclaw_config::OpenClawAgentsDefaults,
 ) -> Result<(), String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let config_path = format!("{home}/.openclaw/openclaw.json");
-
-    let read = session.read_remote_text(&config_path, container.as_deref()).await?;
-    let source = read.as_deref();
-
-    // 构建 agents.defaults JSON
-    let defaults_value = serde_json::to_value(&defaults)
-        .map_err(|e| format!("序列化 agents.defaults 失败: {e}"))?;
-
-    let new_text =
-        crate::openclaw_config::set_nested_section_preserve_format(source, "agents", "defaults", &defaults_value)
-            .map_err(|e| format!("处理远端 {config_path} 失败: {e}"))?;
-
-    let expected_hash = source.map(|t| format!("{:x}", Sha256::digest(t.as_bytes())));
-    session
-        .write_settings_with_backup(&config_path, &new_text, container.as_deref(), expected_hash.as_deref())
-        .await?;
-    Ok(())
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 获取远端 Hermes 的 `model` 段（对齐本机 `get_hermes_model_config`）。
@@ -3880,12 +2622,9 @@ pub async fn get_remote_hermes_model_config(
     host_id: String,
     container: Option<String>,
 ) -> Result<Option<crate::hermes_config::HermesModelConfig>, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    crate::remote::hermes::read_remote_hermes_model_config(&session, container.as_deref(), &home)
-        .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 按 id 加载主机，不存在时报错。
@@ -3947,35 +2686,9 @@ pub async fn query_remote_provider_usage(
     app: String,
     provider_id: String,
 ) -> Result<crate::provider::UsageResult, String> {
-    log::info!(
-        "[remote] query_remote_provider_usage 调用 host={host_id} app={app} provider={provider_id}"
-    );
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-
-    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
-    let provider = ssot
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
-
-    let app_type = crate::app_config::AppType::from_str(&app)
-        .map_err(|e| format!("未知应用类型: {e}"))?;
-    crate::query_usage_for_provider(
-        Some(provider),
-        &copilot_state,
-        &xai_state,
-        app_type,
-    )
-    .await
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
 
 /// 远端目标下检测 Provider 连通性：provider 定义从该远端 SSOT 读取，但连通性
@@ -3990,35 +2703,7 @@ pub async fn stream_check_remote_provider(
     app: String,
     provider_id: String,
 ) -> Result<crate::services::stream_check::StreamCheckResult, String> {
-    let host = load_host(&state, &host_id)?;
-    let password = resolve_password(&host)?;
-    let session = connection::connect(&host, Some(&password)).await?;
-    let home = host.default_home();
-    let target = crate::remote::docker::RemoteTarget::new(
-        &session.sftp,
-        &session.channel,
-        container.as_deref(),
-    )?;
-
-    let ssot = crate::remote::providers::read_remote_providers_ssot(&target, &home, &app).await?;
-    let provider = ssot
-        .providers
-        .iter()
-        .find(|p| p.id == provider_id)
-        .ok_or_else(|| format!("远端供应商 {provider_id} 不存在"))?;
-
-    let app_type = crate::app_config::AppType::from_str(&app)
-        .map_err(|e| format!("未知应用类型: {e}"))?;
-    let config = state
-        .db
-        .get_stream_check_config()
-        .map_err(|e| format!("读取连通性检查配置失败: {e}"))?;
-    crate::commands::stream_check::check_provider_connectivity(
-        &app_type,
-        provider,
-        &config,
-        copilot_state.inner(),
-    )
-    .await
-    .map_err(|e| e.to_string())
+    // TODO(方案②移植): 远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）
+    // 临时桩：让 crate 编过；前端拿到明确错误，而不是命令不存在。
+    Err("远端面板尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
 }
