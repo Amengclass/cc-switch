@@ -9,6 +9,8 @@ pub mod prompts;
 pub mod providers;
 pub mod providers_seed;
 pub mod proxy;
+pub mod remote_current;
+pub mod remote_hosts;
 pub mod settings;
 pub mod skills;
 pub mod stream_check;
