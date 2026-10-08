@@ -12,6 +12,7 @@ mod config;
 mod database;
 mod deeplink;
 mod error;
+mod floating;
 mod gemini_config;
 mod gemini_mcp;
 mod grok_config;
@@ -22,6 +23,7 @@ mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
 pub mod live;
+mod magic;
 mod mcode_config;
 mod mcp;
 pub mod mode;
@@ -423,6 +425,8 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         // 拦截窗口关闭：根据设置决定是否最小化到托盘
         .on_window_event(|window, event| {
+            // 增强层窗口事件（悬浮窗菜单失焦收起 / 球拖动落盘）—— 见 magic 模块
+            crate::magic::on_window_event(window, event);
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 // 数据库版本过新的恢复模式下没有托盘可唤回，关闭即退出，避免应用隐身后台
                 let in_db_recovery = crate::init_status::get_init_error()
@@ -460,6 +464,8 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(window_state_flags())
+                // 排除悬浮窗（球/面板/菜单）避免被恢复成历史错误尺寸——见 magic::DENIED_WINDOW_LABELS
+                .with_denylist(&crate::magic::DENIED_WINDOW_LABELS)
                 .build(),
         )
         .setup(|app| {
@@ -1388,6 +1394,13 @@ pub fn run() {
                 }
             }
 
+            // 启动后预热用量缓存（悬浮窗 / 托盘首次展示即有余量数据）—— 见 magic 模块
+            crate::magic::warm_usage_cache(app);
+            // 悬浮窗：开启时创建悬浮球窗口（独立于主窗口，轻量模式仍可工作）—— 见 magic 模块
+            crate::magic::ensure_floating(
+                app.handle(),
+                crate::settings::get_settings().enable_floating_window,
+            );
 
             Ok(())
         })
@@ -1758,6 +1771,27 @@ pub fn run() {
             commands::enter_lightweight_mode,
             commands::exit_lightweight_mode,
             commands::is_lightweight_mode,
+            // Floating window (加速球)
+            floating::get_floating_window_data,
+            floating::get_floating_ball_detail,
+            floating::get_floating_ball_target,
+            floating::floating_set_pin_app,
+            floating::floating_record_active_app,
+            floating::floating_refresh_usage,
+            floating::floating_set_remote_takeover,
+            floating::floating_set_remote_context,
+            floating::show_floating_panel,
+            floating::hide_floating_panel,
+            floating::floating_set_hover,
+            floating::set_floating_ball_position,
+            floating::open_main_window,
+            floating::disable_floating_window,
+            floating::floating_drag_begin,
+            floating::floating_drag_end,
+            floating::floating_expand_from_strip,
+            floating::show_floating_context_menu,
+            floating::hide_floating_menu,
+            floating::floating_open_settings,
         ]);
 
     let app = builder
@@ -1808,6 +1842,8 @@ pub fn run() {
             let app_handle = app_handle.clone();
             tauri::async_runtime::spawn(async move {
                 save_window_state_before_exit(&app_handle);
+                // 悬浮球位置最后落盘一次（防抖任务可能还没跑完）
+                crate::floating::save_ball_position_now(&app_handle);
                 cleanup_before_exit(&app_handle).await;
                 // 先于 std::process::exit 显式移除托盘图标。
                 // 进程直接退出时 Tauri 运行时不走正常 Drop 流程，

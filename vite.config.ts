@@ -16,6 +16,14 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    // 多页入口：主应用 + 悬浮窗（加速球）独立 HTML，
+    // 让悬浮窗窗口只加载悬浮球/面板组件，彻底避免路由分派到主 App。
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, "src/index.html"),
+        floating: path.resolve(__dirname, "src/floating.html"),
+      },
+    },
   },
   server: {
     port: 3000,

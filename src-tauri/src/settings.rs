@@ -342,6 +342,14 @@ pub struct CodexOfficialHistoryUnifyMigration {
     pub codex_config_dir: Option<String>,
 }
 
+/// 悬浮窗（加速球）位置（逻辑像素坐标）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FloatingWindowPosition {
+    pub x: f64,
+    pub y: f64,
+}
+
 /// 应用设置结构
 ///
 /// 存储设备级别设置，保存在本地 `~/.cc-switch/settings.json`，不随数据库同步。
@@ -514,6 +522,36 @@ pub struct AppSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preferred_terminal: Option<String>,
 
+    // ===== 悬浮窗（加速球）设置 =====
+    /// 是否启用桌面悬浮球（默认关闭）
+    #[serde(default)]
+    pub enable_floating_window: bool,
+    /// 悬浮球位置（逻辑像素坐标）；None 表示使用默认位置（主显示器右下角）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_window_position: Option<FloatingWindowPosition>,
+    /// 吸附动画时长（毫秒）；0 = 立即吸附，None = 默认 160
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_snap_speed_ms: Option<u32>,
+    /// 悬浮球是否固定当前位置（设置页「固定当前位置」开关；固定后不可拖动/不吸附）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_locked: Option<bool>,
+    /// 悬浮球置顶显示的 app（持久化）：Some(app) 时球只显示该 app；
+    /// None = 跟随最近活跃 app（provider-switched 事件更新 floating_last_app）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_pin_app: Option<String>,
+    /// 最近一次活跃的 app（provider-switched 事件写入，供球跟随）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_last_app: Option<String>,
+    /// 球当前显示的 app 是否处「远端接管」（主窗口计算后写入；球据此显示流动边框）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_remote_takeover: Option<bool>,
+    /// 悬浮球背景/边框不透明度（0.2~1.0；设置页滑块调节）。None = 默认 0.97。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_opacity: Option<f32>,
+    /// 边缘自动收起：拖到屏幕边缘松手后收起为色条，鼠标靠近自动展开
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floating_auto_collapse: Option<bool>,
+
     // ===== 本机自动迁移状态 =====
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_migrations: Option<LocalMigrations>,
@@ -584,6 +622,15 @@ impl Default for AppSettings {
             backup_interval_hours: None,
             backup_retain_count: None,
             preferred_terminal: None,
+            enable_floating_window: false,
+            floating_window_position: None,
+            floating_snap_speed_ms: None,
+            floating_locked: None,
+            floating_pin_app: None,
+            floating_last_app: None,
+            floating_remote_takeover: None,
+            floating_opacity: None,
+            floating_auto_collapse: None,
             local_migrations: None,
         }
     }
@@ -820,6 +867,30 @@ where
     save_settings_file(&next)?;
     *guard = next;
     Ok(())
+}
+
+// ===== 悬浮窗（加速球）设置访问器 =====
+
+/// 保存悬浮球位置（逻辑像素坐标）。
+pub fn set_floating_window_position(
+    position: Option<FloatingWindowPosition>,
+) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.floating_window_position = position)
+}
+
+/// 记录最近活跃的 app（provider 切换成功后写入，供悬浮球跟随显示）。
+pub fn set_floating_last_app(app: String) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.floating_last_app = Some(app))
+}
+
+/// 写入悬浮球置顶 app（None = 取消置顶，恢复跟随最近活跃）。
+pub fn set_floating_pin_app(app: Option<String>) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.floating_pin_app = app)
+}
+
+/// 写入「当前 app 是否处远端接管」（主窗口计算后推送，球据此显示流动边框）。
+pub fn set_floating_remote_takeover(active: Option<bool>) -> Result<(), AppError> {
+    mutate_settings(|settings| settings.floating_remote_takeover = active)
 }
 
 pub fn is_codex_third_party_history_provider_bucket_migrated() -> bool {

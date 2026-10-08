@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { isLinux } from "@/lib/platform";
 import { TerminalSelect } from "@/components/settings/TerminalSettings";
+import { FloatingWindowSettings } from "@/components/settings/FloatingWindowSettings";
 import {
   SettingsBlock,
   SettingsCard,
@@ -126,6 +127,11 @@ export function GeneralSection({
             }
           />
         </SettingsCard>
+      </SettingsBlock>
+
+      {/* 悬浮窗（加速球）：自成一节，官方设置页没有这项 */}
+      <SettingsBlock title={t("settings.floatingWindow")}>
+        <FloatingWindowSettings settings={settings} onChange={onAutoSave} />
       </SettingsBlock>
 
       <SettingsBlock title={t("settings.general.updates")}>

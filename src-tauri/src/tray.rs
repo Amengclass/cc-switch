@@ -83,6 +83,7 @@ pub struct TrayTexts {
     pub show_main: &'static str,
     pub open_website: &'static str,
     pub lightweight_mode: &'static str,
+    pub floating_window: &'static str,
     pub quit: &'static str,
     /// 有应用在用路由服务时的「退出」：写明后果（客户端指回直连、路由服务停止，下次打开自动接回）。
     pub quit_stops_routing: &'static str,
@@ -185,6 +186,7 @@ impl TrayTexts {
                 show_main: "Open CC Switch",
                 open_website: "Open official website",
                 lightweight_mode: "Lightweight mode",
+                floating_window: "Floating Widget",
                 quit: "Quit CC Switch",
                 quit_stops_routing: "Quit CC Switch (stops the routing service)",
                 projects_label: "Projects",
@@ -244,6 +246,7 @@ impl TrayTexts {
                 show_main: "CC Switch を開く",
                 open_website: "公式サイトを開く",
                 lightweight_mode: "軽量モード",
+                floating_window: "フローティングコンポーネント",
                 quit: "CC Switch を終了",
                 quit_stops_routing: "CC Switch を終了（ルーティングサービスが停止します）",
                 projects_label: "プロジェクト",
@@ -303,6 +306,7 @@ impl TrayTexts {
                 show_main: "開啟 CC Switch",
                 open_website: "開啟官方網站",
                 lightweight_mode: "輕量模式",
+                floating_window: "懸浮窗",
                 quit: "退出 CC Switch",
                 quit_stops_routing: "退出 CC Switch（路由服務會停止）",
                 projects_label: "專案",
@@ -359,6 +363,7 @@ impl TrayTexts {
                 show_main: "打开 CC Switch",
                 open_website: "打开官方网站",
                 lightweight_mode: "轻量模式",
+                floating_window: "悬浮窗",
                 quit: "退出 CC Switch",
                 quit_stops_routing: "退出 CC Switch（路由服务会停止）",
                 projects_label: "项目",
@@ -415,7 +420,8 @@ impl TrayTexts {
     }
 
     /// 按设置里的语言取文案；没设过语言（首次安装）时按系统区域，而不是固定简体。
-    fn current() -> Self {
+    /// `pub(crate)`：悬浮窗面板复用同一套文案（单一数据源，两边不会各说各的）。
+    pub(crate) fn current() -> Self {
         let settings = crate::settings::get_settings();
         let language = match settings.language.as_deref() {
             Some(lang) => lang,
@@ -622,11 +628,32 @@ fn format_subscription_quota(
     (!lines.is_empty()).then_some(QuotaView::Lines(lines))
 }
 
-fn tier_pct(data: &crate::provider::UsageData) -> Option<f64> {
+/// 用量数据的已用百分比（悬浮窗复用；与托盘同一口径）。
+pub(crate) fn tier_pct(data: &crate::provider::UsageData) -> Option<f64> {
     match (data.used, data.total) {
         (Some(used), Some(total)) if total > 0.0 => Some(used / total * 100.0),
         _ => None,
     }
+}
+
+/// 已知档位按组归并后，各组利用率的最大值（悬浮球上色用）。
+///
+/// 与 `grouped_tier_lines` 同一套 `TIER_GROUPS` 分组与「每组取最高」规则，
+/// 但不产文案 —— 悬浮窗只要一个数，不需要 `TrayTexts`。
+/// 没有已知档位时返回 `None`（调用方可回退到任意一条的利用率）。
+pub(crate) fn worst_utilization(entries: &[(&str, f64)]) -> Option<f64> {
+    let mut worst: Option<f64> = None;
+    for &(_, names) in TIER_GROUPS {
+        let group_max = entries
+            .iter()
+            .filter(|(name, utilization)| names.contains(name) && utilization.is_finite())
+            .map(|(_, utilization)| *utilization)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        if let Some(utilization) = group_max {
+            worst = Some(worst.map_or(utilization, |w| w.max(utilization)));
+        }
+    }
+    worst
 }
 
 /// 脚本结果里 `extra` 带的重置时间：Token Plan 是 JSON 的 `resetsAt`，官方订阅是原样的时间串。
@@ -820,7 +847,7 @@ fn managed_codex_account_id(provider: &Provider) -> Option<String> {
     None
 }
 
-fn provider_uses_official_subscription(provider: &Provider) -> bool {
+pub(crate) fn provider_uses_official_subscription(provider: &Provider) -> bool {
     // Managed Codex uses the account-scoped path in tray_usage_source instead
     // of the CLI's app-wide subscription cache.
     if managed_codex_account_id(provider).is_some() {
@@ -908,6 +935,25 @@ fn usage_view(
             format_script_result(texts, result)
         })
         .flatten()
+}
+
+/// 悬浮窗用：当前 provider 的用量后缀（复用托盘同一套格式化 —— 单一数据源）。
+///
+/// 与托盘悬停/标题同源：`usage_view` 产出结构化额度视图，`quota_title` 取首行文案，
+/// 这里拼成 `" · <文案>"` 交给悬浮球 / 面板。没有可用数据时返回 `None`。
+pub(crate) fn floating_usage_suffix(
+    usage_cache: &UsageCache,
+    app_type: &AppType,
+    provider: &Provider,
+    provider_id: &str,
+) -> Option<String> {
+    let texts = TrayTexts::current();
+    let view = usage_view(usage_cache, &texts, app_type, provider, provider_id)?;
+    let (title, _) = quota_title(&view)?;
+    if title.is_empty() {
+        return None;
+    }
+    Some(format!(" · {title}"))
 }
 
 // ─── 「需要路由」判定（镜像前端 `providerNeedsRouting`）──────────────────────────────
@@ -1979,12 +2025,31 @@ fn collect_status(
 
 fn collect_model(app_state: &AppState, texts: &TrayTexts) -> Result<TrayModel, AppError> {
     let (snapshots, status) = collect_status(app_state, texts)?;
-    let entries = build_menu_model(
+    let mut entries = build_menu_model(
         texts,
         &status,
         &snapshots,
         crate::lightweight::is_lightweight_mode(),
         chrono::Local::now(),
+    );
+    // 悬浮窗（加速球）开关：紧跟「轻量模式」一项。
+    //
+    // 在这里补而不是改 `build_menu_model` 的签名：那个函数被官方 7 个菜单顺序/
+    // 文案测试直接调用，加参数会牵动官方测试断言（等于改动官方被测行为）。
+    // 在消费端插入，官方菜单模型与测试都保持原样，我们只多一项。
+    let insert_at = entries
+        .iter()
+        .position(|entry| matches!(entry, TrayEntry::Check { id, .. } if id == "lightweight_mode"))
+        .map(|index| index + 1)
+        .unwrap_or(entries.len());
+    entries.insert(
+        insert_at,
+        TrayEntry::check(
+            "floating_window",
+            texts.floating_window,
+            true,
+            crate::settings::get_settings().enable_floating_window,
+        ),
     );
     Ok(TrayModel { entries, status })
 }
@@ -2633,6 +2698,8 @@ fn emit_switched(app: &tauri::AppHandle, app_type: &AppType, provider_id: &str) 
     if let Err(e) = app.emit("proxy-flags-changed", event_data.clone()) {
         log::error!("发射 proxy-flags-changed 事件失败: {e}");
     }
+    // 后端同步记录最近活跃 app（悬浮球跟随靠它）
+    crate::floating::record_active_app_sync(app, app_type.as_str());
     if let Err(e) = app.emit("provider-switched", event_data) {
         log::error!("发射 provider-switched 事件失败: {e}");
     }
@@ -2667,6 +2734,10 @@ pub fn handle_tray_menu_event(app: &tauri::AppHandle, event_id: &str) {
             if let Err(e) = app.opener().open_url("https://ccswitch.io", None::<String>) {
                 log::error!("打开官方网站失败: {e}");
             }
+        }
+        "floating_window" => {
+            crate::floating::toggle_from_tray(app);
+            refresh_tray_menu(app);
         }
         "lightweight_mode" => {
             if crate::lightweight::is_lightweight_mode() {
