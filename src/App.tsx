@@ -42,6 +42,10 @@ import {
 } from "@/hooks/useTrayNavigation";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useRemoteTarget } from "@/hooks/useRemoteTarget";
+import {
+  useRemoteProvidersQuery,
+  useSwitchRemoteProviderMutation,
+} from "@/lib/query/remoteMutations";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
@@ -331,12 +335,36 @@ function App() {
     ? takeoverStatus?.[proxyAppId] || false
     : false;
 
-  const { data, isLoading, refetch } = useProvidersQuery(activeApp, {
+  // 供应商列表数据源随目标切换：
+  //  - 本机目标（remoteTargetId 为空）→ 本机 useProvidersQuery（读本地 DB）
+  //  - 远端目标 → useRemoteProvidersQuery（读该目标机器自己的 SSOT）
+  // 两个 query 的 key 不同（["providers",app] vs ["remoteProviders",host,container,app]），
+  // 所以切目标即换数据源，各目标各自缓存、互不串台。
+  const localProvidersQuery = useProvidersQuery(activeApp, {
     isProxyRunning: currentAppUsesProxy && isProxyRunning,
   });
+  const remoteProvidersQuery = useRemoteProvidersQuery(
+    remote.remoteTargetId || undefined,
+    remote.remoteContainerId || undefined,
+    activeApp,
+    undefined,
+    remote.targetKnownOffline,
+  );
+  const isRemoteTarget = Boolean(remote.remoteTargetId);
+  const { data, isLoading, refetch } = isRemoteTarget
+    ? {
+        data: remoteProvidersQuery.data,
+        isLoading: remoteProvidersQuery.isLoading,
+        refetch: remoteProvidersQuery.refetch,
+      }
+    : localProvidersQuery;
   const { data: piCurrentState } = usePiCurrentState(activeApp === "pi");
   const providers = useMemo(() => data?.providers ?? {}, [data]);
   const currentProviderId = data?.currentProviderId ?? "";
+  // 远端目标下的「切换供应商」走远端 mutation（写远端 live），不是本机的。
+  const switchRemoteProvider = useSwitchRemoteProviderMutation(() => {
+    void remoteProvidersQuery.refetch();
+  });
   const isOpenClawView = activeApp === "openclaw" && isAppPage(currentView);
   const { data: openclawHealthWarnings = [] } =
     useOpenClawHealth(isOpenClawView);
@@ -1331,11 +1359,21 @@ function App() {
             currentProviderId={currentProviderId}
             appId={activeApp}
             isLoading={isLoading}
-            onSwitch={(provider) =>
+            onSwitch={(provider) => {
+              // 远端目标：写远端 live；本机目标：原有本机切换。
+              if (isRemoteTarget) {
+                switchRemoteProvider.mutate({
+                  hostId: remote.remoteTargetId,
+                  providerId: provider.id,
+                  app: activeApp,
+                  container: remote.remoteContainerId || undefined,
+                });
+                return;
+              }
               void (activeApp === "pi"
                 ? handleEnablePiProvider(provider)
-                : switchProvider(provider))
-            }
+                : switchProvider(provider));
+            }}
             onRemoveFromConfig={
               activeApp === "opencode" ||
               activeApp === "openclaw" ||
