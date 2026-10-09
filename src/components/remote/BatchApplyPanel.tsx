@@ -24,11 +24,12 @@ import {
   type BroadcastSwitchResult,
 } from "@/lib/api/remote";
 import { listen } from "@tauri-apps/api/event";
+// 官方 v4.0.4 的 popover 只导出 Popover / PopoverTrigger / PopoverContent /
+// PopoverAnchor 四个（没有 PopoverArrow），箭头是纯装饰，去掉。
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
-  PopoverArrow,
 } from "@/components/ui/popover";
 
 interface Target {
@@ -347,7 +348,6 @@ export function BatchApplyPanel({
                   </button>
                 </PopoverTrigger>
                 <PopoverContent align="start" className="w-auto min-w-0 p-1.5" sideOffset={6}>
-                  <PopoverArrow className="fill-popover" />
                   <div className="flex flex-wrap gap-1">
                     {availableApps.map((a) => (
                       <button

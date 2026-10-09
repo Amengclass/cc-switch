@@ -22,7 +22,9 @@ export type GlobalPage =
   | "skillsDiscovery"
   | "prompts"
   | "sessions"
-  | "apps";
+  | "apps"
+  // 远程主机管理（本补丁层新增；官方没有远端概念）。远端功能关闭时该入口隐藏。
+  | "remote";
 
 export type View = AppPage | GlobalPage | "settings";
 
@@ -59,6 +61,7 @@ const GLOBAL_PAGES: GlobalPage[] = [
   "prompts",
   "sessions",
   "apps",
+  "remote",
 ];
 
 export const VIEW_STORAGE_KEY = "cc-switch-last-view";

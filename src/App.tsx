@@ -41,6 +41,11 @@ import {
   useTrayNavigation,
 } from "@/hooks/useTrayNavigation";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
+import { useRemoteTarget } from "@/hooks/useRemoteTarget";
+import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
+import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
+import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
+import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import {
   extractErrorMessage,
@@ -164,6 +169,19 @@ function App() {
   const [currentView, setCurrentView] = useState<View>(readStoredView);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general");
+
+  // 远端（SSH 主机 / Docker 容器）目标：整块逻辑收敛在 hooks/useRemoteTarget
+  // （P2 收敛点），官方 App.tsx 里只留这一次调用。远端功能关闭时，下面所有远端
+  // UI（目标选择器 / 远程主机入口 / 批量应用）都不渲染，界面即还原原生 CC Switch。
+  const remote = useRemoteTarget({
+    activeApp,
+    sharedFeatureApp,
+    currentView,
+    setActiveApp,
+    queryClient,
+    onRemoteFeatureDisabled: () =>
+      setCurrentView((v) => (v === "remote" ? "providers" : v)),
+  });
   // 进设置前停留的页面：设置目录里的「← 返回」回到这里
   const settingsReturnViewRef = useRef<View>("providers");
   const [openclawConfigTab, setOpenclawConfigTab] =
@@ -1483,6 +1501,12 @@ function App() {
             onOpenTerminalSettings={() => openSettings("general")}
           />
         );
+      // 远程主机管理（本补丁层新增；官方没有远端概念）。
+      // 远端功能关闭时侧栏已隐藏入口，这里再加一道保险。
+      case "remote":
+        return remote.remoteFeatureEnabled ? (
+          <RemoteHostsPanel app={sharedFeatureApp} />
+        ) : null;
       case "apps":
         return <AppsPage />;
       default:
