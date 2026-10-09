@@ -46,6 +46,10 @@ import {
   useRemoteProvidersQuery,
   useSwitchRemoteProviderMutation,
 } from "@/lib/query/remoteMutations";
+import {
+  deleteRemoteProvider,
+  removeRemoteProviderFromLive,
+} from "@/lib/api/remote";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
@@ -847,7 +851,18 @@ function App() {
       // Remove from live config only (for additive mode apps like OpenCode/OpenClaw)
       // Does NOT delete from database - provider remains in the list
       try {
-        await providersApi.removeFromLiveConfig(provider.id, activeApp);
+        if (isRemoteTarget) {
+          // 远端目标：移除该远端 live 里的供应商（SSOT 保留）
+          await removeRemoteProviderFromLive(
+            remote.remoteTargetId,
+            activeApp,
+            provider.id,
+            remote.remoteContainerId || undefined,
+          );
+          await remoteProvidersQuery.refetch();
+        } else {
+          await providersApi.removeFromLiveConfig(provider.id, activeApp);
+        }
       } catch (error) {
         const detail = extractErrorMessage(error);
         const description =
@@ -899,7 +914,18 @@ function App() {
       );
     } else {
       try {
-        await deleteProvider(provider.id);
+        if (isRemoteTarget) {
+          // 远端目标：删该远端 SSOT 里的供应商（additive 且已写 live 时后端同时移除 live）
+          await deleteRemoteProvider(
+            remote.remoteTargetId,
+            activeApp,
+            provider.id,
+            remote.remoteContainerId || undefined,
+          );
+          await remoteProvidersQuery.refetch();
+        } else {
+          await deleteProvider(provider.id);
+        }
       } catch {
         // useDeleteProviderMutation 的 onError 已经弹了错误 toast；确认框照样关掉
       }
