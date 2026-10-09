@@ -896,7 +896,9 @@ describe("AppsPage concurrent CLI upgrades", () => {
 });
 
 describe("AppsPage visibility column", () => {
-  it("renders the sidebar visibility switches small and neutral", async () => {
+  it("renders the sidebar visibility switches small and with the action tone", async () => {
+    // 本补丁层改动：原来用 neutral 色调，开/关两态轨道都是灰、圆点都是白，
+    // sm 尺寸下分不出开关状态。改用默认 action 色调（开 = 操作色），一眼可辨。
     vi.resetModules();
     await renderApps();
     const switches = screen.getAllByRole("switch", {
@@ -905,7 +907,7 @@ describe("AppsPage visibility column", () => {
     expect(switches.length).toBeGreaterThan(0);
     for (const element of switches) {
       expect(element).toHaveAttribute("data-size", "sm");
-      expect(element).toHaveAttribute("data-tone", "neutral");
+      expect(element).toHaveAttribute("data-tone", "action");
     }
   });
 });
