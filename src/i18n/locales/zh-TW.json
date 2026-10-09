@@ -4017,7 +4017,8 @@
       "mappingFull": "模型映射"
     },
     "needsAttention": "需要處理",
-    "back": "返回"
+    "back": "返回",
+    "remote": "遠端主機"
   },
   "appsPage": {
     "showInSidebar": "在側欄顯示 {{name}}",

@@ -4016,7 +4016,8 @@
       "mappingFull": "Model mapping"
     },
     "needsAttention": "Needs attention",
-    "back": "Back"
+    "back": "Back",
+    "remote": "Remote Hosts"
   },
   "appsPage": {
     "showInSidebar": "Show {{name}} in the sidebar",

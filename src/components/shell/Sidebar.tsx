@@ -240,6 +240,9 @@ function MainDirectory({
       icon: ChartColumn,
       trailing: todayLabel,
     },
+    // 远程主机管理（本补丁层新增；官方没有远端概念）。
+    // 追加在官方列表末尾，不动官方排序；远端功能关闭时 App 侧会拦掉该页。
+    { page: "remote", label: t("nav.remote"), icon: Globe },
   ];
 
   const isGlobalSelected = (page: GlobalPage) =>

@@ -689,6 +689,12 @@ function App() {
       openSettings("general");
       return;
     }
+    // 远端功能关闭时不进「远程主机」页：侧栏入口仍在（官方侧栏不动它的顺序），
+    // 点了直接回供应商页，避免落到空页。
+    if (page === "remote" && !remote.remoteFeatureEnabled) {
+      setCurrentView("providers");
+      return;
+    }
     if (managementBusyRef.current) return;
     if (confirmLeave(() => openPage(page))) return;
     closeProviderPanels();
