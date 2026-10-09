@@ -4783,6 +4783,8 @@
     "testOkShort": "Reachable",
     "testFailShort": "Failed",
     "loadingContainers": "Loading containers…",
+    "groupServers": "Servers",
+    "groupContainers": "Containers",
     "testingShort": "Testing…",
     "env": "Environment Variables",
     "envTitle": "Conflicting Environment Variables",

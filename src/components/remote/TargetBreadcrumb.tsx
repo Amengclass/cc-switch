@@ -188,6 +188,10 @@ export function TargetBreadcrumb({
             {servers.length > 0 && (
               <>
                 <DropdownMenuSeparator />
+                {/* 分组标题：服务器和容器平铺在一列容易分不清，各给一个小标题 */}
+                <div className="px-2 pb-0.5 pt-1 text-badge text-fg-3">
+                  {t("remote.groupServers", { defaultValue: "服务器" })}
+                </div>
                 {servers.map((s) => (
                   <DropdownMenuCheckboxItem
                     key={s.id}
@@ -206,10 +210,13 @@ export function TargetBreadcrumb({
                 ))}
               </>
             )}
-            {/* 已选服务器：容器紧跟其后（同一菜单内），选容器才关菜单 */}
+            {/* 已选服务器：容器另起一组（带标题 + 胶囊标签），选容器才关菜单 */}
             {!isLocal && (
               <>
                 <DropdownMenuSeparator />
+                <div className="px-2 pb-0.5 pt-1 text-badge text-fg-3">
+                  {t("remote.groupContainers", { defaultValue: "容器" })}
+                </div>
                 {containersLoading && containers.length === 0 ? (
                   <div className="flex items-center gap-1.5 px-2 py-1.5 text-caption text-fg-3">
                     <Loader2 className="h-3 w-3 animate-spin" />
@@ -224,7 +231,12 @@ export function TargetBreadcrumb({
                       onCheckedChange={() => setRemoteContainerId("")}
                       className={menuCheckItemCls}
                     >
-                      {t("remote.targetHost", { defaultValue: "宿主机" })}
+                      <span className="flex w-full items-center justify-between gap-2">
+                        {t("remote.targetHost", { defaultValue: "宿主机" })}
+                        <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
+                          {t("remote.targetHost", { defaultValue: "宿主机" })}
+                        </span>
+                      </span>
                     </DropdownMenuCheckboxItem>
                     {containers.map((c) => (
                       <DropdownMenuCheckboxItem
@@ -233,7 +245,12 @@ export function TargetBreadcrumb({
                         onCheckedChange={() => setRemoteContainerId(c)}
                         className={menuCheckItemCls}
                       >
-                        <span className="truncate">{c}</span>
+                        <span className="flex w-full items-center justify-between gap-2">
+                          <span className="min-w-0 flex-1 truncate">{c}</span>
+                          <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
+                            {t("remote.container", { defaultValue: "容器" })}
+                          </span>
+                        </span>
                       </DropdownMenuCheckboxItem>
                     ))}
                   </>

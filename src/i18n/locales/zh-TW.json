@@ -4784,6 +4784,8 @@
     "testOkShort": "連通",
     "testFailShort": "失敗",
     "loadingContainers": "載入容器…",
+    "groupServers": "伺服器",
+    "groupContainers": "容器",
     "testingShort": "測試中…",
     "env": "環境變數",
     "envTitle": "衝突環境變數",
