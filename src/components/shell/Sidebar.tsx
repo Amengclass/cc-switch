@@ -121,16 +121,14 @@ function RemoteTargetRow({
   const selector = useContext(RemoteTargetContext);
   if (!selector) return null;
 
-  // 与官方分隔线同一元素、同一套缩进（见 MainDirectory），但底色用 border-strong。
-  // 原因：官方那条上下是「应用列表 / 全局项」两块明显不同的内容，浅灰 border 够用；
-  // 这条上方是选择器的 bg-subtle 轨道（#efeff2），和 border（#e4e4ea）、侧栏底
-  // （#f5f5f7）三者明度几乎一样，用 border 会糊成一片看不见 —— 换深一档的
-  // border-strong（#cfcfd6）才读得出来。
+  // 与官方分隔线**完全同款**：同一元素、同一套类、同一缩进（见 MainDirectory）。
+  // 之前为「看得见」擅自换成 border-strong，那是我自创的、和官方不一致 —— 改回
+  // 官方原样的 bg-border，靠留白（选择器行 pb-2 + 本行 mt-0.5）把它和轨道分开。
   const divider = (
     <div
       className={cn(
-        "h-px shrink-0 bg-border-strong",
-        collapsed ? "mx-[18px] my-1.5" : "mx-4 mb-1.5 mt-1",
+        "h-px shrink-0 bg-border",
+        collapsed ? "mx-[18px] my-1.5" : "mx-4 mb-1.5 mt-0.5",
       )}
     />
   );

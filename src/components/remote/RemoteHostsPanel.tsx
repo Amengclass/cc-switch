@@ -18,11 +18,6 @@ import {
   ShieldAlert,
   Eye,
   EyeOff,
-  Tag,
-  Globe,
-  User,
-  Key,
-  Info,
   Plus,
   ChevronUp,
   ChevronDown,
@@ -32,7 +27,6 @@ import { cn } from "@/lib/utils";
 import { copyText } from "@/lib/clipboard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
@@ -53,6 +47,12 @@ import { HoverTip } from "@/components/ui/hover-tip";
 import { MatrixSearch, NeutralBadge } from "@/components/mcp/AppMatrix";
 import { V7ConfirmDialog, V7Dialog } from "@/components/mcp/formBits";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import {
+  SettingsBlock,
+  SettingsCard,
+  SettingsRow,
+  SettingsSwitchRow,
+} from "@/components/settings/SettingsLayout";
 import {
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
@@ -734,69 +734,49 @@ export const RemoteHostsPanel = React.forwardRef<
             </>
           }
         >
-          <div className="flex flex-col gap-6">
-            {/* 基础信息 + 连接信息 + 接管开关 + 提示：整体卡片（对齐 MCP 表单的 glass 卡片样式） */}
-            <div className="glass rounded-xl p-6 border border-white/10 space-y-0">
-              {/* 基础信息 */}
-              <div className="space-y-3 pb-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
-                  {t("remote.basicInfo", { defaultValue: "基础信息" })}
-                </h4>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="host-name"
-                    className="flex items-center gap-1.5 text-foreground/80"
-                  >
-                    <Tag className="h-3.5 w-3.5 text-foreground/70" />
-                    {t("remote.nameLabel", { defaultValue: "名称" })}
-                    <span className="text-xs font-normal text-muted-foreground/60">
+          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-7">
+            {/* 基础信息：官方设置版式（SettingsBlock 标题 + SettingsCard 卡片 + 行） */}
+            <SettingsBlock title={t("remote.basicInfo", { defaultValue: "基础信息" })}>
+              <SettingsCard>
+                <SettingsRow
+                  label={t("remote.nameLabel", { defaultValue: "名称" })}
+                  htmlFor="host-name"
+                  description={t("remote.nameHint", {
+                    defaultValue: "不填时将使用主机地址作为显示名",
+                  })}
+                  control={
+                    <span className="text-caption text-fg-3">
                       {t("remote.optional", { defaultValue: "选填" })}
                     </span>
-                  </Label>
+                  }
+                >
                   <Input
                     id="host-name"
                     ref={nameInputRef}
                     value={form.name}
                     onChange={(e) => setForm({ ...form, name: e.target.value })}
                     placeholder={t("remote.namePlaceholder", {
-                      defaultValue: "GPU 训练机 / 生产服务器…",
+                      defaultValue: "生产服务器 / 开发机…",
                     })}
                   />
-                  <p className="text-xs text-muted-foreground/70">
-                    {t("remote.nameHint", {
-                      defaultValue: "不填时将使用主机地址作为显示名",
-                    })}
-                  </p>
-                </div>
-              </div>
+                </SettingsRow>
+              </SettingsCard>
+            </SettingsBlock>
 
-              {/* 分隔线 */}
-              <div className="border-t border-border/50" />
-
-              {/* 连接信息 */}
-              <div className="space-y-3 pt-4 pb-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
-                  {t("remote.connectionInfo", { defaultValue: "连接信息" })}
-                </h4>
-                <div className="space-y-2">
-                  {/* 标签行 */}
-                  <div className="flex items-center gap-3">
-                    <Label
-                      htmlFor="host-address"
-                      className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-foreground/80"
-                    >
-                      <Globe className="h-3.5 w-3.5 shrink-0 text-foreground/70" />
-                      {t("remote.hostLabel", { defaultValue: "主机地址" })}
-                      <span className="text-destructive">*</span>
-                    </Label>
-                    <Label
-                      htmlFor="host-port"
-                      className="w-24 shrink-0 text-center text-foreground/80"
-                    >
-                      {t("remote.portLabel", { defaultValue: "端口" })}
-                    </Label>
-                  </div>
-                  {/* 输入框行 - 与标签行分离，保证两个输入框水平对齐 */}
+            {/* 连接信息 */}
+            <SettingsBlock
+              title={t("remote.connectionInfo", { defaultValue: "连接信息" })}
+            >
+              <SettingsCard>
+                <SettingsRow
+                  label={t("remote.hostLabel", { defaultValue: "主机地址" })}
+                  htmlFor="host-address"
+                  control={
+                    <span className="text-danger-text" aria-hidden="true">
+                      *
+                    </span>
+                  }
+                >
                   <div className="flex items-center gap-3">
                     <Input
                       id="host-address"
@@ -839,7 +819,7 @@ export const RemoteHostsPanel = React.forwardRef<
                               ),
                             })
                           }
-                          className="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="flex h-3.5 w-4 items-center justify-center rounded-sm text-fg-3 hover:bg-subtle hover:text-fg-1"
                         >
                           <ChevronUp className="h-3 w-3" />
                         </button>
@@ -854,23 +834,33 @@ export const RemoteHostsPanel = React.forwardRef<
                               ),
                             })
                           }
-                          className="flex h-3.5 w-4 items-center justify-center rounded-sm text-muted-foreground hover:bg-muted hover:text-foreground"
+                          className="flex h-3.5 w-4 items-center justify-center rounded-sm text-fg-3 hover:bg-subtle hover:text-fg-1"
                         >
                           <ChevronDown className="h-3 w-3" />
                         </button>
                       </div>
                     </div>
                   </div>
-                </div>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="host-user"
-                    className="flex items-center gap-1.5 text-foreground/80"
-                  >
-                    <User className="h-3.5 w-3.5 text-foreground/70" />
-                    {t("remote.usernameLabel", { defaultValue: "用户名" })}
-                    <span className="text-destructive">*</span>
-                  </Label>
+                </SettingsRow>
+                <SettingsRow
+                  label={t("remote.usernameLabel", { defaultValue: "用户名" })}
+                  htmlFor="host-user"
+                  description={
+                    form.username === "root"
+                      ? t("remote.rootWarning", {
+                          defaultValue:
+                            "不建议使用 root，推荐具有 sudo 权限的普通用户",
+                        })
+                      : t("remote.usernameHint", {
+                          defaultValue: "建议使用具有 SSH 权限的普通用户",
+                        })
+                  }
+                  control={
+                    <span className="text-danger-text" aria-hidden="true">
+                      *
+                    </span>
+                  }
+                >
                   <Input
                     id="host-user"
                     value={form.username}
@@ -881,41 +871,25 @@ export const RemoteHostsPanel = React.forwardRef<
                       defaultValue: "例如 root",
                     })}
                   />
-                  {form.username === "root" ? (
-                    <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <Info className="h-3 w-3 shrink-0 text-foreground/50" />
-                      {t("remote.rootWarning", {
-                        defaultValue:
-                          "不建议使用 root，推荐具有 sudo 权限的普通用户",
-                      })}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground/70">
-                      {t("remote.usernameHint", {
-                        defaultValue: "建议使用具有 SSH 权限的普通用户",
-                      })}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* 分隔线 */}
-              <div className="border-t border-border/50" />
-
-              {/* 认证信息 */}
-              <div className="space-y-3 pt-4 pb-3">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground/60">
-                  {t("remote.authInfo", { defaultValue: "认证信息" })}
-                </h4>
-                <div className="space-y-2">
-                  <Label
-                    htmlFor="host-pass"
-                    className="flex items-center gap-1.5 text-foreground/80"
-                  >
-                    <Key className="h-3.5 w-3.5 text-foreground/70" />
-                    {t("remote.passwordLabel", { defaultValue: "密码" })}
-                    {!editing && <span className="text-destructive">*</span>}
-                  </Label>
+                </SettingsRow>
+              </SettingsCard>
+            </SettingsBlock>
+            {/* 认证信息 */}
+            <SettingsBlock
+              title={t("remote.authInfo", { defaultValue: "认证信息" })}
+            >
+              <SettingsCard>
+                <SettingsRow
+                  label={t("remote.passwordLabel", { defaultValue: "密码" })}
+                  htmlFor="host-pass"
+                  control={
+                    !editing ? (
+                      <span className="text-danger-text" aria-hidden="true">
+                        *
+                      </span>
+                    ) : undefined
+                  }
+                >
                   <div className="relative">
                     <Input
                       id="host-pass"
@@ -947,7 +921,7 @@ export const RemoteHostsPanel = React.forwardRef<
                               defaultValue: "显示密码",
                             })
                       }
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-foreground/60 hover:text-foreground"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-3 hover:text-fg-1"
                     >
                       {showPassword ? (
                         <EyeOff className="h-4 w-4" />
@@ -956,85 +930,29 @@ export const RemoteHostsPanel = React.forwardRef<
                       )}
                     </button>
                   </div>
-                </div>
-                {/* 保存密码 - 轻量行内样式 */}
-                <div className="flex items-center justify-between py-2">
-                  <div className="space-y-0.5">
-                    <Label
-                      className={`text-sm font-normal ${editing || form.password ? "text-foreground/80" : "text-muted-foreground/60"}`}
-                    >
-                      {t("remote.savePassword", {
-                        defaultValue: "加密保存密码",
-                      })}
-                    </Label>
-                    <p className="text-xs text-muted-foreground/70">
-                      {t("remote.savePasswordHint", {
-                        defaultValue:
-                          "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
-                      })}
-                    </p>
-                  </div>
-                  <Switch
-                    checked={form.savePassword}
-                    onCheckedChange={(v) =>
-                      setForm({ ...form, savePassword: v })
-                    }
-                    // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
-                    disabled={!editing && !form.password}
-                  />
-                </div>
-                {/* 远端接管 per-app - 轻量行内样式 */}
-                <div className="space-y-2 py-2">
-                  <div className="space-y-0.5">
-                    <Label className="text-sm font-normal text-foreground/80">
-                      {t("remote.routeThroughLocalProxy", {
-                        defaultValue: "远端接管（宿主机）",
-                      })}
-                    </Label>
-                    <p className="text-xs text-muted-foreground/70">
-                      {t("remote.routeThroughLocalProxyHint", {
-                        defaultValue:
-                          "作用于该宿主机：开启后，对应应用的供应商会经 SSH 反向隧道使用你本机正在运行的代理；未运行时会自动启动本机代理。容器目标请到容器下单独配置",
-                      })}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {(["claude", "codex", "gemini", "grokbuild"] as const).map(
-                      (app) => (
-                        <label
-                          key={app}
-                          className="flex items-center justify-between rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 cursor-pointer"
-                        >
-                          <span className="text-xs capitalize">{app}</span>
-                          <Switch
-                            checked={Boolean(form.routeProxyApps?.[app])}
-                            onCheckedChange={(v) =>
-                              setForm({
-                                ...form,
-                                routeProxyApps: {
-                                  ...form.routeProxyApps,
-                                  [app]: v,
-                                },
-                              })
-                            }
-                          />
-                        </label>
-                      ),
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <Alert className="border-amber-200/40 bg-amber-50/40 dark:border-amber-800/20 dark:bg-amber-950/10">
-                <Info className="h-4 w-4 text-amber-500/80" />
-                <AlertDescription className="text-xs text-muted-foreground/80">
-                  {t("remote.formHint", {
-                    defaultValue:
-                      "M1 阶段仅支持密码认证；密钥认证将在后续版本加入。",
+                </SettingsRow>
+                <SettingsSwitchRow
+                  label={t("remote.savePassword", {
+                    defaultValue: "加密保存密码",
                   })}
-                </AlertDescription>
-              </Alert>
-            </div>
+                  description={t("remote.savePasswordHint", {
+                    defaultValue:
+                      "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
+                  })}
+                  checked={form.savePassword}
+                  onCheckedChange={(v) => setForm({ ...form, savePassword: v })}
+                  // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
+                  disabled={!editing && !form.password}
+                />
+              </SettingsCard>
+            </SettingsBlock>
+
+            <p className="text-caption text-fg-2">
+              {t("remote.formHint", {
+                defaultValue:
+                  "M1 阶段仅支持密码认证；密钥认证将在后续版本加入。",
+              })}
+            </p>
           </div>
         </FullScreenPanel>
 
@@ -1047,7 +965,7 @@ export const RemoteHostsPanel = React.forwardRef<
           describedBy="remote-env-dialog-desc"
         >
           <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-amber-500" />
+            <ShieldAlert className="h-5 w-5 text-warning" strokeWidth={1.5} />
             <DialogTitle className="text-section">
               {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
             </DialogTitle>
@@ -1083,13 +1001,13 @@ export const RemoteHostsPanel = React.forwardRef<
                   {envConflicts.map((c, i) => (
                     <div
                       key={i}
-                      className="rounded-lg border border-border bg-muted/30 px-3 py-2.5"
+                      className="rounded-control border border-border bg-subtle px-3 py-2.5"
                     >
-                      <p className="font-mono text-sm font-medium">
+                      <p className="font-mono text-body font-medium">
                         {c.varName}
                       </p>
                       <p
-                        className="mt-0.5 break-all font-mono text-xs text-muted-foreground"
+                        className="mt-0.5 break-all font-mono text-caption text-fg-2"
                         title={c.sourcePath}
                       >
                         {c.sourcePath}
@@ -1098,7 +1016,7 @@ export const RemoteHostsPanel = React.forwardRef<
                   ))}
                 </div>
               </ScrollArea>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-fg-2">
                 {t("remote.envCleanWarning", {
                   defaultValue:
                     "清理会移除这些变量（含系统级 .env 中的定义）",
