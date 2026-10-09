@@ -809,16 +809,106 @@ pub async fn apply_remote_provider_to_live(
                 warnings: Vec::new(),
             })
         }
-        "codex" | "grokbuild" | "gemini" | "opencode" | "openclaw" | "hermes" | "pi"
-        | "mcode" => {
-            // TODO(方案②移植): 这些应用的远端写入待移植。
-            // 官方 v4.0.4 里对应的配置模块（codex_config / gemini_config /
-            // opencode_config / openclaw_config / hermes_config / pi_config /
-            // mcode_config）都绑死本地 fs，且内部保序写入器是私有的；
-            // 方案②要求用官方 live::project + live::patch（纯函数）或我们自带的
-            // 转换器重做，而不是像旧版那样往官方文件里塞函数。
-            // 目前只有 claude 走通了新路（见本函数 "claude" 分支）。
-            Err(format!("远端切换暂不支持应用 {app}（当前版本仅支持 claude）"))
+        "codex" => {
+            crate::remote::codex::apply_codex_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                provider.category.as_deref(),
+                crate::proxy::providers::resolve_codex_catalog_tool_profile(provider),
+            )
+            .await
+        }
+        "grokbuild" => {
+            crate::remote::grok::apply_grok_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                provider.category.as_deref(),
+            )
+            .await
+        }
+        "gemini" => {
+            crate::remote::gemini::apply_gemini_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                provider,
+                route_proxy,
+                route_base.as_deref(),
+                port,
+                session.host_id(),
+            )
+            .await
+        }
+        "opencode" => {
+            crate::remote::opencode::apply_opencode_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
+        }
+        "openclaw" => {
+            crate::remote::openclaw::apply_openclaw_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
+        }
+        "hermes" => {
+            crate::remote::hermes::apply_hermes_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
+        }
+        "pi" => {
+            crate::remote::pi::apply_pi_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
+        }
+        "mcode" => {
+            crate::remote::mcode::apply_mcode_provider_settings(
+                session,
+                container,
+                home,
+                host_name,
+                &provider.name,
+                &provider.settings_config,
+                &provider.id,
+            )
+            .await
         }
         other => Err(format!("远程切换暂不支持应用: {other}")),
     }?;
