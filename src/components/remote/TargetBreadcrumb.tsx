@@ -181,7 +181,7 @@ export function TargetBreadcrumb({
             onValueChange={handleSelectHost}
             className="overflow-y-auto max-h-[40vh]"
           >
-            <DropdownMenuRadioItem value="">
+            <DropdownMenuRadioItem value="" className="pl-7">
               {t("remote.targetLocal", { defaultValue: "本机" })}
             </DropdownMenuRadioItem>
             {servers.length > 0 && (
@@ -191,7 +191,7 @@ export function TargetBreadcrumb({
                   <DropdownMenuRadioItem
                     key={s.id}
                     value={s.id}
-                    className="flex items-center justify-between gap-3 pr-2"
+                    className="flex items-center justify-between gap-3 pl-7 pr-2"
                   >
                     <span className="truncate">{s.name}</span>
                     {statusDot(s.id)}
@@ -268,7 +268,7 @@ export function TargetBreadcrumb({
                 onValueChange={setRemoteContainerId}
                 className="overflow-y-auto max-h-[40vh]"
               >
-                <DropdownMenuRadioItem value="" className="pr-2">
+                <DropdownMenuRadioItem value="" className="pl-7 pr-2">
                   <span className="flex w-full items-center justify-between gap-2">
                     {t("remote.targetHost")}
                     <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
@@ -280,7 +280,11 @@ export function TargetBreadcrumb({
                   <>
                     <DropdownMenuSeparator />
                     {filteredContainers.map((c) => (
-                      <DropdownMenuRadioItem key={c} value={c} className="pr-2">
+                      <DropdownMenuRadioItem
+                        key={c}
+                        value={c}
+                        className="pl-7 pr-2"
+                      >
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
                           <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
