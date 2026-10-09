@@ -22,6 +22,8 @@ import {
   ChevronUp,
   ChevronDown,
   MoreHorizontal,
+  Check,
+  CircleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -247,6 +249,12 @@ export const RemoteHostsPanel = React.forwardRef<
           : t("remote.added", { defaultValue: "远程主机已添加" }),
       );
       setFormOpen(false);
+      // 连接信息可能已改，旧测试结果作废
+      setTestResults((prev) => {
+        const next = { ...prev };
+        delete next[host.id];
+        return next;
+      });
       load();
     } catch (error) {
       console.error("Failed to save remote host:", error);
@@ -258,10 +266,17 @@ export const RemoteHostsPanel = React.forwardRef<
     }
   };
 
+  // 每台主机最近一次测试连接的结果（会话内有效，不落库）：
+  // 让列表直接显示「连通 / 失败」，不用再点一次才知道。
+  const [testResults, setTestResults] = useState<
+    Record<string, "ok" | "fail">
+  >({});
+
   const handleTest = async (host: RemoteHost) => {
     setTestingId(host.id);
     try {
       await testRemoteConnection(host.id, app);
+      setTestResults((prev) => ({ ...prev, [host.id]: "ok" }));
       toast.success(
         t("remote.reachable", {
           defaultValue: `连通正常 ${host.name}`,
@@ -270,6 +285,7 @@ export const RemoteHostsPanel = React.forwardRef<
       );
     } catch (error) {
       console.error("Failed to test connection:", error);
+      setTestResults((prev) => ({ ...prev, [host.id]: "fail" }));
       toast.error(t("remote.connectionFailed", { defaultValue: "连接失败" }), {
         description: String(error),
       });
@@ -290,7 +306,9 @@ export const RemoteHostsPanel = React.forwardRef<
         try {
           await testRemoteConnection(host.id, app);
           ok += 1;
+          setTestResults((prev) => ({ ...prev, [host.id]: "ok" }));
         } catch {
+          setTestResults((prev) => ({ ...prev, [host.id]: "fail" }));
           // 单台失败不打断整批，最后统一报数
         }
       }
@@ -614,6 +632,31 @@ export const RemoteHostsPanel = React.forwardRef<
                               ? t("remote.statusDisabled")
                               : t("remote.statusEnabled")}
                           </span>
+                          {/* 最近一次测试连接的结果（会话内）：连通绿 / 失败红。
+                              没测过就不显示，避免和上面的启用/禁用徽标混淆。 */}
+                          {testResults[host.id] && (
+                            <span
+                              className={cn(
+                                "inline-flex h-[18px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-badge font-medium",
+                                testResults[host.id] === "ok"
+                                  ? "bg-success-soft text-success-text"
+                                  : "bg-danger-soft text-danger-text",
+                              )}
+                            >
+                              {testResults[host.id] === "ok" ? (
+                                <Check className="h-3 w-3" />
+                              ) : (
+                                <CircleAlert className="h-3 w-3" />
+                              )}
+                              {testResults[host.id] === "ok"
+                                ? t("remote.testOkShort", {
+                                    defaultValue: "连通",
+                                  })
+                                : t("remote.testFailShort", {
+                                    defaultValue: "失败",
+                                  })}
+                            </span>
+                          )}
                         </div>
                         <div className="flex min-w-0 items-center text-caption text-fg-2">
                           <span className="min-w-0 truncate font-mono">

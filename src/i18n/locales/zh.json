@@ -4780,6 +4780,8 @@
     "testAll": "测试全部连接",
     "testAllOk": "{{count}} 台主机全部连通正常",
     "testAllPartial": "{{ok}}/{{total}} 台连通正常",
+    "testOkShort": "连通",
+    "testFailShort": "失败",
     "testingShort": "测试中…",
     "env": "环境变量",
     "envTitle": "冲突环境变量",

@@ -4780,6 +4780,8 @@
     "testAll": "Test all connections",
     "testAllOk": "All {{count}} hosts are reachable",
     "testAllPartial": "{{ok}}/{{total}} hosts reachable",
+    "testOkShort": "Reachable",
+    "testFailShort": "Failed",
     "testingShort": "Testing…",
     "env": "Environment Variables",
     "envTitle": "Conflicting Environment Variables",
