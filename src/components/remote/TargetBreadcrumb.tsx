@@ -95,8 +95,11 @@ export function TargetBreadcrumb({
     }
   };
 
+  // 段按钮照官方分段控件（`components/ui/segmented-control.tsx`）：
+  // 文字角色 text-caption、未选中 text-fg-2 / hover 到 text-fg-1，
+  // 按下缩一下（active:scale-[0.96]，官方按钮族同款）。
   const segmentCls =
-    "inline-flex h-full items-center gap-1.5 px-2.5 text-muted-foreground hover:bg-black/5 dark:hover:bg-white/5 hover:text-foreground transition-colors focus-visible:outline-none";
+    "inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-caption font-medium text-fg-2 transition-[background-color,color,scale] hover:text-fg-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.96]";
 
   // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
   const statusDot = (hostId: string) => {
@@ -104,7 +107,7 @@ export function TargetBreadcrumb({
     if (online === undefined) {
       return (
         <Loader2
-          className="h-3 w-3 shrink-0 animate-spin text-muted-foreground/70"
+          className="h-3 w-3 shrink-0 animate-spin text-fg-3"
           aria-label={t("remote.probing")}
         />
       );
@@ -113,7 +116,7 @@ export function TargetBreadcrumb({
       <span
         className={cn(
           "inline-flex h-2 w-2 shrink-0 rounded-full",
-          online ? "bg-emerald-500" : "bg-muted-foreground/40",
+          online ? "bg-success" : "bg-fg-3/40",
         )}
         aria-hidden="true"
       />
@@ -121,10 +124,15 @@ export function TargetBreadcrumb({
   };
 
   return (
-    <div className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-lg border border-border/80 bg-muted text-xs shadow-sm">
+    // 轨道照官方分段控件：bg-subtle 底 + 3px 内衬 + h-7 / rounded-[8px]（sm 档），
+    // 内圆角 = 外圆角 − 内衬 = 5px。选中段自己贴 bg-surface + shadow-v7-sm。
+    <div className="inline-flex h-7 shrink-0 items-stretch rounded-[8px] bg-subtle p-[3px]">
       <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) onProbeHosts?.(); }}>
         <DropdownMenuTrigger asChild>
-          <button type="button" className={cn(segmentCls, "rounded-l-lg")}>
+          <button
+            type="button"
+            className={cn(segmentCls, "bg-surface shadow-v7-sm")}
+          >
             {isLocal ? (
               <Laptop className="h-3.5 w-3.5 shrink-0" />
             ) : (
@@ -142,7 +150,7 @@ export function TargetBreadcrumb({
               className="relative border-b px-2 py-1.5"
               onKeyDown={(e) => e.stopPropagation()}
             >
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
               <Input
                 value={hostSearch}
                 onChange={(e) => setHostSearch(e.target.value)}
@@ -154,14 +162,14 @@ export function TargetBreadcrumb({
                 }}
                 placeholder={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
                 aria-label={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
-                className="h-7 pl-7 pr-7 text-xs"
+                className="h-7 pl-7 pr-7 text-caption"
                 autoFocus
               />
               {hostSearch && (
                 <button
                   type="button"
                   onClick={() => setHostSearch("")}
-                  className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -190,7 +198,7 @@ export function TargetBreadcrumb({
                   </DropdownMenuRadioItem>
                 ))}
                 {hostSearch && filteredHosts.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-muted-foreground text-center">
+                  <div className="px-3 py-2 text-center text-caption text-fg-3">
                     {t("remote.noMatchingHosts", { defaultValue: "无匹配主机" })}
                   </div>
                 )}
@@ -203,15 +211,18 @@ export function TargetBreadcrumb({
       {!isLocal && (
         <>
           <ChevronRight
-            className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60"
+            className="h-3.5 w-3.5 shrink-0 self-center text-fg-3"
             aria-hidden="true"
           />
           <DropdownMenu onOpenChange={handleContainerOpen}>
             <DropdownMenuTrigger asChild>
-              <button type="button" className={cn(segmentCls, "rounded-r-lg")}>
+              <button
+                type="button"
+                className={cn(segmentCls, "bg-surface shadow-v7-sm")}
+              >
                 <Container className="h-3.5 w-3.5 shrink-0" />
                 {containersLoading && !containers.length ? (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
                 ) : (
                   <span className="max-w-[140px] truncate">{containerLabel}</span>
                 )}
@@ -226,7 +237,7 @@ export function TargetBreadcrumb({
                   className="relative border-b px-2 py-1.5"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
                   <Input
                     value={containerSearch}
                     onChange={(e) => setContainerSearch(e.target.value)}
@@ -238,14 +249,14 @@ export function TargetBreadcrumb({
                     }}
                     placeholder={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
                     aria-label={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
-                    className="h-7 pl-7 pr-7 text-xs"
+                    className="h-7 pl-7 pr-7 text-caption"
                     autoFocus
                   />
                   {containerSearch && (
                     <button
                       type="button"
                       onClick={() => setContainerSearch("")}
-                      className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -260,7 +271,7 @@ export function TargetBreadcrumb({
                 <DropdownMenuRadioItem value="" className="pr-2">
                   <span className="flex w-full items-center justify-between gap-2">
                     {t("remote.targetHost")}
-                    <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-primary/15 text-primary">
+                    <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
                       {t("remote.targetHost")}
                     </span>
                   </span>
@@ -272,7 +283,7 @@ export function TargetBreadcrumb({
                       <DropdownMenuRadioItem key={c} value={c} className="pr-2">
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
-                          <span className="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium bg-muted/50 text-muted-foreground">
+                          <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
                             {t("remote.container")}
                           </span>
                         </span>
@@ -281,7 +292,7 @@ export function TargetBreadcrumb({
                   </>
                 )}
                 {containerSearch && filteredContainers.length === 0 && (
-                  <div className="px-3 py-2 text-xs text-muted-foreground text-center">
+                  <div className="px-3 py-2 text-center text-caption text-fg-3">
                     {t("remote.noMatchingContainers", { defaultValue: "无匹配容器" })}
                   </div>
                 )}
