@@ -100,8 +100,10 @@ export function TargetBreadcrumb({
   // 段按钮照官方分段控件（`components/ui/segmented-control.tsx`）：
   // 文字角色 text-caption、未选中 text-fg-2 / hover 到 text-fg-1，
   // 按下缩一下（active:scale-[0.96]，官方按钮族同款）。
+  // min-w-0 + 内部 truncate：侧栏只有 200 宽，主机名/容器名长时靠收缩+截断，
+  // 不能撑破侧栏（否则被 nav 的 overflow-hidden 裁掉）。
   const segmentCls =
-    "inline-flex h-full items-center gap-1.5 whitespace-nowrap rounded-[5px] px-2.5 text-caption font-medium text-fg-2 transition-[background-color,color,scale] hover:text-fg-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.96]";
+    "inline-flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-[5px] px-2.5 text-caption font-medium text-fg-2 transition-[background-color,color,scale] hover:text-fg-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.96]";
 
   // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
   const statusDot = (hostId: string) => {
@@ -128,7 +130,7 @@ export function TargetBreadcrumb({
   return (
     // 轨道照官方分段控件：bg-subtle 底 + 3px 内衬 + h-7 / rounded-[8px]（sm 档），
     // 内圆角 = 外圆角 − 内衬 = 5px。选中段自己贴 bg-surface + shadow-v7-sm。
-    <div className="inline-flex h-7 shrink-0 items-stretch rounded-[8px] bg-subtle p-[3px]">
+    <div className="inline-flex h-7 w-full min-w-0 items-stretch rounded-[8px] bg-subtle p-[3px]">
       <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) { onRefreshServers?.(); onProbeHosts?.(); } }}>
         <DropdownMenuTrigger asChild>
           <button
@@ -140,7 +142,7 @@ export function TargetBreadcrumb({
             ) : (
               <Server className="h-3.5 w-3.5 shrink-0" />
             )}
-            <span className="max-w-[140px] truncate">{hostLabel}</span>
+            <span className="min-w-0 truncate">{hostLabel}</span>
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -230,7 +232,7 @@ export function TargetBreadcrumb({
                 {containersLoading && !containers.length ? (
                   <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
                 ) : (
-                  <span className="max-w-[140px] truncate">{containerLabel}</span>
+                  <span className="min-w-0 truncate">{containerLabel}</span>
                 )}
               </button>
             </DropdownMenuTrigger>

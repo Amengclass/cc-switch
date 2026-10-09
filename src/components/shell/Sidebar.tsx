@@ -161,7 +161,7 @@ function RemoteTargetRow({
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-1">
+      <div className="flex min-w-0 shrink-0 items-center px-4 pb-2 pt-1">
         {selector}
       </div>
       {divider}
