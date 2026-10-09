@@ -21,6 +21,7 @@ import {
   Plus,
   ChevronUp,
   ChevronDown,
+  MoreHorizontal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,12 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -271,6 +278,58 @@ export const RemoteHostsPanel = React.forwardRef<
     }
   };
 
+  // 批量测试所有启用中的主机（⋯ 菜单）
+  const [testingAll, setTestingAll] = useState(false);
+  const handleTestAll = async () => {
+    const targets = hosts.filter((h) => !h.disabled);
+    if (targets.length === 0) return;
+    setTestingAll(true);
+    let ok = 0;
+    try {
+      for (const host of targets) {
+        try {
+          await testRemoteConnection(host.id, app);
+          ok += 1;
+        } catch {
+          // 单台失败不打断整批，最后统一报数
+        }
+      }
+      if (ok === targets.length) {
+        toast.success(
+          t("remote.testAllOk", {
+            defaultValue: `{{count}} 台主机全部连通正常`,
+            count: targets.length,
+          }),
+        );
+      } else {
+        toast.warning(
+          t("remote.testAllPartial", {
+            defaultValue: `{{ok}}/{{total}} 台连通正常`,
+            ok,
+            total: targets.length,
+          }),
+        );
+      }
+    } finally {
+      setTestingAll(false);
+    }
+  };
+
+  // 复制全部主机（名称 + 地址）到剪贴板（⋯ 菜单）
+  const handleCopyAll = async () => {
+    if (hosts.length === 0) return;
+    const text = hosts
+      .map((h) => `${h.name}\t${h.username}@${h.host}:${h.port}`)
+      .join("\n");
+    await copyText(text);
+    toast.success(
+      t("remote.copiedAll", {
+        defaultValue: `已复制 {{count}} 台主机`,
+        count: hosts.length,
+      }),
+    );
+  };
+
   // 禁用/启用某台主机（软禁用：不删除，目标选择/操作排除，管理页仍可恢复）
   const handleToggleDisabled = async (host: RemoteHost) => {
     const next = { ...host, disabled: !host.disabled };
@@ -417,15 +476,48 @@ export const RemoteHostsPanel = React.forwardRef<
           <HelpTip title={t("remote.title")}>{t("remote.description")}</HelpTip>
         }
         actions={
-          <Button
-            type="button"
-            variant="solid"
-            size="regular"
-            onClick={openAdd}
-          >
-            <Plus className="h-4 w-4" strokeWidth={2} />
-            {t("remote.add")}
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="solid"
+              size="regular"
+              onClick={openAdd}
+            >
+              <Plus className="h-4 w-4" strokeWidth={2} />
+              {t("remote.add")}
+            </Button>
+            <DropdownMenu>
+              <HoverTip content={t("common.more", { defaultValue: "更多" })}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="quiet"
+                    size="icon-compact"
+                    className="h-8 w-8"
+                    aria-label={t("remote.moreActions", {
+                      defaultValue: "更多操作",
+                    })}
+                  >
+                    <MoreHorizontal className="h-4 w-4" strokeWidth={1.5} />
+                  </Button>
+                </DropdownMenuTrigger>
+              </HoverTip>
+              <DropdownMenuContent align="end" className="min-w-[200px]">
+                <DropdownMenuItem
+                  disabled={testingAll || hosts.every((h) => h.disabled)}
+                  onSelect={() => void handleTestAll()}
+                >
+                  {t("remote.testAll", { defaultValue: "测试全部连接" })}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={hosts.length === 0}
+                  onSelect={() => void handleCopyAll()}
+                >
+                  {t("remote.copyAll", { defaultValue: "复制全部主机" })}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
         }
       />
 
