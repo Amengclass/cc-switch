@@ -535,12 +535,16 @@ pub async fn queryProviderUsage(
     //      不写失败快照、不 emit：保留上一份托盘快照，与前端 react-query reject
     //      保留上次 data 的语义一致；否则失败快照会经 useUsageCacheBridge 盲写
     //      回 query 缓存，抹掉 reject 本该保留的旧值。
+    // 本机路径：从 SQLite 读该 provider 再交给共用分派逻辑（与远端 SSOT 路径共用）。
+    let providers = state
+        .db
+        .get_all_providers(app_type.as_str())
+        .map_err(|e| format!("Failed to get providers: {e}"))?;
     let inner = query_provider_usage_inner(
-        &state,
         &copilot_state,
         &xai_state,
         app_type.clone(),
-        &providerId,
+        providers.get(&providerId),
     )
     .await;
     if let Ok(snapshot) = &inner {
@@ -605,19 +609,16 @@ fn resolve_coding_plan_credentials(
     }
 }
 
+/// 按供应商的 usage_script 与模板类型分派余量查询。
+///
+/// 本补丁层重构：provider 由调用方提供（本机从 SQLite 读、远端从远端 SSOT 读），
+/// 不再自己读数据库 —— 这样远端场景与本机共用同一份分派逻辑，行为一致。
 async fn query_provider_usage_inner(
-    state: &AppState,
     copilot_state: &CopilotAuthState,
     xai_state: &XaiOAuthState,
     app_type: AppType,
-    provider_id: &str,
+    provider: Option<&Provider>,
 ) -> Result<crate::provider::UsageResult, String> {
-    // 从数据库读取供应商信息，检查特殊模板类型
-    let providers = state
-        .db
-        .get_all_providers(app_type.as_str())
-        .map_err(|e| format!("Failed to get providers: {e}"))?;
-    let provider = providers.get(provider_id);
     let usage_script = provider
         .and_then(|p| p.meta.as_ref())
         .and_then(|m| m.usage_script.as_ref());
@@ -822,9 +823,24 @@ async fn query_provider_usage_inner(
     }
 
     // ── 通用 JS 脚本路径 ──
-    ProviderService::query_usage(state, app_type, provider_id)
+    let Some(provider) = provider else {
+        return Err("供应商不存在".to_string());
+    };
+    crate::services::provider::usage::execute_usage_for_provider(provider, &app_type)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 本补丁层：按调用方提供的 provider 查询用量（不读数据库）。
+/// 远端场景 provider 来自远端 SSOT，与本机共用同一份分派逻辑。
+#[allow(clippy::too_many_arguments)]
+pub async fn query_usage_for_provider(
+    provider: Option<&Provider>,
+    copilot_state: &CopilotAuthState,
+    xai_state: &XaiOAuthState,
+    app_type: AppType,
+) -> Result<crate::provider::UsageResult, String> {
+    query_provider_usage_inner(copilot_state, xai_state, app_type, provider).await
 }
 
 #[allow(non_snake_case)]

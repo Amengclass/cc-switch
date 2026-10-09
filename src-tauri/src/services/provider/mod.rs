@@ -20,7 +20,7 @@ mod live;
 #[cfg(test)]
 mod opencode_tests;
 mod pi;
-mod usage;
+pub(crate) mod usage;
 
 use indexmap::IndexMap;
 use regex::Regex;
