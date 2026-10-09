@@ -1,4 +1,4 @@
-import { useRef, type ComponentType } from "react";
+import { useContext, useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
@@ -26,6 +26,7 @@ import type { VisibleApps } from "@/types";
 import { APP_IDS } from "@/config/appConfig";
 import type { GlobalPage, SettingsSection, View } from "@/lib/navigation";
 import { isAppPage } from "@/lib/navigation";
+import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { SkillsIcon } from "@/components/BrandIcons";
 import { useUpdate } from "@/contexts/UpdateContext";
 import { sidebarWidth, useSidebarCollapsed } from "@/hooks/useSidebarCollapsed";
@@ -85,12 +86,65 @@ export function Sidebar(props: SidebarProps) {
         {t("nav.skipToContent")}
       </a>
       <SidebarTopBar collapsed={collapsed} onToggle={toggle} />
+      {/* 远端目标选择器（本补丁层新增）：由 App 经 context 注入。
+          放侧栏而不是主区，是因为 Windows 上窗口是自绘标题栏
+          （decorations:false），主区页头必须贴顶，否则窗口按钮被顶下去；
+          侧栏与主区左右并排，零主区占用，且每页常驻。 */}
+      <RemoteTargetRow collapsed={collapsed} onExpand={toggle} />
       {inSettings ? (
         <SettingsDirectory {...props} collapsed={collapsed} />
       ) : (
         <MainDirectory {...props} collapsed={collapsed} />
       )}
     </nav>
+  );
+}
+
+/**
+ * 侧栏里的「远端目标选择器」行（本补丁层新增）。
+ *
+ * - 渲染什么由 App 决定（经 `RemoteTargetContext` 注入）；远端功能关闭时值为
+ *   `null`，这里整段不渲染 —— 侧栏与官方完全一致。
+ * - 展开态：整行放 App 给的选择器（本机 / 服务器 / 容器 连体胶囊）。
+ * - 收起态（72px 图标轨）：放不下胶囊，退化成一个图标按钮，点击展开侧栏再操作。
+ */
+function RemoteTargetRow({
+  collapsed,
+  onExpand,
+}: {
+  collapsed: boolean;
+  onExpand: () => void;
+}) {
+  const { t } = useTranslation();
+  const selector = useContext(RemoteTargetContext);
+  if (!selector) return null;
+
+  if (collapsed) {
+    return (
+      <div className="flex shrink-0 justify-center px-3 pt-1">
+        <HoverTip
+          content={t("remote.title")}
+          side="right"
+          disableHoverableContent
+        >
+          <button
+            type="button"
+            onClick={onExpand}
+            aria-label={t("remote.title")}
+            style={NO_DRAG}
+            className="flex h-7 w-7 items-center justify-center rounded-control text-fg-2 transition-[background-color,color,scale] hover:bg-subtle hover:text-fg-1 active:scale-[0.96]"
+          >
+            <Globe className="h-4 w-4" strokeWidth={1.5} />
+          </button>
+        </HoverTip>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex shrink-0 items-center gap-2 px-4 pt-1">
+      {selector}
+    </div>
   );
 }
 

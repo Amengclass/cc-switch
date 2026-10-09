@@ -43,6 +43,7 @@ import {
 import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useRemoteTarget } from "@/hooks/useRemoteTarget";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
+import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
 // TODO(远端接线②): BatchApplyPanel（批量应用：把本机一个供应商推到多台主机/容器）
 // 的挂载点待定，先把 import 收起来。
@@ -1361,25 +1362,26 @@ function App() {
     );
   };
 
-  // 远端「目标选择器」行（本补丁层新增；方案 A：页头/页签之下、内容之上）。
+  // 远端「目标选择器」的**节点本身**（不含外框）——外框由侧栏决定（展开态整行 /
+  // 收起态图标）。通过 RemoteTargetContext 注入给 Sidebar，避免改官方 Sidebar 的
+  // props 签名（照官方 WindowControlsContext 的做法）。
   //
-  // 位置：应用页在 `renderAppSegments()` 之后（有页签时在页签下面），全局页在页面
-  // 顶部。远端功能关闭时**整行不渲染** —— 界面即还原原生 CC Switch。
-  const renderTargetRow = () =>
+  // 为什么放侧栏而不是主区：Windows 上窗口是 decorations:false（自绘标题栏），
+  // 最小化/最大化/关闭靠官方页头右侧渲染；任何插在页头上方的东西都会把窗口按钮
+  // 顶下去。侧栏与主区左右并排，放这里零主区占用。
+  const remoteTargetSelector =
     remote.remoteFeatureEnabled && remote.remoteAvailableForApp ? (
-      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/30 px-6 py-2 text-sm">
-        <TargetBreadcrumb
-          remoteTargetId={remote.remoteTargetId}
-          remoteContainerId={remote.remoteContainerId}
-          setRemoteTargetId={remote.setRemoteTargetId}
-          setRemoteContainerId={remote.setRemoteContainerId}
-          servers={remote.servers}
-          containers={remote.containers}
-          containersLoading={remote.containersLoading}
-          hostsOnline={remote.hostsOnline}
-          onProbeHosts={() => void remote.probeHosts()}
-        />
-      </div>
+      <TargetBreadcrumb
+        remoteTargetId={remote.remoteTargetId}
+        remoteContainerId={remote.remoteContainerId}
+        setRemoteTargetId={remote.setRemoteTargetId}
+        setRemoteContainerId={remote.setRemoteContainerId}
+        servers={remote.servers}
+        containers={remote.containers}
+        containersLoading={remote.containersLoading}
+        hostsOnline={remote.hostsOnline}
+        onProbeHosts={() => void remote.probeHosts()}
+      />
     ) : null;
 
   const renderAppPage = () => {
@@ -1440,8 +1442,6 @@ function App() {
       <>
         {renderAppPageHeader()}
         {renderAppSegments()}
-        {/* 远端目标选择器：页签之下、内容之上（方案 A）。远端关闭时不渲染 */}
-        {renderTargetRow()}
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
@@ -1556,23 +1556,15 @@ function App() {
         />
       );
     }
-    return isAppPage(currentView) ? (
-      renderAppPage()
-    ) : (
-      <>
-        {/* 全局页（MCP / Skills / 提示词 / 会话 / 用量…）同样要显示目标选择器：
-            这些面板在远端目标下也生效，没有它就看不到「当前在操作哪台机器」。
-            注：全局页的页头由各面板自己画，所以这一行落在页头之上（应用页在页签之下）。 */}
-        {renderTargetRow()}
-        {renderGlobalPage()}
-      </>
-    );
+    return isAppPage(currentView) ? renderAppPage() : renderGlobalPage();
   };
 
   return (
     <WindowControlsContext.Provider
       value={useAppWindowControls ? <WindowControls /> : null}
     >
+      {/* 远端目标选择器注入给侧栏（见 RemoteTargetContext 的说明） */}
+      <RemoteTargetContext.Provider value={remoteTargetSelector}>
       <div className="flex h-screen overflow-hidden bg-app text-fg-1 selection:bg-action/25">
         <Sidebar
           activeApp={activeApp}
@@ -1725,6 +1717,7 @@ function App() {
       <FirstRunNoticeDialog />
       <NewLayoutDialog />
       <WhatsNewNotice />
+      </RemoteTargetContext.Provider>
     </WindowControlsContext.Provider>
   );
 }
