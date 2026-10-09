@@ -121,12 +121,16 @@ function RemoteTargetRow({
   const selector = useContext(RemoteTargetContext);
   if (!selector) return null;
 
-  // 与官方「应用列表 ↔ 全局页」分隔线同一元素、同一套类（见 MainDirectory）
+  // 与官方分隔线同一元素、同一套缩进（见 MainDirectory），但底色用 border-strong。
+  // 原因：官方那条上下是「应用列表 / 全局项」两块明显不同的内容，浅灰 border 够用；
+  // 这条上方是选择器的 bg-subtle 轨道（#efeff2），和 border（#e4e4ea）、侧栏底
+  // （#f5f5f7）三者明度几乎一样，用 border 会糊成一片看不见 —— 换深一档的
+  // border-strong（#cfcfd6）才读得出来。
   const divider = (
     <div
       className={cn(
-        "h-px shrink-0 bg-border",
-        collapsed ? "mx-[18px] my-1.5" : "mx-4 mb-1.5 mt-0.5",
+        "h-px shrink-0 bg-border-strong",
+        collapsed ? "mx-[18px] my-1.5" : "mx-4 mb-1.5 mt-1",
       )}
     />
   );
@@ -159,7 +163,7 @@ function RemoteTargetRow({
 
   return (
     <>
-      <div className="flex shrink-0 items-center gap-2 px-4 pt-1">
+      <div className="flex shrink-0 items-center gap-2 px-4 pb-2 pt-1">
         {selector}
       </div>
       {divider}
