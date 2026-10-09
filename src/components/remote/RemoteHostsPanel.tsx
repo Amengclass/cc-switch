@@ -138,7 +138,9 @@ export const RemoteHostsPanel = React.forwardRef<
   const [editing, setEditing] = useState<RemoteHost | null>(null);
   const [form, setForm] = useState<HostFormState>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
-  const [testingId, setTestingId] = useState<string | null>(null);
+  // 正在测连接的主机 id 集合：单台测试和「测试全部」共用，
+  // 行内转圈 / 禁用按钮都看它（用 Set 而不是单个 id，批量时能同时转多行）。
+  const [testingIds, setTestingIds] = useState<Set<string>>(new Set());
   // 测试「未保存」的新连接信息
   const [testFormLoading, setTestFormLoading] = useState(false);
   // 抽屉打开时初始焦点指向「名称」输入框（而非右上角 X）
@@ -272,8 +274,17 @@ export const RemoteHostsPanel = React.forwardRef<
     Record<string, "ok" | "fail">
   >({});
 
+  // 标记某台主机「测试中」，返回取消标记的函数
+  const markTesting = (id: string, on: boolean) =>
+    setTestingIds((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
   const handleTest = async (host: RemoteHost) => {
-    setTestingId(host.id);
+    markTesting(host.id, true);
     try {
       await testRemoteConnection(host.id, app);
       setTestResults((prev) => ({ ...prev, [host.id]: "ok" }));
@@ -290,7 +301,7 @@ export const RemoteHostsPanel = React.forwardRef<
         description: String(error),
       });
     } finally {
-      setTestingId(null);
+      markTesting(host.id, false);
     }
   };
 
@@ -309,6 +320,7 @@ export const RemoteHostsPanel = React.forwardRef<
       const worker = async () => {
         while (cursor < targets.length) {
           const host = targets[cursor++];
+          markTesting(host.id, true);
           try {
             await testRemoteConnection(host.id, app);
             ok += 1;
@@ -316,6 +328,8 @@ export const RemoteHostsPanel = React.forwardRef<
           } catch {
             setTestResults((prev) => ({ ...prev, [host.id]: "fail" }));
             // 单台失败不打断整批，最后统一报数
+          } finally {
+            markTesting(host.id, false);
           }
         }
       };
@@ -744,10 +758,10 @@ export const RemoteHostsPanel = React.forwardRef<
                             variant="quiet"
                             size="icon-compact"
                             aria-label={t("remote.test")}
-                            disabled={host.disabled || testingId === host.id}
+                            disabled={host.disabled || testingIds.has(host.id)}
                             onClick={() => void handleTest(host)}
                           >
-                            {testingId === host.id ? (
+                            {testingIds.has(host.id) ? (
                               <Loader2 className="h-[15px] w-[15px] animate-spin" />
                             ) : (
                               <PlugZap
@@ -1097,12 +1111,12 @@ export const RemoteHostsPanel = React.forwardRef<
                 }}
                 disabled={saving || testFormLoading}
               >
-                {testFormLoading || (editing && testingId === editing.id) ? (
+                {testFormLoading || (editing && testingIds.has(editing.id)) ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
                   <PlugZap className="mr-1 h-4 w-4" />
                 )}
-                {testFormLoading || (editing && testingId === editing.id)
+                {testFormLoading || (editing && testingIds.has(editing.id))
                   ? t("remote.testing", { defaultValue: "测试中…" })
                   : t("remote.test", { defaultValue: "测试连接" })}
               </Button>
