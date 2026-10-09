@@ -53,7 +53,7 @@ import {
 import { AppPageHeader } from "@/components/shell/AppPageHeader";
 import { HelpTip } from "@/components/ui/help-tip";
 import { HoverTip } from "@/components/ui/hover-tip";
-import { MatrixSearch, NeutralBadge } from "@/components/mcp/AppMatrix";
+import { MatrixSearch } from "@/components/mcp/AppMatrix";
 import {
   LABEL_CLASS,
   RequiredMark,
@@ -584,7 +584,6 @@ export const RemoteHostsPanel = React.forwardRef<
                       className={cn(
                         "flex h-14 items-center gap-3 pe-2 ps-4 transition-colors hover:bg-subtle",
                         index > 0 && "border-t border-border",
-                        host.disabled && "opacity-60",
                       )}
                     >
                       <div className="flex min-w-0 flex-1 flex-col">
@@ -595,19 +594,26 @@ export const RemoteHostsPanel = React.forwardRef<
                           >
                             {host.name}
                           </span>
-                          <NeutralBadge>
-                            {host.disabled ? (
-                              <>
-                                <Ban className="h-3 w-3 text-danger-text" />
-                                {t("remote.statusDisabled")}
-                              </>
-                            ) : (
-                              <>
-                                <CircleDot className="h-3 w-3 text-success-text" />
-                                {t("remote.statusEnabled")}
-                              </>
+                          {/* 状态徽标照官方 UsageDataSourcesSheet / PromptListItem 的写法：
+                              开 = bg-success-soft + text-success-text，关 = bg-subtle + text-fg-2。
+                              比灰描边 chip + 小色点醒目得多。 */}
+                          <span
+                            className={cn(
+                              "inline-flex h-[18px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 text-badge font-medium",
+                              host.disabled
+                                ? "bg-subtle text-fg-2"
+                                : "bg-success-soft text-success-text",
                             )}
-                          </NeutralBadge>
+                          >
+                            {host.disabled ? (
+                              <Ban className="h-3 w-3" />
+                            ) : (
+                              <CircleDot className="h-3 w-3" />
+                            )}
+                            {host.disabled
+                              ? t("remote.statusDisabled")
+                              : t("remote.statusEnabled")}
+                          </span>
                         </div>
                         <div className="flex min-w-0 items-center text-caption text-fg-2">
                           <span className="min-w-0 truncate font-mono">
