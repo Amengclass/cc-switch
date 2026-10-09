@@ -107,6 +107,8 @@ export function Sidebar(props: SidebarProps) {
  *   `null`，这里整段不渲染 —— 侧栏与官方完全一致。
  * - 展开态：整行放 App 给的选择器（本机 / 服务器 / 容器 连体胶囊）。
  * - 收起态（72px 图标轨）：放不下胶囊，退化成一个图标按钮，点击展开侧栏再操作。
+ * - 选择器下方画一条与官方一致的分隔线（元素与类同 MainDirectory 里的官方分隔线），
+ *   收起 / 展开两种缩进也照官方；远端功能关闭时整行 return null，不会留残余线。
  */
 function RemoteTargetRow({
   collapsed,
@@ -119,32 +121,49 @@ function RemoteTargetRow({
   const selector = useContext(RemoteTargetContext);
   if (!selector) return null;
 
+  // 与官方「应用列表 ↔ 全局页」分隔线同一元素、同一套类（见 MainDirectory）
+  const divider = (
+    <div
+      className={cn(
+        "h-px shrink-0 bg-border",
+        collapsed ? "mx-[18px] my-1.5" : "mx-4 mb-1.5 mt-0.5",
+      )}
+    />
+  );
+
   if (collapsed) {
     return (
-      <div className="flex shrink-0 justify-center px-3 pt-1">
-        <HoverTip
-          content={t("remote.title")}
-          side="right"
-          disableHoverableContent
-        >
-          <button
-            type="button"
-            onClick={onExpand}
-            aria-label={t("remote.title")}
-            style={NO_DRAG}
-            className="flex h-7 w-7 items-center justify-center rounded-control text-fg-2 transition-[background-color,color,scale] hover:bg-subtle hover:text-fg-1 active:scale-[0.96]"
+      <>
+        {/* 图标按钮照官方轨道项（AppNavItem / NavItem 收起态）：h-8 w-12 + h-5 图标 */}
+        <div className="flex shrink-0 justify-center px-3 pt-1">
+          <HoverTip
+            content={t("remote.title")}
+            side="right"
+            disableHoverableContent
           >
-            <Globe className="h-4 w-4" strokeWidth={1.5} />
-          </button>
-        </HoverTip>
-      </div>
+            <button
+              type="button"
+              onClick={onExpand}
+              aria-label={t("remote.title")}
+              style={NO_DRAG}
+              className="mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle"
+            >
+              <Globe className="h-5 w-5" />
+            </button>
+          </HoverTip>
+        </div>
+        {divider}
+      </>
     );
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-2 px-4 pt-1">
-      {selector}
-    </div>
+    <>
+      <div className="flex shrink-0 items-center gap-2 px-4 pt-1">
+        {selector}
+      </div>
+      {divider}
+    </>
   );
 }
 
