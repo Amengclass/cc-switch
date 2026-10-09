@@ -177,12 +177,9 @@ export function TargetBreadcrumb({
           <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden">
             <DropdownMenuCheckboxItem
               checked={isLocal}
-              // 收起态：选主机不关菜单，让容器在同一菜单里接着选（一次开完）。
-              // 选「本机」没有容器子项，正常关闭。
-              onSelect={(e) => {
-                if (isLocal) return;
-                e.preventDefault();
-              }}
+              // 「本机」没有容器子项，选中即关菜单（不要拦 onSelect）。
+              // 注意别用 isLocal 判断：那是点击前的状态，从远端点「本机」时它是 false，
+              // 拦了就变成要点两次才关。
               onCheckedChange={() => handleSelectHost("")}
               className={menuCheckItemCls}
             >
