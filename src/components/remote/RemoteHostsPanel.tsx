@@ -34,10 +34,7 @@ import {
   TooltipContent,
   TooltipProvider,
 } from "@/components/ui/tooltip";
-import {
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -417,9 +414,7 @@ export const RemoteHostsPanel = React.forwardRef<
         icon={<Server className="h-5 w-5" strokeWidth={1.5} />}
         title={t("remote.title")}
         titleExtra={
-          <HelpTip title={t("remote.title")}>
-            {t("remote.description")}
-          </HelpTip>
+          <HelpTip title={t("remote.title")}>{t("remote.description")}</HelpTip>
         }
         actions={
           <Button
@@ -690,82 +685,89 @@ export const RemoteHostsPanel = React.forwardRef<
         </div>
       </div>
 
-        {/* 添加/编辑表单：右侧整页抽屉（对齐 MCP 的 Sheet 形态） */}
-        {formOpen && (
-          <Sheet open modal={false} onOpenChange={(open) => { if (!open) setFormOpen(false); }}>
-            <SheetPageContent
-              title={
-                editing
-                  ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
-                  : t("remote.addTitle", { defaultValue: "添加远程主机" })
-              }
-              closeLabel={t("common.back", { defaultValue: "返回" })}
-              aria-describedby={undefined}
-            >
-              <SheetBody className="flex flex-col gap-5 px-6 pb-6 pt-5">
-          <div className="mx-auto flex w-full max-w-[600px] flex-col gap-5">
-            {/* 名称：照 MCP 表单 —— 标签在上、输入框在下，右侧「?」放说明 */}
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-0.5">
-                <label htmlFor="host-name" className={LABEL_CLASS}>
-                  {t("remote.nameLabel", { defaultValue: "名称" })}
-                </label>
-                <span className="text-caption text-fg-3">
-                  {t("remote.optional", { defaultValue: "选填" })}
-                </span>
-                <HelpTip title={t("remote.nameLabel", { defaultValue: "名称" })}>
-                  {t("remote.nameHint", {
-                    defaultValue: "不填时将使用主机地址作为显示名",
-                  })}
-                </HelpTip>
-              </div>
-              <Input
-                id="host-name"
-                ref={nameInputRef}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder={t("remote.namePlaceholder", {
-                  defaultValue: "生产服务器 / 开发机…",
-                })}
-              />
-            </div>
-
-            <div aria-hidden="true" className="h-px shrink-0 bg-border" />
-
-            {/* 连接信息 */}
-            <section
-              aria-labelledby="remote-conn-title"
-              className="flex flex-col gap-4"
-            >
-              <h3
-                id="remote-conn-title"
-                className="m-0 text-body font-semibold text-fg-1"
-              >
-                {t("remote.connectionInfo", { defaultValue: "连接信息" })}
-              </h3>
+      {/* 添加/编辑表单：右侧整页抽屉（对齐 MCP 的 Sheet 形态） */}
+      {formOpen && (
+        <Sheet
+          open
+          modal={false}
+          onOpenChange={(open) => {
+            if (!open) setFormOpen(false);
+          }}
+        >
+          <SheetPageContent
+            title={
+              editing
+                ? t("remote.editTitle", { defaultValue: "编辑远程主机" })
+                : t("remote.addTitle", { defaultValue: "添加远程主机" })
+            }
+            closeLabel={t("common.back", { defaultValue: "返回" })}
+            aria-describedby={undefined}
+          >
+            <SheetBody className="flex flex-col gap-5 px-6 pb-6 pt-5">
+              {/* 名称：照 MCP 表单 —— 标签在上、输入框在下，右侧「?」放说明 */}
               <div className="flex flex-col gap-1.5">
-                <label htmlFor="host-address" className={LABEL_CLASS}>
-                  {t("remote.hostLabel", { defaultValue: "主机地址" })}
-                  <RequiredMark
-                    srText={t("remote.required", { defaultValue: "必填" })}
-                  />
-                </label>
-                <div className="flex items-center gap-3">
-                  <Input
-                    id="host-address"
-                    value={form.host}
-                    onChange={(e) =>
-                      setForm({ ...form, host: e.target.value })
-                    }
-                    placeholder={t("remote.hostPlaceholder", {
-                      defaultValue: "例如 192.168.1.10",
+                <div className="flex items-center gap-0.5">
+                  <label htmlFor="host-name" className={LABEL_CLASS}>
+                    {t("remote.nameLabel", { defaultValue: "名称" })}
+                  </label>
+                  <span className="text-caption text-fg-3">
+                    {t("remote.optional", { defaultValue: "选填" })}
+                  </span>
+                  <HelpTip
+                    title={t("remote.nameLabel", { defaultValue: "名称" })}
+                  >
+                    {t("remote.nameHint", {
+                      defaultValue: "不填时将使用主机地址作为显示名",
                     })}
-                    className="min-w-0 flex-1"
-                  />
-                  <div className="relative w-24 shrink-0">
+                  </HelpTip>
+                </div>
+                <Input
+                  id="host-name"
+                  ref={nameInputRef}
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder={t("remote.namePlaceholder", {
+                    defaultValue: "生产服务器 / 开发机…",
+                  })}
+                />
+              </div>
+
+              <div aria-hidden="true" className="h-px shrink-0 bg-border" />
+
+              {/* 连接信息 */}
+              <section
+                aria-labelledby="remote-conn-title"
+                className="flex flex-col gap-4"
+              >
+                <h3
+                  id="remote-conn-title"
+                  className="m-0 text-body font-semibold text-fg-1"
+                >
+                  {t("remote.connectionInfo", { defaultValue: "连接信息" })}
+                </h3>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="host-address" className={LABEL_CLASS}>
+                    {t("remote.hostLabel", { defaultValue: "主机地址" })}
+                    <RequiredMark
+                      srText={t("remote.required", { defaultValue: "必填" })}
+                    />
+                  </label>
+                  <div className="flex items-center gap-3">
                     <Input
-                      id="host-port"
-                      type="text"
+                      id="host-address"
+                      value={form.host}
+                      onChange={(e) =>
+                        setForm({ ...form, host: e.target.value })
+                      }
+                      placeholder={t("remote.hostPlaceholder", {
+                        defaultValue: "例如 192.168.1.10",
+                      })}
+                      className="min-w-0 flex-1"
+                    />
+                    <div className="relative w-24 shrink-0">
+                      <Input
+                        id="host-port"
+                        type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
                         value={form.port}
@@ -816,284 +818,280 @@ export const RemoteHostsPanel = React.forwardRef<
                   </div>
                 </div>
               </section>
-            {/* 认证信息 */}
-            <section
-              aria-labelledby="remote-auth-title"
-              className="flex flex-col gap-4"
-            >
-              <h3
-                id="remote-auth-title"
-                className="m-0 text-body font-semibold text-fg-1"
+              {/* 认证信息 */}
+              <section
+                aria-labelledby="remote-auth-title"
+                className="flex flex-col gap-4"
               >
-                {t("remote.authInfo", { defaultValue: "认证信息" })}
-              </h3>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="host-user" className={LABEL_CLASS}>
-                  {t("remote.usernameLabel", { defaultValue: "用户名" })}
-                  <RequiredMark
-                    srText={t("remote.required", { defaultValue: "必填" })}
-                  />
-                </label>
-                <Input
-                  id="host-user"
-                  value={form.username}
-                  onChange={(e) =>
-                    setForm({ ...form, username: e.target.value })
-                  }
-                  placeholder={t("remote.usernamePlaceholder", {
-                    defaultValue: "例如 root",
-                  })}
-                />
-                <span className="text-caption text-fg-2">
-                  {form.username === "root"
-                    ? t("remote.rootWarning", {
-                        defaultValue:
-                          "不建议使用 root，推荐具有 sudo 权限的普通用户",
-                      })
-                    : t("remote.usernameHint", {
-                        defaultValue: "建议使用具有 SSH 权限的普通用户",
-                      })}
-                </span>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor="host-pass" className={LABEL_CLASS}>
-                  {t("remote.passwordLabel", { defaultValue: "密码" })}
-                  {!editing && (
+                <h3
+                  id="remote-auth-title"
+                  className="m-0 text-body font-semibold text-fg-1"
+                >
+                  {t("remote.authInfo", { defaultValue: "认证信息" })}
+                </h3>
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="host-user" className={LABEL_CLASS}>
+                    {t("remote.usernameLabel", { defaultValue: "用户名" })}
                     <RequiredMark
                       srText={t("remote.required", { defaultValue: "必填" })}
                     />
-                  )}
-                </label>
-                <div className="relative">
+                  </label>
                   <Input
-                    id="host-pass"
-                    type={showPassword ? "text" : "password"}
-                    value={form.password}
+                    id="host-user"
+                    value={form.username}
                     onChange={(e) =>
-                      setForm({ ...form, password: e.target.value })
+                      setForm({ ...form, username: e.target.value })
                     }
-                    placeholder={
-                      editing
-                        ? t("remote.passwordKeepHint", {
-                            defaultValue: "留空则保留已保存的密码",
-                          })
-                        : t("remote.passwordPlaceholder", {
-                            defaultValue: "请输入 SSH 登录密码",
-                          })
-                    }
-                    className="pr-9"
+                    placeholder={t("remote.usernamePlaceholder", {
+                      defaultValue: "例如 root",
+                    })}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    title={
-                      showPassword
-                        ? t("remote.hidePassword", {
-                            defaultValue: "隐藏密码",
-                          })
-                        : t("remote.showPassword", {
-                            defaultValue: "显示密码",
-                          })
-                    }
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-3 hover:text-fg-1"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="h-4 w-4" />
-                    ) : (
-                      <Eye className="h-4 w-4" />
-                    )}
-                  </button>
+                  <span className="text-caption text-fg-2">
+                    {form.username === "root"
+                      ? t("remote.rootWarning", {
+                          defaultValue:
+                            "不建议使用 root，推荐具有 sudo 权限的普通用户",
+                        })
+                      : t("remote.usernameHint", {
+                          defaultValue: "建议使用具有 SSH 权限的普通用户",
+                        })}
+                  </span>
                 </div>
-              </div>
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1">
-                    <span className={LABEL_CLASS}>
-                      {t("remote.savePassword", {
-                        defaultValue: "加密保存密码",
-                      })}
-                    </span>
-                    <HelpTip
-                      title={t("remote.savePassword", {
-                        defaultValue: "加密保存密码",
-                      })}
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="host-pass" className={LABEL_CLASS}>
+                    {t("remote.passwordLabel", { defaultValue: "密码" })}
+                    {!editing && (
+                      <RequiredMark
+                        srText={t("remote.required", { defaultValue: "必填" })}
+                      />
+                    )}
+                  </label>
+                  <div className="relative">
+                    <Input
+                      id="host-pass"
+                      type={showPassword ? "text" : "password"}
+                      value={form.password}
+                      onChange={(e) =>
+                        setForm({ ...form, password: e.target.value })
+                      }
+                      placeholder={
+                        editing
+                          ? t("remote.passwordKeepHint", {
+                              defaultValue: "留空则保留已保存的密码",
+                            })
+                          : t("remote.passwordPlaceholder", {
+                              defaultValue: "请输入 SSH 登录密码",
+                            })
+                      }
+                      className="pr-9"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((v) => !v)}
+                      title={
+                        showPassword
+                          ? t("remote.hidePassword", {
+                              defaultValue: "隐藏密码",
+                            })
+                          : t("remote.showPassword", {
+                              defaultValue: "显示密码",
+                            })
+                      }
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-fg-3 hover:text-fg-1"
                     >
-                      {t("remote.savePasswordHint", {
-                        defaultValue:
-                          "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
-                      })}
-                    </HelpTip>
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
-                <Switch
-                  checked={form.savePassword}
-                  onCheckedChange={(v) => setForm({ ...form, savePassword: v })}
-                  // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
-                  disabled={!editing && !form.password}
-                  aria-label={t("remote.savePassword", {
-                    defaultValue: "加密保存密码",
-                  })}
-                />
-              </div>
-            </section>
-
-            <p className="text-caption text-fg-2">
-              {t("remote.formHint", {
-                defaultValue:
-                  "M1 阶段仅支持密码认证；密钥认证将在后续版本加入。",
-              })}
-            </p>
-          </div>
-              </SheetBody>
-              <SheetFooter className="h-14 px-6 py-0">
-                <Button
-                  variant="outline"
-                  onClick={() => setFormOpen(false)}
-                  disabled={saving || testFormLoading}
-                >
-                  {t("common.cancel", { defaultValue: "取消" })}
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (editing) {
-                      void handleTest(editing);
-                    } else {
-                      void handleTestForm();
-                    }
-                  }}
-                  disabled={saving || testFormLoading}
-                >
-                  {testFormLoading || (editing && testingId === editing.id) ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <PlugZap className="mr-1 h-4 w-4" />
-                  )}
-                  {testFormLoading || (editing && testingId === editing.id)
-                    ? t("remote.testing", { defaultValue: "测试中…" })
-                    : t("remote.test", { defaultValue: "测试连接" })}
-                </Button>
-                <Button
-                  onClick={() => void handleSave()}
-                  disabled={saving || testFormLoading}
-                >
-                  {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
-                  {t("common.save", { defaultValue: "保存" })}
-                </Button>
-              </SheetFooter>
-            </SheetPageContent>
-          </Sheet>
-        )}
-
-        {/* 环境变量清理 */}
-        <V7Dialog
-          open={envDialog.open}
-          onOpenChange={(open) => {
-            if (!open) setEnvDialog({ open: false, host: null });
-          }}
-          describedBy="remote-env-dialog-desc"
-        >
-          <div className="flex items-center gap-2">
-            <ShieldAlert className="h-5 w-5 text-warning" strokeWidth={1.5} />
-            <DialogTitle className="text-section">
-              {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
-            </DialogTitle>
-          </div>
-          <DialogDescription
-            id="remote-env-dialog-desc"
-            className="text-body text-fg-2"
-          >
-            {envDialog.host
-              ? t("remote.envSubtitle", {
-                  defaultValue: "{{host}} · 清理后远端切换才生效",
-                  host: envDialog.host.name,
-                })
-              : ""}
-          </DialogDescription>
-
-          {envLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin" />
-            </div>
-          ) : envConflicts.length === 0 ? (
-            <Alert>
-              <AlertDescription>
-                {t("remote.envClean", {
-                  defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
-                })}
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <>
-              <ScrollArea className="max-h-[45vh]">
-                <div className="space-y-2">
-                  {envConflicts.map((c, i) => (
-                    <div
-                      key={i}
-                      className="rounded-control border border-border bg-subtle px-3 py-2.5"
-                    >
-                      <p className="font-mono text-body font-medium">
-                        {c.varName}
-                      </p>
-                      <p
-                        className="mt-0.5 break-all font-mono text-caption text-fg-2"
-                        title={c.sourcePath}
+                <div className="flex items-center justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1">
+                      <span className={LABEL_CLASS}>
+                        {t("remote.savePassword", {
+                          defaultValue: "加密保存密码",
+                        })}
+                      </span>
+                      <HelpTip
+                        title={t("remote.savePassword", {
+                          defaultValue: "加密保存密码",
+                        })}
                       >
-                        {c.sourcePath}
-                      </p>
+                        {t("remote.savePasswordHint", {
+                          defaultValue:
+                            "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
+                        })}
+                      </HelpTip>
                     </div>
-                  ))}
+                  </div>
+                  <Switch
+                    checked={form.savePassword}
+                    onCheckedChange={(v) =>
+                      setForm({ ...form, savePassword: v })
+                    }
+                    // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
+                    disabled={!editing && !form.password}
+                    aria-label={t("remote.savePassword", {
+                      defaultValue: "加密保存密码",
+                    })}
+                  />
                 </div>
-              </ScrollArea>
+              </section>
+
               <p className="text-caption text-fg-2">
-                {t("remote.envCleanWarning", {
+                {t("remote.formHint", {
                   defaultValue:
-                    "清理会移除这些变量（含系统级 .env 中的定义）",
+                    "M1 阶段仅支持密码认证；密钥认证将在后续版本加入。",
                 })}
               </p>
-            </>
-          )}
+            </SheetBody>
+            <SheetFooter className="h-14 px-6 py-0">
+              <Button
+                variant="outline"
+                onClick={() => setFormOpen(false)}
+                disabled={saving || testFormLoading}
+              >
+                {t("common.cancel", { defaultValue: "取消" })}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (editing) {
+                    void handleTest(editing);
+                  } else {
+                    void handleTestForm();
+                  }
+                }}
+                disabled={saving || testFormLoading}
+              >
+                {testFormLoading || (editing && testingId === editing.id) ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <PlugZap className="mr-1 h-4 w-4" />
+                )}
+                {testFormLoading || (editing && testingId === editing.id)
+                  ? t("remote.testing", { defaultValue: "测试中…" })
+                  : t("remote.test", { defaultValue: "测试连接" })}
+              </Button>
+              <Button
+                onClick={() => void handleSave()}
+                disabled={saving || testFormLoading}
+              >
+                {saving && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+                {t("common.save", { defaultValue: "保存" })}
+              </Button>
+            </SheetFooter>
+          </SheetPageContent>
+        </Sheet>
+      )}
 
-          <div className="flex flex-wrap justify-end gap-2 pt-1">
-            <Button
-              type="button"
-              variant="neutral"
-              size="regular"
-              onClick={() => setEnvDialog({ open: false, host: null })}
-            >
-              {t("common.cancel", { defaultValue: "取消" })}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="regular"
-              disabled={
-                envLoading || envConflicts.length === 0 || envCleaning
-              }
-              onClick={() => void handleCleanEnv()}
-            >
-              {envCleaning && (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              )}
-              {t("remote.cleanEnv", { defaultValue: "清理冲突变量" })}
-            </Button>
+      {/* 环境变量清理 */}
+      <V7Dialog
+        open={envDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setEnvDialog({ open: false, host: null });
+        }}
+        describedBy="remote-env-dialog-desc"
+      >
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-5 w-5 text-warning" strokeWidth={1.5} />
+          <DialogTitle className="text-section">
+            {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
+          </DialogTitle>
+        </div>
+        <DialogDescription
+          id="remote-env-dialog-desc"
+          className="text-body text-fg-2"
+        >
+          {envDialog.host
+            ? t("remote.envSubtitle", {
+                defaultValue: "{{host}} · 清理后远端切换才生效",
+                host: envDialog.host.name,
+              })
+            : ""}
+        </DialogDescription>
+
+        {envLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin" />
           </div>
-        </V7Dialog>
+        ) : envConflicts.length === 0 ? (
+          <Alert>
+            <AlertDescription>
+              {t("remote.envClean", {
+                defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
+              })}
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <>
+            <ScrollArea className="max-h-[45vh]">
+              <div className="space-y-2">
+                {envConflicts.map((c, i) => (
+                  <div
+                    key={i}
+                    className="rounded-control border border-border bg-subtle px-3 py-2.5"
+                  >
+                    <p className="font-mono text-body font-medium">
+                      {c.varName}
+                    </p>
+                    <p
+                      className="mt-0.5 break-all font-mono text-caption text-fg-2"
+                      title={c.sourcePath}
+                    >
+                      {c.sourcePath}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+            <p className="text-caption text-fg-2">
+              {t("remote.envCleanWarning", {
+                defaultValue: "清理会移除这些变量（含系统级 .env 中的定义）",
+              })}
+            </p>
+          </>
+        )}
 
-        {/* 删除确认 */}
-        <V7ConfirmDialog
-          open={deleteConfirm.open}
-          title={t("remote.deleteConfirmTitle", {
-            defaultValue: "删除远程主机",
-          })}
-          body={t("remote.deleteConfirmMessage", {
-            defaultValue: `确定要删除 "${deleteConfirm.host?.name}" 吗？已加密保存的密码也会一并清除。`,
-            name: deleteConfirm.host?.name ?? "",
-          })}
-          confirmLabel={t("common.delete", { defaultValue: "删除" })}
-          onConfirm={handleDelete}
-          onCancel={() => setDeleteConfirm({ open: false, host: null })}
-        />
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <Button
+            type="button"
+            variant="neutral"
+            size="regular"
+            onClick={() => setEnvDialog({ open: false, host: null })}
+          >
+            {t("common.cancel", { defaultValue: "取消" })}
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="regular"
+            disabled={envLoading || envConflicts.length === 0 || envCleaning}
+            onClick={() => void handleCleanEnv()}
+          >
+            {envCleaning && <Loader2 className="mr-1 h-4 w-4 animate-spin" />}
+            {t("remote.cleanEnv", { defaultValue: "清理冲突变量" })}
+          </Button>
+        </div>
+      </V7Dialog>
+
+      {/* 删除确认 */}
+      <V7ConfirmDialog
+        open={deleteConfirm.open}
+        title={t("remote.deleteConfirmTitle", {
+          defaultValue: "删除远程主机",
+        })}
+        body={t("remote.deleteConfirmMessage", {
+          defaultValue: `确定要删除 "${deleteConfirm.host?.name}" 吗？已加密保存的密码也会一并清除。`,
+          name: deleteConfirm.host?.name ?? "",
+        })}
+        confirmLabel={t("common.delete", { defaultValue: "删除" })}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteConfirm({ open: false, host: null })}
+      />
     </TooltipProvider>
   );
 });
