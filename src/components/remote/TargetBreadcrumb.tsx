@@ -105,6 +105,14 @@ export function TargetBreadcrumb({
   const segmentCls =
     "inline-flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-[5px] px-2.5 text-caption font-medium text-fg-2 transition-[background-color,color,scale] hover:text-fg-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.96]";
 
+  // 下拉条目照官方菜单（见 sessions/SessionItem.tsx 的 sessionMenuItemClass）：
+  // h-8 + rounded-control + px-2.5 + text-body。默认的 DropdownMenu*Item 是
+  // py-1.5 / rounded-sm / text-sm，比官方大一号、圆角也不对。
+  // 勾选项再加 ps-8 给左侧勾选标记留位（官方 DropdownMenuCheckboxItem 自带 pl-8，
+  // 但这里要覆盖成官方菜单的紧凑规格，所以显式写 ps-8）。
+  const menuItemCls = "h-8 rounded-control px-2.5 text-body";
+  const menuCheckItemCls = cn(menuItemCls, "ps-8");
+
   // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
   const statusDot = (hostId: string) => {
     const online = hostsOnline?.[hostId];
@@ -147,11 +155,11 @@ export function TargetBreadcrumb({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          className="min-w-[150px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+          className="min-w-[150px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
           {servers.length >= 3 && (
             <div
-              className="relative border-b px-2 py-1.5"
+              className="relative mb-1 border-b border-border px-1 pb-1.5"
               onKeyDown={(e) => e.stopPropagation()}
             >
               <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
@@ -188,6 +196,7 @@ export function TargetBreadcrumb({
             <DropdownMenuCheckboxItem
               checked={isLocal}
               onCheckedChange={() => handleSelectHost("")}
+              className={menuCheckItemCls}
             >
               {t("remote.targetLocal", { defaultValue: "本机" })}
             </DropdownMenuCheckboxItem>
@@ -199,7 +208,10 @@ export function TargetBreadcrumb({
                     key={s.id}
                     checked={remoteTargetId === s.id}
                     onCheckedChange={() => handleSelectHost(s.id)}
-                    className="flex items-center justify-between gap-3"
+                    className={cn(
+                      menuCheckItemCls,
+                      "flex items-center justify-between gap-3",
+                    )}
                   >
                     <span className="truncate">{s.name}</span>
                     {statusDot(s.id)}
@@ -238,11 +250,11 @@ export function TargetBreadcrumb({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
-              className="min-w-[180px] max-h-[50vh] p-0 overflow-hidden [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+              className="min-w-[180px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
             >
               {containers.length >= 3 && (
                 <div
-                  className="relative border-b px-2 py-1.5"
+                  className="relative mb-1 border-b border-border px-1 pb-1.5"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
                   <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
@@ -279,6 +291,7 @@ export function TargetBreadcrumb({
                 <DropdownMenuCheckboxItem
                   checked={!remoteContainerId}
                   onCheckedChange={() => setRemoteContainerId("")}
+                  className={menuCheckItemCls}
                 >
                   <span className="flex w-full items-center justify-between gap-2">
                     {t("remote.targetHost")}
@@ -295,6 +308,7 @@ export function TargetBreadcrumb({
                         key={c}
                         checked={remoteContainerId === c}
                         onCheckedChange={() => setRemoteContainerId(c)}
+                        className={menuCheckItemCls}
                       >
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
