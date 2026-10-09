@@ -354,6 +354,28 @@ impl Database {
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
 
+        // 远端主机表（本补丁层新增；官方没有远端概念）。
+        // 全新库在这里建；存量库由 v20->v21 迁移补建。
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_hosts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                username TEXT NOT NULL,
+                auth_method TEXT NOT NULL DEFAULT 'password',
+                save_password BOOLEAN NOT NULL DEFAULT 1,
+                route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0,
+                route_proxy_apps TEXT NOT NULL DEFAULT '{}',
+                route_proxy_container_apps TEXT NOT NULL DEFAULT '{}',
+                disabled BOOLEAN NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             )",
+            [],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
+
         // 修复跑过未发布开发版的库：current 标记曾是全局 key，现按应用分组
         // （随 v12 定稿为 current_profile_id_<scope>，不单独 bump 版本）
         if conn
@@ -576,6 +598,11 @@ impl Database {
                             )?;
                         }
                         Self::set_user_version(conn, 20)?;
+                    }
+                    20 => {
+                        log::info!("迁移数据库从 v20 到 v21（补建远端主机表）");
+                        Self::migrate_v20_to_v21(conn)?;
+                        Self::set_user_version(conn, 21)?;
                     }
                     _ => {
                         return Err(AppError::Database(format!(
@@ -1624,6 +1651,34 @@ impl Database {
                 "INTEGER",
             )?;
         }
+        Ok(())
+    }
+
+    /// v20 -> v21: 补建远端主机表 `remote_hosts`。
+    ///
+    /// 本补丁层新增的表（官方没有远端概念）。早期版本在旧迁移链里建过，
+    /// 升到官方 v4.0.4 后官方迁移链不含它，导致 `list_remote_hosts` 报
+    /// 「无法连接远端」。这里补一版，存量库与全新库都能拿到表。
+    fn migrate_v20_to_v21(conn: &Connection) -> Result<(), AppError> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS remote_hosts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL DEFAULT 22,
+                username TEXT NOT NULL,
+                auth_method TEXT NOT NULL DEFAULT 'password',
+                save_password BOOLEAN NOT NULL DEFAULT 1,
+                route_through_local_proxy BOOLEAN NOT NULL DEFAULT 0,
+                route_proxy_apps TEXT NOT NULL DEFAULT '{}',
+                route_proxy_container_apps TEXT NOT NULL DEFAULT '{}',
+                disabled BOOLEAN NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0
+             );",
+            [],
+        )
+        .map_err(|error| AppError::Database(format!("创建远端主机表失败: {error}")))?;
         Ok(())
     }
 
