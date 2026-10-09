@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Server,
+  Terminal,
   Pencil,
   Trash2,
   PlugZap,
@@ -497,7 +497,7 @@ export const RemoteHostsPanel = React.forwardRef<
   return (
     <TooltipProvider>
       <AppPageHeader
-        icon={<Server className="h-5 w-5" strokeWidth={1.5} />}
+        icon={<Terminal className="h-5 w-5" strokeWidth={1.5} />}
         title={t("remote.title")}
         titleExtra={
           <HelpTip title={t("remote.title")}>{t("remote.description")}</HelpTip>

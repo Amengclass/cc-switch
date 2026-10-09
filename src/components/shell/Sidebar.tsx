@@ -20,6 +20,7 @@ import {
   Server,
   Settings,
   SlidersHorizontal,
+  Terminal,
 } from "lucide-react";
 import type { AppId } from "@/lib/api";
 import type { VisibleApps } from "@/types";
@@ -90,7 +91,7 @@ export function Sidebar(props: SidebarProps) {
           放侧栏而不是主区，是因为 Windows 上窗口是自绘标题栏
           （decorations:false），主区页头必须贴顶，否则窗口按钮被顶下去；
           侧栏与主区左右并排，零主区占用，且每页常驻。 */}
-      <RemoteTargetRow collapsed={collapsed} onExpand={toggle} />
+      <RemoteTargetRow collapsed={collapsed} />
       {inSettings ? (
         <SettingsDirectory {...props} collapsed={collapsed} />
       ) : (
@@ -110,14 +111,7 @@ export function Sidebar(props: SidebarProps) {
  * - 选择器下方画一条与官方一致的分隔线（元素与类同 MainDirectory 里的官方分隔线），
  *   收起 / 展开两种缩进也照官方；远端功能关闭时整行 return null，不会留残余线。
  */
-function RemoteTargetRow({
-  collapsed,
-  onExpand,
-}: {
-  collapsed: boolean;
-  onExpand: () => void;
-}) {
-  const { t } = useTranslation();
+function RemoteTargetRow({ collapsed }: { collapsed: boolean }) {
   const selector = useContext(RemoteTargetContext);
   if (!selector) return null;
 
@@ -133,31 +127,11 @@ function RemoteTargetRow({
     />
   );
 
-  if (collapsed) {
-    return (
-      <>
-        {/* 图标按钮照官方轨道项（AppNavItem / NavItem 收起态）：h-8 w-12 + h-5 图标 */}
-        <div className="flex shrink-0 justify-center px-3 pt-1">
-          <HoverTip
-            content={t("remote.title")}
-            side="right"
-            disableHoverableContent
-          >
-            <button
-              type="button"
-              onClick={onExpand}
-              aria-label={t("remote.title")}
-              style={NO_DRAG}
-              className="mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle"
-            >
-              <Globe className="h-5 w-5" />
-            </button>
-          </HoverTip>
-        </div>
-        {divider}
-      </>
-    );
-  }
+  // 收起态（72px 图标轨）不渲染选择器行：
+  //  - 轨道放不下「本机 / 服务器 / 容器」两段选择器；
+  //  - 若退化成一个图标，会和下面「远程主机」导航项撞成两个一样的图标；
+  //  - 收起时切目标走「远程主机」页即可，展开侧栏就恢复选择器。
+  if (collapsed) return null;
 
   return (
     <>
@@ -303,7 +277,9 @@ function MainDirectory({
     // 它是「作用域的管理页」（管哪些机器），和顶部目标选择器是同一件事的两面，
     // 不是 MCP/Skills 那种「内容页」，所以不跟内容页混排、也不该沉到末尾。
     // 远端功能关闭时 App 侧会拦掉该页。
-    { page: "remote", label: t("nav.remote"), icon: Globe },
+    // 图标用 Terminal（SSH 连到远端 shell 的语义），不用 Globe ——
+    // Globe 已被「设置 → 网络」占用，两处撞图标。
+    { page: "remote", label: t("nav.remote"), icon: Terminal },
     { page: "mcp", label: "MCP", icon: Server },
     { page: "skills", label: "Skills", icon: SkillsIcon },
     { page: "prompts", label: t("nav.prompts"), icon: BookOpen },
