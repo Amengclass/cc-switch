@@ -1563,7 +1563,11 @@ function App() {
         );
       case "mcp":
         return (
-          <UnifiedMcpPanel onInteractionBlockedChange={setMcpManagementBusy} />
+          <UnifiedMcpPanel
+            onInteractionBlockedChange={setMcpManagementBusy}
+            remoteTargetId={remote.remoteTargetId || undefined}
+            remoteContainerId={remote.remoteContainerId || undefined}
+          />
         );
       case "skills":
       case "skillsDiscovery":

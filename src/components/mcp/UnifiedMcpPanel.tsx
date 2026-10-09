@@ -103,6 +103,9 @@ const failKey = (id: string, app: McpAppId) => `${id}\u0000${app}`;
 
 interface UnifiedMcpPanelProps {
   onInteractionBlockedChange?: (blocked: boolean) => void;
+  /** 远端目标（本补丁层）：非空时 MCP 数据源切到该目标自己的 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 interface ImportReport {
@@ -117,6 +120,8 @@ interface ImportReport {
  */
 const UnifiedMcpPanel: React.FC<UnifiedMcpPanelProps> = ({
   onInteractionBlockedChange,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const appIds = useVisibleAppIds(MCP_APP_IDS);
@@ -141,11 +146,20 @@ const UnifiedMcpPanel: React.FC<UnifiedMcpPanelProps> = ({
     isError,
     error: loadError,
     refetch,
-  } = useAllMcpServers();
-  const toggleAppMutation = useToggleMcpApp();
-  const bulkToggleAppMutation = useBulkToggleMcpApp();
-  const deleteServerMutation = useDeleteMcpServer();
-  const importMutation = useImportMcpFromApps();
+  } = useAllMcpServers(remoteTargetId, remoteContainerId);
+  const toggleAppMutation = useToggleMcpApp(remoteTargetId, remoteContainerId);
+  const bulkToggleAppMutation = useBulkToggleMcpApp(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const deleteServerMutation = useDeleteMcpServer(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const importMutation = useImportMcpFromApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const resyncMutation = useResyncMcpToApps();
 
   const mutationPending =
