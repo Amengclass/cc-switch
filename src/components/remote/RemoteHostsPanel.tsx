@@ -15,16 +15,15 @@ import {
   Loader2,
   Ban,
   CircleDot,
-  ListFilter,
   ShieldAlert,
   Eye,
   EyeOff,
   Tag,
   Globe,
-  Search,
   User,
   Key,
   Info,
+  Plus,
   ChevronUp,
   ChevronDown,
 } from "lucide-react";
@@ -42,25 +41,18 @@ import {
   TooltipProvider,
 } from "@/components/ui/tooltip";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogDescription,
-  DialogFooter,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
-import { ManagementListSearch } from "@/components/common/ManagementListSearch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { AppPageHeader } from "@/components/shell/AppPageHeader";
+import { HelpTip } from "@/components/ui/help-tip";
+import { HoverTip } from "@/components/ui/hover-tip";
+import { MatrixSearch, NeutralBadge } from "@/components/mcp/AppMatrix";
+import { V7ConfirmDialog, V7Dialog } from "@/components/mcp/formBits";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
@@ -398,15 +390,6 @@ export const RemoteHostsPanel = React.forwardRef<
     }
   };
 
-  const description = useMemo(
-    () =>
-      t("remote.description", {
-        defaultValue:
-          "通过 SSH 直连 Linux 服务器，统一管理远端各应用（Claude Code / Codex / Gemini / Grok Build / OpenCode 等）的配置与供应商切换，实现「一处配置、多机生效」。",
-      }),
-    [t],
-  );
-
   // 搜索 + 状态过滤：按名称/地址/用户名匹配；按状态过滤（列表顺序保持原始创建顺序，不沉底）。
   const filteredHosts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -426,160 +409,174 @@ export const RemoteHostsPanel = React.forwardRef<
 
   return (
     <TooltipProvider>
-      <div className="space-y-4 px-6 pt-4">
-        {/* 添加按钮在顶部导航右侧（remote.add），此处仅保留页面描述 */}
-        <p className="text-sm text-muted-foreground">{description}</p>
-
-        {/* 搜索 + 状态过滤 + 计数（对齐 MCP 管理面板） */}
-        <div className="flex items-center gap-2">
-          {/* -mb-4 抵消 ManagementListSearch 自带的 mb-4 下边距，使搜索框与状态下拉垂直对齐 */}
-          <div className="-mb-4 flex-1">
-            <ManagementListSearch
-              value={searchQuery}
-              onValueChange={setSearchQuery}
-              placeholder={t("remote.searchPlaceholder", {
-                defaultValue: "搜索主机名称 / 地址 / 用户名…",
-              })}
-              ariaLabel={t("remote.searchAriaLabel", {
-                defaultValue: "搜索远程主机",
-              })}
-              clearLabel={t("common.clear", { defaultValue: "清除" })}
-            />
-          </div>
-          {/* 状态过滤：全部 / 仅启用 / 仅禁用（带记录数，shadcn Select） */}
-          <Select
-            value={statusFilter}
-            onValueChange={(v) =>
-              setStatusFilter(v as "all" | "enabled" | "disabled")
-            }
+      <AppPageHeader
+        icon={<Server className="h-5 w-5" strokeWidth={1.5} />}
+        title={t("remote.title")}
+        titleExtra={
+          <HelpTip title={t("remote.title")}>
+            {t("remote.description")}
+          </HelpTip>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="solid"
+            size="regular"
+            onClick={openAdd}
           >
-            <SelectTrigger className="h-9 w-auto shrink-0 gap-1.5 border-border/40 px-2.5">
-              <ListFilter className="h-3.5 w-3.5 text-muted-foreground" />
-              {/* SelectValue 会自动显示选中项的文本，不要再额外放同名 span，否则文本重复 */}
-              <SelectValue placeholder="状态" />
-            </SelectTrigger>
-            <SelectContent align="end" className="min-w-0 w-auto">
-              <SelectItem value="all">
-                {t("remote.filterAll", { defaultValue: "全部" })}
-              </SelectItem>
-              <SelectItem value="enabled">
-                {t("remote.filterEnabled", { defaultValue: "仅启用" })}
-              </SelectItem>
-              <SelectItem value="disabled">
-                {t("remote.filterDisabled", { defaultValue: "仅禁用" })}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+            <Plus className="h-4 w-4" strokeWidth={2} />
+            {t("remote.add")}
+          </Button>
+        }
+      />
+
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* 搜索 + 状态过滤 + 计数（对齐 MCP 管理面板） */}
+        <div className="flex h-14 shrink-0 items-center gap-3 px-6">
+          <MatrixSearch
+            className="w-[320px] min-w-[180px] shrink"
+            value={searchQuery}
+            onValueChange={setSearchQuery}
+            placeholder={t("remote.searchPlaceholder")}
+            ariaLabel={t("remote.searchAriaLabel")}
+            status={
+              searchQuery.trim()
+                ? t("appMatrix.found", { count: filteredHosts.length })
+                : ""
+            }
+          />
+          <SegmentedControl<"all" | "enabled" | "disabled">
+            aria-label={t("remote.filterAriaLabel")}
+            value={statusFilter}
+            onValueChange={setStatusFilter}
+            size="sm"
+            className="shrink-0"
+            items={[
+              { value: "all", label: t("remote.filterAll") },
+              { value: "enabled", label: t("remote.filterEnabled") },
+              { value: "disabled", label: t("remote.filterDisabled") },
+            ]}
+          />
+          <span className="shrink-0 whitespace-nowrap text-caption tabular-nums text-fg-2">
+            {t("remote.count", { count: filteredHosts.length })}
+          </span>
         </div>
 
         {/* 主机列表 */}
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-          </div>
-        ) : hosts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-12 text-center">
-            <Server className="mb-3 h-10 w-10 text-muted-foreground/50" />
-            <p className="text-sm text-muted-foreground">
-              {t("remote.empty", { defaultValue: "还没有远程主机" })}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/70">
-              {t("remote.emptyHint", {
-                defaultValue:
-                  "点击「添加远程主机」，连接你的 GPU 服务器 / 云主机",
-              })}
-            </p>
-          </div>
-        ) : (
-          <div>
-            {filteredHosts.length === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-xl border border-dashed py-12 text-center">
-                <Search className="mb-3 h-8 w-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">
-                  {t("remote.searchEmpty", {
-                    defaultValue: "没有匹配的主机",
-                  })}
-                </p>
+        <div className="flex min-h-0 flex-1 flex-col px-6 pb-5">
+          {loading ? (
+            <div className="flex flex-1 items-center justify-center gap-2 text-body text-fg-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t("remote.loading")}
+            </div>
+          ) : hosts.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 px-10 pb-12 text-center">
+              <h2 className="m-0 text-section">{t("remote.empty")}</h2>
+              <p className="m-0 text-body text-fg-2">{t("remote.emptyHint")}</p>
+              <div className="mt-2 flex gap-2">
+                <Button
+                  type="button"
+                  variant="neutral"
+                  size="regular"
+                  onClick={openAdd}
+                >
+                  <Plus className="h-3.5 w-3.5" strokeWidth={2} />
+                  {t("remote.add")}
+                </Button>
               </div>
-            ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredHosts.map((host) => (
-                  <div
-                    key={host.id}
-                    className={cn(
-                      "group rounded-xl border bg-card p-4 shadow-sm transition-all duration-300 hover:border-border-active hover:shadow-sm",
-                      editing?.id === host.id &&
-                        "ring-2 ring-primary/60 border-primary/40",
-                      // 禁用态：底色明显变暗 + 虚线边框 + 更强降透明，一眼可辨「这台已停用」
-                      host.disabled && "border-dashed bg-muted/70 opacity-70",
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">
-                          {host.name}
-                          {/* 状态 pill（仅状态展示，切换由右上角 Switch 负责）：启用=绿/禁用=红 */}
+            </div>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-auto scroll-stable rounded-panel border border-border bg-surface">
+              {filteredHosts.length === 0 ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center">
+                  <span className="text-body text-fg-2">
+                    {t("remote.searchEmpty")}
+                  </span>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="neutral"
+                      size="regular"
+                      onClick={() => setSearchQuery("")}
+                    >
+                      {t("mcpPage.clearSearch")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ul
+                  aria-label={t("remote.listLabel")}
+                  className="m-0 list-none p-0"
+                >
+                  {filteredHosts.map((host, index) => (
+                    <li
+                      key={host.id}
+                      className={cn(
+                        "flex h-14 items-center gap-3 pe-2 ps-4 transition-colors hover:bg-subtle",
+                        index > 0 && "border-t border-border",
+                        host.disabled && "opacity-60",
+                      )}
+                    >
+                      <div className="flex min-w-0 flex-1 flex-col">
+                        <div className="flex min-w-0 items-center gap-1.5">
                           <span
-                            className={cn(
-                              "ml-2 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
-                              host.disabled
-                                ? "border-red-500/30 bg-red-500/10 text-red-600"
-                                : "border-border/60 bg-muted/60 text-muted-foreground",
-                            )}
+                            className="min-w-0 truncate text-body font-medium"
+                            title={host.name}
                           >
+                            {host.name}
+                          </span>
+                          <NeutralBadge>
                             {host.disabled ? (
                               <>
-                                <Ban className="h-3 w-3" />
-                                {t("remote.statusDisabled", { defaultValue: "已禁用" })}
+                                <Ban className="h-3 w-3 text-danger-text" />
+                                {t("remote.statusDisabled")}
                               </>
                             ) : (
                               <>
-                                <CircleDot className="h-3 w-3" />
-                                {t("remote.statusEnabled", { defaultValue: "启用中" })}
+                                <CircleDot className="h-3 w-3 text-success-text" />
+                                {t("remote.statusEnabled")}
                               </>
                             )}
-                          </span>
-                        </p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          <span className="text-foreground/70">
-                            {host.username}
-                          </span>
-                          <span className="text-muted-foreground/60">@</span>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  void copyText(host.host).then(() =>
-                                    toast.success(
-                                      t("remote.copied", {
-                                        defaultValue: "主机地址已复制",
-                                      }),
-                                    ),
-                                  );
-                                }}
-                                className="inline-block font-mono text-blue-500 transition-colors hover:underline dark:text-blue-400 cursor-pointer"
-                              >
-                                {host.host}
-                              </button>
-                            </TooltipTrigger>
-                            <TooltipContent>
-                              {t("remote.copyHost", {
-                                defaultValue: "点击复制主机地址",
-                              })}
-                            </TooltipContent>
-                          </Tooltip>
-                          <span className="text-muted-foreground/60">
+                          </NeutralBadge>
+                        </div>
+                        <div className="flex min-w-0 items-center text-caption text-fg-2">
+                          <span className="min-w-0 truncate font-mono">
+                            {host.username}@
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void copyText(host.host).then(() =>
+                                      toast.success(
+                                        t("remote.copied", {
+                                          defaultValue: "主机地址已复制",
+                                        }),
+                                      ),
+                                    );
+                                  }}
+                                  className="text-fg-2 underline decoration-border underline-offset-[3px] hover:text-fg-1"
+                                >
+                                  {host.host}
+                                </button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {t("remote.copyHost", {
+                                  defaultValue: "点击复制主机地址",
+                                })}
+                              </TooltipContent>
+                            </Tooltip>
                             :{host.port}
                           </span>
-                        </p>
+                        </div>
                       </div>
-                      {/* 右上角禁用/启用开关：Tooltip 悬停提示。
-                    注意：TooltipTrigger 用 asChild 直接包 Switch 会破坏 Switch 渲染（轨道变白），
-                    因此改包一层中介 <span>，悬停 span 触发提示、Switch 自身正常渲染。 */}
+
+                      {/* 禁用/启用开关：Tooltip 悬停提示。
+                          注意：TooltipTrigger 用 asChild 直接包 Switch 会破坏 Switch 渲染（轨道变白），
+                          因此改包一层中介 <span>，悬停 span 触发提示、Switch 自身正常渲染。 */}
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="inline-flex">
+                          <span className="inline-flex shrink-0">
                             <Switch
                               checked={!host.disabled}
                               onCheckedChange={() =>
@@ -609,66 +606,85 @@ export const RemoteHostsPanel = React.forwardRef<
                               })}
                         </TooltipContent>
                       </Tooltip>
-                    </div>
 
-                    {/* 测试结果通过 toast 提示，卡片不常驻状态行（仅按钮文案反映已测过） */}
-
-                    <div className="mt-3 flex flex-wrap gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void handleTest(host)}
-                        disabled={host.disabled || testingId === host.id}
-                      >
-                        {testingId === host.id ? (
-                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <PlugZap className="mr-1 h-3.5 w-3.5" />
-                        )}
-                        {testingId === host.id
-                          ? t("remote.testingShort", {
-                              defaultValue: "测试中…",
-                            })
-                          : t("remote.test", { defaultValue: "测试连接" })}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void openEnvDialog(host)}
-                        disabled={host.disabled}
-                      >
-                        <ShieldAlert className="mr-1 h-3.5 w-3.5" />
-                        {t("remote.env", { defaultValue: "环境变量" })}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="ml-auto h-7 w-7"
-                        onClick={() => openEdit(host)}
-                        disabled={host.disabled}
-                        title={t("common.edit", { defaultValue: "编辑" })}
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteConfirm({ open: true, host })}
-                        disabled={host.disabled}
-                        title={t("common.delete", { defaultValue: "删除" })}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 添加按钮已移至顶部工具栏（不随列表漂移） */}
+                      {/* 行内操作：测试连接 / 环境变量 / 编辑 / 删除 */}
+                      <div className="flex shrink-0 items-center gap-1">
+                        <HoverTip content={t("remote.test")}>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-compact"
+                            aria-label={t("remote.test")}
+                            disabled={host.disabled || testingId === host.id}
+                            onClick={() => void handleTest(host)}
+                          >
+                            {testingId === host.id ? (
+                              <Loader2 className="h-[15px] w-[15px] animate-spin" />
+                            ) : (
+                              <PlugZap
+                                className="h-[15px] w-[15px]"
+                                strokeWidth={1.5}
+                              />
+                            )}
+                          </Button>
+                        </HoverTip>
+                        <HoverTip content={t("remote.env")}>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-compact"
+                            aria-label={t("remote.env")}
+                            disabled={host.disabled}
+                            onClick={() => void openEnvDialog(host)}
+                          >
+                            <ShieldAlert
+                              className="h-[15px] w-[15px]"
+                              strokeWidth={1.5}
+                            />
+                          </Button>
+                        </HoverTip>
+                        <HoverTip content={t("common.edit")}>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-compact"
+                            aria-label={t("common.edit")}
+                            disabled={host.disabled}
+                            onClick={() => openEdit(host)}
+                          >
+                            <Pencil
+                              className="h-[15px] w-[15px]"
+                              strokeWidth={1.5}
+                            />
+                          </Button>
+                        </HoverTip>
+                        <HoverTip content={t("common.delete")}>
+                          <Button
+                            type="button"
+                            variant="quiet"
+                            size="icon-compact"
+                            className="text-danger-text hover:text-danger-text"
+                            aria-label={t("common.delete")}
+                            disabled={host.disabled}
+                            onClick={() =>
+                              setDeleteConfirm({ open: true, host })
+                            }
+                          >
+                            <Trash2
+                              className="h-[15px] w-[15px]"
+                              strokeWidth={1.5}
+                            />
+                          </Button>
+                        </HoverTip>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
         {/* 添加/编辑表单 - 全屏面板（对齐 MCP 的 FullScreenPanel 形态） */}
         <FullScreenPanel
@@ -1023,111 +1039,114 @@ export const RemoteHostsPanel = React.forwardRef<
         </FullScreenPanel>
 
         {/* 环境变量清理 */}
-        <Dialog
+        <V7Dialog
           open={envDialog.open}
-          onOpenChange={(open) =>
-            !open && setEnvDialog({ open: false, host: null })
-          }
+          onOpenChange={(open) => {
+            if (!open) setEnvDialog({ open: false, host: null });
+          }}
+          describedBy="remote-env-dialog-desc"
         >
-          <DialogContent className="max-w-md" zIndex="alert">
-            <DialogHeader className="space-y-3 border-b-0 bg-transparent pb-0">
-              <DialogTitle className="flex items-center gap-2 text-lg font-semibold">
-                <ShieldAlert className="h-5 w-5 text-amber-500" />
-                {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
-              </DialogTitle>
-              <DialogDescription className="text-sm text-muted-foreground">
-                {envDialog.host
-                  ? t("remote.envSubtitle", {
-                      defaultValue: "{{host}} · 清理后远端切换才生效",
-                      host: envDialog.host.name,
-                    })
-                  : ""}
-              </DialogDescription>
-            </DialogHeader>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-amber-500" />
+            <DialogTitle className="text-section">
+              {t("remote.envTitle", { defaultValue: "冲突环境变量" })}
+            </DialogTitle>
+          </div>
+          <DialogDescription
+            id="remote-env-dialog-desc"
+            className="text-body text-fg-2"
+          >
+            {envDialog.host
+              ? t("remote.envSubtitle", {
+                  defaultValue: "{{host}} · 清理后远端切换才生效",
+                  host: envDialog.host.name,
+                })
+              : ""}
+          </DialogDescription>
 
-            <div className="space-y-3 px-6">
-              {envLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                </div>
-              ) : envConflicts.length === 0 ? (
-                <Alert>
-                  <AlertDescription>
-                    {t("remote.envClean", {
-                      defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
-                    })}
-                  </AlertDescription>
-                </Alert>
-              ) : (
-                <>
-                  <ScrollArea className="max-h-[45vh]">
-                    <div className="space-y-2">
-                      {envConflicts.map((c, i) => (
-                        <div
-                          key={i}
-                          className="rounded-lg border border-border bg-muted/30 px-3 py-2.5"
-                        >
-                          <p className="font-mono text-sm font-medium">
-                            {c.varName}
-                          </p>
-                          <p
-                            className="mt-0.5 break-all font-mono text-xs text-muted-foreground"
-                            title={c.sourcePath}
-                          >
-                            {c.sourcePath}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                  <p className="text-xs text-muted-foreground">
-                    {t("remote.envCleanWarning", {
-                      defaultValue:
-                        "清理会移除这些变量（含系统级 .env 中的定义）",
-                    })}
-                  </p>
-                </>
-              )}
+          {envLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin" />
             </div>
+          ) : envConflicts.length === 0 ? (
+            <Alert>
+              <AlertDescription>
+                {t("remote.envClean", {
+                  defaultValue: "未发现冲突的 ANTHROPIC_* 环境变量",
+                })}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              <ScrollArea className="max-h-[45vh]">
+                <div className="space-y-2">
+                  {envConflicts.map((c, i) => (
+                    <div
+                      key={i}
+                      className="rounded-lg border border-border bg-muted/30 px-3 py-2.5"
+                    >
+                      <p className="font-mono text-sm font-medium">
+                        {c.varName}
+                      </p>
+                      <p
+                        className="mt-0.5 break-all font-mono text-xs text-muted-foreground"
+                        title={c.sourcePath}
+                      >
+                        {c.sourcePath}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+              <p className="text-xs text-muted-foreground">
+                {t("remote.envCleanWarning", {
+                  defaultValue:
+                    "清理会移除这些变量（含系统级 .env 中的定义）",
+                })}
+              </p>
+            </>
+          )}
 
-            <DialogFooter className="flex gap-2 border-t-0 bg-transparent pt-2 sm:justify-end">
-              <Button
-                variant="outline"
-                onClick={() => setEnvDialog({ open: false, host: null })}
-              >
-                {t("common.cancel", { defaultValue: "取消" })}
-              </Button>
-              <Button
-                variant="destructive"
-                disabled={
-                  envLoading || envConflicts.length === 0 || envCleaning
-                }
-                onClick={() => void handleCleanEnv()}
-              >
-                {envCleaning && (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                )}
-                {t("remote.cleanEnv", { defaultValue: "清理冲突变量" })}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <Button
+              type="button"
+              variant="neutral"
+              size="regular"
+              onClick={() => setEnvDialog({ open: false, host: null })}
+            >
+              {t("common.cancel", { defaultValue: "取消" })}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="regular"
+              disabled={
+                envLoading || envConflicts.length === 0 || envCleaning
+              }
+              onClick={() => void handleCleanEnv()}
+            >
+              {envCleaning && (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              )}
+              {t("remote.cleanEnv", { defaultValue: "清理冲突变量" })}
+            </Button>
+          </div>
+        </V7Dialog>
 
         {/* 删除确认 */}
-        <ConfirmDialog
-          isOpen={deleteConfirm.open}
+        <V7ConfirmDialog
+          open={deleteConfirm.open}
           title={t("remote.deleteConfirmTitle", {
             defaultValue: "删除远程主机",
           })}
-          message={t("remote.deleteConfirmMessage", {
+          body={t("remote.deleteConfirmMessage", {
             defaultValue: `确定要删除 "${deleteConfirm.host?.name}" 吗？已加密保存的密码也会一并清除。`,
             name: deleteConfirm.host?.name ?? "",
           })}
-          confirmText={t("common.delete", { defaultValue: "删除" })}
+          confirmLabel={t("common.delete", { defaultValue: "删除" })}
           onConfirm={handleDelete}
           onCancel={() => setDeleteConfirm({ open: false, host: null })}
         />
-      </div>
     </TooltipProvider>
   );
 });
