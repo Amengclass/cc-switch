@@ -4780,8 +4780,6 @@
     "testAll": "Test all connections",
     "testAllOk": "All {{count}} hosts are reachable",
     "testAllPartial": "{{ok}}/{{total}} hosts reachable",
-    "copyAll": "Copy all hosts",
-    "copiedAll": "Copied {{count}} hosts",
     "testingShort": "Testing…",
     "env": "Environment Variables",
     "envTitle": "Conflicting Environment Variables",

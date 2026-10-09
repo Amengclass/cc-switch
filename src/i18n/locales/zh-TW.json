@@ -4781,8 +4781,6 @@
     "testAll": "測試全部連線",
     "testAllOk": "{{count}} 台主機全部連線正常",
     "testAllPartial": "{{ok}}/{{total}} 台連線正常",
-    "copyAll": "複製全部主機",
-    "copiedAll": "已複製 {{count}} 台主機",
     "testingShort": "測試中…",
     "env": "環境變數",
     "envTitle": "衝突環境變數",

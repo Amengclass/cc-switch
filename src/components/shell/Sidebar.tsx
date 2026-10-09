@@ -299,6 +299,11 @@ function MainDirectory({
     trailing?: string;
     alert?: string;
   }[] = [
+    // 远程主机管理（本补丁层新增；官方没有远端概念），放全局组第一项：
+    // 它是「作用域的管理页」（管哪些机器），和顶部目标选择器是同一件事的两面，
+    // 不是 MCP/Skills 那种「内容页」，所以不跟内容页混排、也不该沉到末尾。
+    // 远端功能关闭时 App 侧会拦掉该页。
+    { page: "remote", label: t("nav.remote"), icon: Globe },
     { page: "mcp", label: "MCP", icon: Server },
     { page: "skills", label: "Skills", icon: SkillsIcon },
     { page: "prompts", label: t("nav.prompts"), icon: BookOpen },
@@ -315,9 +320,6 @@ function MainDirectory({
       icon: ChartColumn,
       trailing: todayLabel,
     },
-    // 远程主机管理（本补丁层新增；官方没有远端概念）。
-    // 追加在官方列表末尾，不动官方排序；远端功能关闭时 App 侧会拦掉该页。
-    { page: "remote", label: t("nav.remote"), icon: Globe },
   ];
 
   const isGlobalSelected = (page: GlobalPage) =>

@@ -315,21 +315,6 @@ export const RemoteHostsPanel = React.forwardRef<
     }
   };
 
-  // 复制全部主机（名称 + 地址）到剪贴板（⋯ 菜单）
-  const handleCopyAll = async () => {
-    if (hosts.length === 0) return;
-    const text = hosts
-      .map((h) => `${h.name}\t${h.username}@${h.host}:${h.port}`)
-      .join("\n");
-    await copyText(text);
-    toast.success(
-      t("remote.copiedAll", {
-        defaultValue: `已复制 {{count}} 台主机`,
-        count: hosts.length,
-      }),
-    );
-  };
-
   // 禁用/启用某台主机（软禁用：不删除，目标选择/操作排除，管理页仍可恢复）
   const handleToggleDisabled = async (host: RemoteHost) => {
     const next = { ...host, disabled: !host.disabled };
@@ -508,12 +493,6 @@ export const RemoteHostsPanel = React.forwardRef<
                   onSelect={() => void handleTestAll()}
                 >
                   {t("remote.testAll", { defaultValue: "测试全部连接" })}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={hosts.length === 0}
-                  onSelect={() => void handleCopyAll()}
-                >
-                  {t("remote.copyAll", { defaultValue: "复制全部主机" })}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
