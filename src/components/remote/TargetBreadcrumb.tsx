@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Container, Laptop, Loader2, Search, Server, X } from "lucide-react";
+import { ChevronRight, Container, Laptop, Loader2, Search, Server, Target, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { HoverTip } from "@/components/ui/hover-tip";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,6 +16,8 @@ import type { RemoteHost } from "@/types/remote";
 interface TargetBreadcrumbProps {
   remoteTargetId: string;
   remoteContainerId: string;
+  /** 侧栏收起（72px 图标轨）：渲染成图标按钮，点击弹出同一套下拉 */
+  collapsed?: boolean;
   setRemoteTargetId: (value: string) => void;
   setRemoteContainerId: (value: string) => void;
   servers: RemoteHost[];
@@ -40,6 +43,7 @@ interface TargetBreadcrumbProps {
 export function TargetBreadcrumb({
   remoteTargetId,
   remoteContainerId,
+  collapsed = false,
   setRemoteTargetId,
   setRemoteContainerId,
   servers,
@@ -135,6 +139,95 @@ export function TargetBreadcrumb({
       />
     );
   };
+
+  // 收起态（72px 图标轨）：一个图标按钮，点开是「主机 + 容器」合一的下拉。
+  // 图标用 Target（唯一，不和「远程主机」的 Terminal、「设置→网络」的 Globe 撞），
+  // 当前在远端时叠一个小绿点，一眼能看出「现在不是本机」。
+  if (collapsed) {
+    return (
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) {
+            onRefreshServers?.();
+            onProbeHosts?.();
+          }
+        }}
+      >
+        <HoverTip content={hostLabel} side="right" disableHoverableContent>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("remote.title")}
+              className="relative mx-auto flex h-8 w-12 shrink-0 items-center justify-center rounded-control transition-colors hover:bg-subtle"
+            >
+              <Target className="h-5 w-5" />
+              {!isLocal && (
+                <span
+                  aria-hidden="true"
+                  className="absolute end-2.5 top-1 h-2 w-2 rounded-full border-2 border-sidebar bg-success"
+                />
+              )}
+            </button>
+          </DropdownMenuTrigger>
+        </HoverTip>
+        <DropdownMenuContent
+          align="start"
+          className="min-w-[160px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+        >
+          <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden">
+            <DropdownMenuCheckboxItem
+              checked={isLocal}
+              onCheckedChange={() => handleSelectHost("")}
+              className={menuCheckItemCls}
+            >
+              {t("remote.targetLocal", { defaultValue: "本机" })}
+            </DropdownMenuCheckboxItem>
+            {servers.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                {servers.map((s) => (
+                  <DropdownMenuCheckboxItem
+                    key={s.id}
+                    checked={remoteTargetId === s.id}
+                    onCheckedChange={() => handleSelectHost(s.id)}
+                    className={cn(
+                      menuCheckItemCls,
+                      "flex items-center justify-between gap-3",
+                    )}
+                  >
+                    <span className="truncate">{s.name}</span>
+                    {statusDot(s.id)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </>
+            )}
+            {!isLocal && containers.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuCheckboxItem
+                  checked={!remoteContainerId}
+                  onCheckedChange={() => setRemoteContainerId("")}
+                  className={menuCheckItemCls}
+                >
+                  {t("remote.targetHost", { defaultValue: "宿主机" })}
+                </DropdownMenuCheckboxItem>
+                {containers.map((c) => (
+                  <DropdownMenuCheckboxItem
+                    key={c}
+                    checked={remoteContainerId === c}
+                    onCheckedChange={() => setRemoteContainerId(c)}
+                    className={menuCheckItemCls}
+                  >
+                    <span className="truncate">{c}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </>
+            )}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
   return (
     // 轨道照官方分段控件：bg-subtle 底 + 3px 内衬 + h-7 / rounded-[8px]（sm 档），

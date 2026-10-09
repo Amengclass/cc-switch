@@ -1,4 +1,4 @@
-import { useContext, useRef, type ComponentType } from "react";
+import { useContext, useEffect, useRef, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { getVersion } from "@tauri-apps/api/app";
@@ -54,6 +54,8 @@ interface SidebarProps {
   onExitSettings: () => void;
   /** 打开了「启动时检查应用更新」并且查到了新版本 */
   appsUpdateAvailable?: boolean;
+  /** 收起状态变化时回传（目标选择器要在收起态渲染图标轨版本） */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }
 
 type DirectoryProps = SidebarProps & { collapsed: boolean };
@@ -68,8 +70,13 @@ export function Sidebar(props: SidebarProps) {
   const { t } = useTranslation();
   const navRef = useRef<HTMLElement>(null);
   const { collapsed, toggle } = useSidebarCollapsed(navRef);
-  const { view } = props;
+  const { view, onCollapsedChange } = props;
   const inSettings = view === "settings";
+
+  // 回传收起状态给 App（目标选择器收起态要换图标轨形态）
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
 
   return (
     <nav
@@ -127,15 +134,16 @@ function RemoteTargetRow({ collapsed }: { collapsed: boolean }) {
     />
   );
 
-  // 收起态（72px 图标轨）不渲染选择器行：
-  //  - 轨道放不下「本机 / 服务器 / 容器」两段选择器；
-  //  - 若退化成一个图标，会和下面「远程主机」导航项撞成两个一样的图标；
-  //  - 收起时切目标走「远程主机」页即可，展开侧栏就恢复选择器。
-  if (collapsed) return null;
-
+  // 收起态也渲染选择器（由 TargetBreadcrumb 自己换成图标轨形态）——
+  // 之前收起时整行 return null，导致收起后没法切目标，已改回。
   return (
     <>
-      <div className="flex min-w-0 shrink-0 items-center px-4 pb-2 pt-1">
+      <div
+        className={cn(
+          "flex min-w-0 shrink-0 items-center",
+          collapsed ? "justify-center px-3 pt-1" : "px-4 pb-2 pt-1",
+        )}
+      >
         {selector}
       </div>
       {divider}

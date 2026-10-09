@@ -172,6 +172,9 @@ function App() {
   const [currentView, setCurrentView] = useState<View>(readStoredView);
   const [settingsSection, setSettingsSection] =
     useState<SettingsSection>("general");
+  // 侧栏收起状态由 Sidebar 内部持有（useSidebarCollapsed），回传一份给 App：
+  // 目标选择器要在收起态渲染成图标轨版本，需要知道当前是否收起。
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // 远端（SSH 主机 / Docker 容器）目标：整块逻辑收敛在 hooks/useRemoteTarget
   // （P2 收敛点），官方 App.tsx 里只留这一次调用。远端功能关闭时，下面所有远端
@@ -1372,6 +1375,7 @@ function App() {
   const remoteTargetSelector =
     remote.remoteFeatureEnabled && remote.remoteAvailableForApp ? (
       <TargetBreadcrumb
+        collapsed={sidebarCollapsed}
         remoteTargetId={remote.remoteTargetId}
         remoteContainerId={remote.remoteContainerId}
         setRemoteTargetId={remote.setRemoteTargetId}
@@ -1576,6 +1580,7 @@ function App() {
           onSelectPage={openPageFromNav}
           onSelectSettingsSection={setSettingsSection}
           onExitSettings={exitSettings}
+          onCollapsedChange={setSidebarCollapsed}
           appsUpdateAvailable={
             checkToolUpdatesOnStartup && toolUpdatesAvailable
           }
