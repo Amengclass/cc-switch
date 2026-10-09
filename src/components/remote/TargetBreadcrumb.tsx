@@ -105,21 +105,14 @@ export function TargetBreadcrumb({
   const segmentCls =
     "inline-flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-[5px] px-2.5 text-caption font-medium text-fg-2 transition-[background-color,color,scale] hover:text-fg-1 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:scale-[0.96]";
 
-  // 下拉条目照官方菜单（见 sessions/SessionItem.tsx 的 sessionMenuItemClass）：
-  // h-8 + rounded-control + px-2.5 + text-body。默认的 DropdownMenu*Item 是
-  // py-1.5 / rounded-sm / text-sm，比官方大一号、圆角也不对。
-  // 勾选项再加 ps-8 给左侧勾选标记留位（官方 DropdownMenuCheckboxItem 自带 pl-8，
-  // 但这里要覆盖成官方菜单的紧凑规格，所以显式写 ps-8）。
-  // 条目规格照官方菜单（sessions/SessionItem.tsx 的 sessionMenuItemClass）：
-  // h-8 + rounded-control + px-2.5 + text-body。
-  // 注意 text-body 必须带 ! —— 基类 DropdownMenu*Item 自带 text-sm，而 twMerge
-  // 不把 text-sm / text-body 当同一组去重（一个是 Tailwind 原生档、一个是自定义
-  // fontSize key），两个类都会留下；本仓库编译出的 CSS 里 .text-sm 在 .text-body
-  // 之后，于是 text-sm(14px) 反而赢，条目字就偏大。!text-body 靠 important 稳赢。
-  const menuItemCls = "h-8 !rounded-control px-2.5 !text-body";
-  // pl-8（不是 ps-8）：基类 CheckboxItem 自带 pl-8/pr-2，ps-* 与 pl-* 是两组，
-  // 写 ps-8 会变成 pl-8 + ps-8 双份左内边距；写 pl-8 正好覆盖基类那份。
-  const menuCheckItemCls = cn(menuItemCls, "pl-8");
+  // 下拉条目：比官方菜单再紧凑一档（选择器是窄控件，不需要菜单那么高的行）。
+  //  - 字 text-caption(12px)：基类自带 text-sm，twMerge 不把两者当同一组去重，
+  //    本仓库 CSS 里 .text-sm 排在 .text-caption 之后会赢，所以必须带 ! 强制。
+  //  - 行 min-h-6(24px)：比官方 h-8 矮一档，配 12px 字不显空。
+  //  - 内边距 px-2：左右收紧；勾选项左侧留 pl-6 给勾选标记（基类自带 pl-8，
+  //    用 pl-6 覆盖它 —— ps-* 和 pl-* 是两组，写 ps-* 会双份内边距）。
+  const menuItemCls = "min-h-6 !rounded-control px-2 !text-caption";
+  const menuCheckItemCls = cn(menuItemCls, "pl-6");
 
   // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
   const statusDot = (hostId: string) => {
@@ -163,14 +156,14 @@ export function TargetBreadcrumb({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
-          className="min-w-[150px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+          className="min-w-[150px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
         >
           {servers.length >= 3 && (
             <div
-              className="relative mb-1 border-b border-border px-1 pb-1.5"
+              className="relative mb-0.5 border-b border-border pb-1"
               onKeyDown={(e) => e.stopPropagation()}
             >
-              <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-3" />
               <Input
                 value={hostSearch}
                 onChange={(e) => setHostSearch(e.target.value)}
@@ -182,14 +175,14 @@ export function TargetBreadcrumb({
                 }}
                 placeholder={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
                 aria-label={t("remote.searchHosts", { defaultValue: "搜索主机…" })}
-                className="h-7 pl-7 pr-7 text-caption"
+                className="h-6 pl-6 pr-6 !text-caption"
                 autoFocus
               />
               {hostSearch && (
                 <button
                   type="button"
                   onClick={() => setHostSearch("")}
-                  className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
+                  className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
                 >
                   <X className="h-3 w-3" />
                 </button>
@@ -199,7 +192,7 @@ export function TargetBreadcrumb({
           <div
             role="group"
             aria-label={t("remote.targetHost", { defaultValue: "宿主机" })}
-            className="overflow-y-auto max-h-[40vh]"
+            className="max-h-[40vh] overflow-y-auto overflow-x-hidden"
           >
             <DropdownMenuCheckboxItem
               checked={isLocal}
@@ -258,14 +251,14 @@ export function TargetBreadcrumb({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="start"
-              className="min-w-[180px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar]:block [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
+              className="min-w-[180px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
             >
               {containers.length >= 3 && (
                 <div
-                  className="relative mb-1 border-b border-border px-1 pb-1.5"
+                  className="relative mb-0.5 border-b border-border pb-1"
                   onKeyDown={(e) => e.stopPropagation()}
                 >
-                  <Search className="pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-3" />
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-fg-3" />
                   <Input
                     value={containerSearch}
                     onChange={(e) => setContainerSearch(e.target.value)}
@@ -277,14 +270,14 @@ export function TargetBreadcrumb({
                     }}
                     placeholder={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
                     aria-label={t("remote.searchContainers", { defaultValue: "搜索容器…" })}
-                    className="h-7 pl-7 pr-7 text-caption"
+                    className="h-6 pl-6 pr-6 !text-caption"
                     autoFocus
                   />
                   {containerSearch && (
                     <button
                       type="button"
                       onClick={() => setContainerSearch("")}
-                      className="absolute right-3 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
+                      className="absolute right-1.5 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-control text-fg-3 transition-colors hover:bg-subtle hover:text-fg-1"
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -294,7 +287,7 @@ export function TargetBreadcrumb({
               <div
                 role="group"
                 aria-label={t("remote.container", { defaultValue: "容器" })}
-                className="overflow-y-auto max-h-[40vh]"
+                className="max-h-[40vh] overflow-y-auto overflow-x-hidden"
               >
                 <DropdownMenuCheckboxItem
                   checked={!remoteContainerId}
