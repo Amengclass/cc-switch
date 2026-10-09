@@ -4,9 +4,8 @@ import { ChevronRight, Container, Laptop, Loader2, Search, Server, X } from "luc
 import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -176,26 +175,30 @@ export function TargetBreadcrumb({
               )}
             </div>
           )}
-          <DropdownMenuRadioGroup
-            value={remoteTargetId}
-            onValueChange={handleSelectHost}
+          <div
+            role="group"
+            aria-label={t("remote.targetHost", { defaultValue: "宿主机" })}
             className="overflow-y-auto max-h-[40vh]"
           >
-            <DropdownMenuRadioItem value="" className="pl-7">
+            <DropdownMenuCheckboxItem
+              checked={isLocal}
+              onCheckedChange={() => handleSelectHost("")}
+            >
               {t("remote.targetLocal", { defaultValue: "本机" })}
-            </DropdownMenuRadioItem>
+            </DropdownMenuCheckboxItem>
             {servers.length > 0 && (
               <>
                 <DropdownMenuSeparator />
                 {filteredHosts.map((s) => (
-                  <DropdownMenuRadioItem
+                  <DropdownMenuCheckboxItem
                     key={s.id}
-                    value={s.id}
-                    className="flex items-center justify-between gap-3 pl-7 pr-2"
+                    checked={remoteTargetId === s.id}
+                    onCheckedChange={() => handleSelectHost(s.id)}
+                    className="flex items-center justify-between gap-3"
                   >
                     <span className="truncate">{s.name}</span>
                     {statusDot(s.id)}
-                  </DropdownMenuRadioItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
                 {hostSearch && filteredHosts.length === 0 && (
                   <div className="px-3 py-2 text-center text-caption text-fg-3">
@@ -204,7 +207,7 @@ export function TargetBreadcrumb({
                 )}
               </>
             )}
-          </DropdownMenuRadioGroup>
+          </div>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -263,27 +266,30 @@ export function TargetBreadcrumb({
                   )}
                 </div>
               )}
-              <DropdownMenuRadioGroup
-                value={remoteContainerId}
-                onValueChange={setRemoteContainerId}
+              <div
+                role="group"
+                aria-label={t("remote.container", { defaultValue: "容器" })}
                 className="overflow-y-auto max-h-[40vh]"
               >
-                <DropdownMenuRadioItem value="" className="pl-7 pr-2">
+                <DropdownMenuCheckboxItem
+                  checked={!remoteContainerId}
+                  onCheckedChange={() => setRemoteContainerId("")}
+                >
                   <span className="flex w-full items-center justify-between gap-2">
                     {t("remote.targetHost")}
                     <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-badge text-fg-3">
                       {t("remote.targetHost")}
                     </span>
                   </span>
-                </DropdownMenuRadioItem>
+                </DropdownMenuCheckboxItem>
                 {filteredContainers.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
                     {filteredContainers.map((c) => (
-                      <DropdownMenuRadioItem
+                      <DropdownMenuCheckboxItem
                         key={c}
-                        value={c}
-                        className="pl-7 pr-2"
+                        checked={remoteContainerId === c}
+                        onCheckedChange={() => setRemoteContainerId(c)}
                       >
                         <span className="flex w-full items-center justify-between gap-2">
                           <span className="min-w-0 flex-1 truncate">{c}</span>
@@ -291,7 +297,7 @@ export function TargetBreadcrumb({
                             {t("remote.container")}
                           </span>
                         </span>
-                      </DropdownMenuRadioItem>
+                      </DropdownMenuCheckboxItem>
                     ))}
                   </>
                 )}
@@ -300,7 +306,7 @@ export function TargetBreadcrumb({
                     {t("remote.noMatchingContainers", { defaultValue: "无匹配容器" })}
                   </div>
                 )}
-              </DropdownMenuRadioGroup>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </>
