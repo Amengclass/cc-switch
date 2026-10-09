@@ -1381,6 +1381,7 @@ function App() {
         containersLoading={remote.containersLoading}
         hostsOnline={remote.hostsOnline}
         onProbeHosts={() => void remote.probeHosts()}
+        onRefreshServers={() => void remote.refreshServers()}
       />
     ) : null;
 

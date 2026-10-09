@@ -25,6 +25,8 @@ interface TargetBreadcrumbProps {
   hostsOnline?: Record<string, boolean>;
   /** 下拉打开时触发的批量探活回调 */
   onProbeHosts?: () => void;
+  /** 下拉打开时刷新主机列表（在远程主机页禁用/删除后，下拉里立刻同步） */
+  onRefreshServers?: () => void;
 }
 
 /**
@@ -45,6 +47,7 @@ export function TargetBreadcrumb({
   containersLoading,
   hostsOnline,
   onProbeHosts,
+  onRefreshServers,
 }: TargetBreadcrumbProps) {
   const { t } = useTranslation();
   const [hostSearch, setHostSearch] = useState("");
@@ -126,7 +129,7 @@ export function TargetBreadcrumb({
     // 轨道照官方分段控件：bg-subtle 底 + 3px 内衬 + h-7 / rounded-[8px]（sm 档），
     // 内圆角 = 外圆角 − 内衬 = 5px。选中段自己贴 bg-surface + shadow-v7-sm。
     <div className="inline-flex h-7 shrink-0 items-stretch rounded-[8px] bg-subtle p-[3px]">
-      <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) onProbeHosts?.(); }}>
+      <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) { onRefreshServers?.(); onProbeHosts?.(); } }}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
