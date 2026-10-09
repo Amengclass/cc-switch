@@ -131,16 +131,24 @@ interface SessionManagerPageProps {
   fromApp?: AppId;
   /** 打开设置里的「首选终端」 */
   onOpenTerminalSettings?: () => void;
+  /** 远端目标（本补丁层）：非空时会话列表读该目标 ~/.claude/projects */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export function SessionManagerPage({
   appId,
   fromApp,
   onOpenTerminalSettings,
+  remoteTargetId,
+  remoteContainerId,
 }: SessionManagerPageProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const { data, isLoading, refetch } = useSessionsQuery();
+  const { data, isLoading, refetch } = useSessionsQuery(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const sessions = useMemo(() => data ?? [], [data]);
   const { data: settings } = useSettingsQuery();
 

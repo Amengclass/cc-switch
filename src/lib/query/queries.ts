@@ -10,6 +10,7 @@ import {
 import type { Provider, Settings, UsageResult, SessionMeta } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
+import { listRemoteSessionsAll } from "@/lib/api/remote";
 
 const sortProviders = (
   providers: Record<string, Provider>,
@@ -305,10 +306,18 @@ export const useUsageQuery = (
   };
 };
 
-export const useSessionsQuery = () => {
+export const useSessionsQuery = (
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) => {
   return useQuery<SessionMeta[]>({
-    queryKey: ["sessions"],
-    queryFn: async () => sessionsApi.list(),
+    queryKey: remoteTargetId
+      ? ["sessions", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
+      : ["sessions"],
+    queryFn: async () =>
+      remoteTargetId
+        ? listRemoteSessionsAll(remoteTargetId, remoteContainerId)
+        : sessionsApi.list(),
     staleTime: 30 * 1000,
   });
 };

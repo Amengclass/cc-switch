@@ -1609,6 +1609,8 @@ function App() {
             appId={sharedFeatureApp}
             fromApp={activeApp}
             onOpenTerminalSettings={() => openSettings("general")}
+            remoteTargetId={remote.remoteTargetId || undefined}
+            remoteContainerId={remote.remoteContainerId || undefined}
           />
         );
       // 远程主机管理（本补丁层新增；官方没有远端概念）。
