@@ -49,6 +49,20 @@ pub fn parse_env_file(content: &str) -> HashMap<String, String> {
     map
 }
 
+/// 把键值对序列化成 `.env` 文本（按键排序保证输出稳定）。
+///
+/// 本补丁层新增：远端 gemini 切换要把 provider settings 写成远端 `.env`，
+/// 官方 v4.0.4 只保留了 `parse_env_file` / `write_gemini_env_text_atomic`，
+/// 没有「HashMap → 文本」这一步。逻辑照官方旧版同名字符串，保证与本机一致。
+pub fn serialize_env_file(map: &HashMap<String, String>) -> String {
+    let mut keys: Vec<_> = map.keys().collect();
+    keys.sort();
+    keys.into_iter()
+        .filter_map(|key| map.get(key).map(|value| format!("{key}={value}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// 严格解析 .env 文件内容，返回详细的错误信息
 ///
 /// 与 `parse_env_file` 不同，此函数在遇到无效行时会返回错误，

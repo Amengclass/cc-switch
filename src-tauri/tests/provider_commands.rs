@@ -445,6 +445,7 @@ command = "say"
                 hermes: false,
                 mcode: false,
                 pi: false,
+                openclaw: false,
             },
             description: None,
             homepage: None,

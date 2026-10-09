@@ -3577,6 +3577,33 @@ impl SkillService {
         Err(last_error.unwrap_or_else(|| anyhow::anyhow!("所有分支下载失败")))
     }
 
+    /// 本补丁层新增：下载仓库并解析出技能源目录，一步返回。
+    ///
+    /// 官方 v4.0.4 把这件事拆成 `download_repo` + `resolve_skill_source_dir` 两步
+    /// （见 `install` / `update_skill` 的用法）。远端 SFTP/容器场景要复用同一步骤，
+    /// 这里包一层，返回 `(temp_guard, canonical_temp, source_dir, used_branch)`：
+    /// - `temp_guard` 必须由调用方持有到上传完成，否则临时目录被提前回收；
+    /// - `canonical_temp` 供调用方做「源目录在临时根内」的校验。
+    pub async fn download_and_resolve_skill_source(
+        &self,
+        skill: &DiscoverableSkill,
+    ) -> Result<(tempfile::TempDir, PathBuf, PathBuf, String)> {
+        let repo = SkillRepo {
+            owner: skill.repo_owner.clone(),
+            name: skill.repo_name.clone(),
+            branch: skill.repo_branch.clone(),
+            enabled: true,
+        };
+        let (temp_guard, used_branch) = self.download_repo(&repo).await?;
+        let temp_dir = temp_guard.path();
+        let source_dir = Self::resolve_skill_source_dir(temp_dir, &skill.directory)
+            .ok_or_else(|| anyhow::anyhow!("技能源目录未找到: {}", skill.directory))?;
+        let canonical_temp = temp_dir
+            .canonicalize()
+            .unwrap_or_else(|_| temp_dir.to_path_buf());
+        Ok((temp_guard, canonical_temp, source_dir, used_branch))
+    }
+
     /// 下载并解压 ZIP
     async fn download_and_extract(&self, url: &str, dest: &Path) -> Result<()> {
         let client = crate::proxy::http_client::get();
@@ -4267,7 +4294,7 @@ impl SkillService {
     /// 同步等一长串 `?`，任何一处提前返回都会把最多 512 MiB 的临时内容永久留在
     /// 磁盘上。守卫交给调用方持有，清理就变成作用域结束时自动发生，不再依赖每条
     /// 出口都记得手写 `remove_dir_all`（实测漏了不止一条）。
-    fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
+    pub fn extract_local_zip(zip_path: &Path) -> Result<tempfile::TempDir> {
         Self::extract_local_zip_in(zip_path, &std::env::temp_dir())
     }
 
@@ -4354,7 +4381,7 @@ impl SkillService {
     }
 
     /// 递归扫描目录查找包含 SKILL.md 的技能目录
-    fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    pub fn scan_skills_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut skill_dirs = Vec::new();
         Self::scan_skills_recursive(dir, &mut skill_dirs)?;
         Ok(skill_dirs)

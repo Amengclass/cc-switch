@@ -256,6 +256,7 @@ pub fn import_from_codex(config: &mut MultiAppConfig) -> Result<usize, AppError>
                             hermes: false,
                             mcode: false,
                             pi: false,
+                            openclaw: false,
                         },
                         description: None,
                         homepage: None,
@@ -648,7 +649,7 @@ fn spec_transport_type(spec: &Value) -> &str {
 /// 写出 `type = "stdio"` 会被 Codex 0.158+ 的配置校验当作未知字段告警
 /// （`unknown configuration field mcp_servers.<id>.type`）。DB 中仍保留 `type`
 /// 以便在各客户端之间共享同一份 server 规范。
-pub(super) fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table, AppError> {
+pub fn json_server_to_toml_table(spec: &Value) -> Result<toml_edit::Table, AppError> {
     use toml_edit::{Array, Item, Table};
 
     let mut t = Table::new();

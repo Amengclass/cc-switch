@@ -535,7 +535,7 @@ fn models_dict_to_array(dict: serde_json::Map<String, serde_json::Value>) -> ser
 /// every `set_provider` call so stored data heals on the next activation;
 /// unknown keys pass through untouched to keep forward-compat with new
 /// Hermes fields (e.g. `request_timeout_seconds`).
-fn sanitize_hermes_provider_keys(config: &mut serde_json::Value) {
+pub(crate) fn sanitize_hermes_provider_keys(config: &mut serde_json::Value) {
     const KEY_ALIASES: &[(&str, &str)] = &[
         ("baseUrl", "base_url"),
         ("apiKey", "api_key"),
@@ -566,7 +566,7 @@ fn sanitize_hermes_provider_keys(config: &mut serde_json::Value) {
 
 /// If `config.models` is a JSON array, convert it in-place to the dict shape.
 /// No-op when `models` is absent or already a dict.
-fn normalize_provider_models_for_write(config: &mut serde_json::Value) {
+pub(crate) fn normalize_provider_models_for_write(config: &mut serde_json::Value) {
     let Some(obj) = config.as_object_mut() else {
         return;
     };

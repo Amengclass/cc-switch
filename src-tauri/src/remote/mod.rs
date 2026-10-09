@@ -12,7 +12,7 @@
 // 正经移植时逐个恢复：把 unimplemented 的调用换成官方新抽象（live::project /
 // live::patch / mode::controller）或我们自带的转换器。
 //
-// pub mod codex;
+pub mod codex;
 pub mod commands;
 pub mod connection;
 #[cfg(target_os = "windows")]
@@ -21,22 +21,22 @@ pub mod current;
 pub mod docker;
 pub mod effect;
 pub mod env_clean;
-// pub mod gemini;
-// pub mod grok;
-// pub mod hermes;
-// pub mod hooks;
-// pub mod mcp;
-// pub mod mcode;
-// pub mod openclaw;
-// pub mod opencode;
-// pub mod pi;
-// pub mod prompt;
+pub mod gemini;
+pub mod grok;
+pub mod hermes;
+pub mod hooks;
+pub mod mcp;
+pub mod mcode;
+pub mod openclaw;
+pub mod opencode;
+pub mod pi;
+pub mod prompt;
 pub mod providers;
 pub mod schema;
-// pub mod sessions;
+pub mod sessions;
 pub mod settings;
 pub mod sftp_io;
-// pub mod skill;
+pub mod skill;
 
 use std::collections::HashMap;
 use std::sync::Mutex;

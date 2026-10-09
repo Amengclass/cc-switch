@@ -69,11 +69,23 @@ impl Database {
             enabled_opencode BOOLEAN NOT NULL DEFAULT 0,
             enabled_mcode BOOLEAN NOT NULL DEFAULT 0,
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
-            enabled_pi BOOLEAN NOT NULL DEFAULT 0
+            enabled_pi BOOLEAN NOT NULL DEFAULT 0,
+            enabled_openclaw BOOLEAN NOT NULL DEFAULT 0
         )",
             [],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+
+        // 本补丁层：OpenClaw 4.x 原生 MCP 支持需要 enabled_openclaw 列。
+        // 存量库靠这里补列（create_tables 每次启动都跑、在迁移之前），不 bump SCHEMA_VERSION。
+        if Self::table_exists(conn, "mcp_servers")? {
+            Self::add_column_if_missing(
+                conn,
+                "mcp_servers",
+                "enabled_openclaw",
+                "BOOLEAN NOT NULL DEFAULT 0",
+            )?;
+        }
 
         // 4. Prompts 表
         conn.execute("CREATE TABLE IF NOT EXISTS prompts (

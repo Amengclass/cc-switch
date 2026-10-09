@@ -259,6 +259,25 @@ impl OpenClawConfigDocument {
         })
     }
 
+    /// 本补丁层新增：从给定源文本构造（不落盘），供远端 SFTP/容器场景复用同一套
+    /// 保形回写。`load()` 只能读本机盘上的文件，远端拿不到。
+    fn from_source(source: Option<String>, path: PathBuf) -> Result<Self, AppError> {
+        let source = source
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| OPENCLAW_DEFAULT_SOURCE.to_string());
+        let text = rt_from_str(&source).map_err(|e| {
+            AppError::Config(format!(
+                "Failed to parse OpenClaw config as round-trip JSON5 document: {}",
+                e.message
+            ))
+        })?;
+        Ok(Self {
+            path,
+            original_source: Some(source),
+            text,
+        })
+    }
+
     fn set_root_section(&mut self, key: &str, value: &Value) -> Result<(), AppError> {
         let RtJSONValue::JSONObject {
             key_value_pairs,
@@ -653,12 +672,15 @@ pub fn get_provider(id: &str) -> Result<Option<Value>, AppError> {
     Ok(get_providers()?.get(id).cloned())
 }
 
-/// 设置供应商配置（原始 JSON）
-///
-/// 写入到 `models.providers`
-pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOutcome, AppError> {
-    let mut full_config = read_openclaw_config()?;
-    let root = ensure_object(&mut full_config);
+/// 把 `providers.{id} = provider_config` 合并进 `full_config` 的 models 段，
+/// 返回重建后的完整 `models` 值（保留 models 下其它字段与 `mode`）。
+/// 本补丁层抽出：`set_provider`（落盘）和 `upsert_provider_preserve_format`（保形，不落盘）共用。
+fn merge_provider_into_models(
+    full_config: &mut Value,
+    id: &str,
+    provider_config: &Value,
+) -> Value {
+    let root = ensure_object(full_config);
     let models = root.entry("models".to_string()).or_insert_with(|| {
         json!({
             "mode": "merge",
@@ -668,15 +690,120 @@ pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOut
     let providers = ensure_object(models)
         .entry("providers".to_string())
         .or_insert_with(|| Value::Object(Map::new()));
-    ensure_object(providers).insert(id.to_string(), provider_config);
+    ensure_object(providers).insert(id.to_string(), provider_config.clone());
 
-    let models_value = root.get("models").cloned().unwrap_or_else(|| {
+    root.get("models").cloned().unwrap_or_else(|| {
         json!({
             "mode": "merge",
             "providers": {}
         })
-    });
-    write_root_section("models", &models_value)
+    })
+}
+
+/// 设置供应商配置（原始 JSON）
+///
+/// 写入到 `models.providers`
+pub fn set_provider(id: &str, provider_config: Value) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut full_config = read_openclaw_config()?;
+    let merged_models = merge_provider_into_models(&mut full_config, id, &provider_config);
+    write_root_section("models", &merged_models)
+}
+
+/// 保形设置顶层 section（供远端命令使用，纯变换不落盘）：
+/// 解析 `source`（JSON5，严格；None/空白 → 默认骨架），把 `value` 替换到 `section` 键，
+/// 返回保形新文本；其余顶层段注释/排版原样保留。
+pub fn set_section_preserve_format(
+    source: Option<&str>,
+    section: &str,
+    value: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+    let mut doc =
+        OpenClawConfigDocument::from_source(Some(effective_source.to_string()), PathBuf::new())?;
+    doc.set_root_section(section, value)?;
+    Ok(doc.text.to_string())
+}
+
+/// 保形设置嵌套 section（如 agents.defaults，供远端命令使用）。
+pub fn set_nested_section_preserve_format(
+    source: Option<&str>,
+    parent_section: &str,
+    child_section: &str,
+    value: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+    let mut full_config = json5::from_str::<Value>(effective_source).map_err(|e| {
+        AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+    })?;
+    let root = ensure_object(&mut full_config);
+    let parent = root
+        .entry(parent_section.to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    ensure_object(parent).insert(child_section.to_string(), value.clone());
+
+    let parent_value = root
+        .get(parent_section)
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    set_section_preserve_format(Some(effective_source), parent_section, &parent_value)
+}
+
+/// Round-trip upsert 供应商到任意源文本，返回**保形**（保留顶层注释/排版）的新文本。
+/// 仅重写 `models` 段，其余顶层段原样保留。语义与 `set_provider` 的合并逻辑逐字一致，
+/// 只是不落盘 —— 供远端 SFTP/容器场景复用本机同一 json-five 保形回写。
+pub fn upsert_provider_preserve_format(
+    source: Option<&str>,
+    id: &str,
+    provider_config: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+    let merged_models = {
+        let mut full_config = json5::from_str::<Value>(effective_source).map_err(|e| {
+            AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+        })?;
+        merge_provider_into_models(&mut full_config, id, provider_config)
+    };
+    set_section_preserve_format(Some(effective_source), "models", &merged_models)
+}
+
+/// 保形设置 `agents.defaults.model`（镜像本机 `set_default_model` 的合并逻辑，不落盘）。
+/// 供远端 SFTP/容器场景使用：仅重写 `agents` 段，保留顶层注释、其它顶层段，
+/// 以及 agents 下其它 defaults 字段（subagents/workspace/timeoutSeconds 等）。
+pub fn set_default_model_preserve_format(
+    source: Option<&str>,
+    model: &Value,
+) -> Result<String, AppError> {
+    let effective_source = match source {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => OPENCLAW_DEFAULT_SOURCE,
+    };
+    let agents_value = {
+        let mut config = json5::from_str::<Value>(effective_source).map_err(|e| {
+            AppError::Config(format!("Failed to parse OpenClaw config as JSON5: {e}"))
+        })?;
+        let root = ensure_object(&mut config);
+        let agents = root
+            .entry("agents".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        let defaults = ensure_object(agents)
+            .entry("defaults".to_string())
+            .or_insert_with(|| Value::Object(Map::new()));
+        ensure_object(defaults).insert("model".to_string(), model.clone());
+
+        root.get("agents")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(Map::new()))
+    };
+    set_section_preserve_format(Some(effective_source), "agents", &agents_value)
 }
 
 /// 删除供应商配置
@@ -909,6 +1036,86 @@ pub fn get_tools_config() -> Result<OpenClawToolsConfig, AppError> {
 pub fn set_tools_config(tools: &OpenClawToolsConfig) -> Result<OpenClawWriteOutcome, AppError> {
     let value = serde_json::to_value(tools).map_err(|e| AppError::JsonSerialize { source: e })?;
     write_root_section("tools", &value)
+}
+
+// ============================================================================
+// MCP Configuration（本补丁层新增：OpenClaw 4.x 原生 MCP，openclaw.json 顶层 mcp.servers）
+// 官方 v4.0.4 没有 OpenClaw MCP 支持，这几个函数随补丁层一起带过来。
+// ============================================================================
+
+/// OpenClaw 是否装了 MCP 配置（openclaw.json 目录存在即视为可用）。
+fn should_sync_openclaw_mcp() -> bool {
+    get_openclaw_dir().exists()
+}
+
+/// OpenClaw MCP 是否可用（openclaw.json 目录存在）。
+pub fn is_openclaw_mcp_available() -> bool {
+    should_sync_openclaw_mcp()
+}
+
+/// 读取 `mcp.servers` 映射（id -> spec）。文件缺失或无 mcp 块时返回空映射。
+pub fn get_mcp_servers() -> Result<Map<String, Value>, AppError> {
+    let config = read_openclaw_config()?;
+    Ok(config
+        .get("mcp")
+        .and_then(|m| m.get("servers"))
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 写入 `mcp` 顶层块。仅替换 `servers`，保留 mcp 下其它字段（如 gateway 等）。
+fn write_mcp_servers(servers: &Map<String, Value>) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut config = read_openclaw_config()?;
+    let root = ensure_object(&mut config);
+    let mcp = root
+        .entry("mcp".to_string())
+        .or_insert_with(|| Value::Object(Map::new()));
+    let mcp_obj = ensure_object(mcp);
+    mcp_obj.insert("servers".to_string(), Value::Object(servers.clone()));
+    let mcp_value = root
+        .get("mcp")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Map::new()));
+    write_root_section("mcp", &mcp_value)
+}
+
+/// 新增/更新一个 MCP 服务器（merge-on-write，保留该条目已有但本次未提供的字段）。
+pub fn upsert_mcp_server(id: &str, spec: &Value) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut servers = get_mcp_servers()?;
+    let merged = if let Some(existing) = servers.get(id) {
+        merge_mcp_server_spec(existing, spec)
+    } else {
+        spec.clone()
+    };
+    servers.insert(id.to_string(), merged);
+    write_mcp_servers(&servers)
+}
+
+/// 从 `mcp.servers` 移除一个 MCP 服务器。
+pub fn remove_mcp_server(id: &str) -> Result<OpenClawWriteOutcome, AppError> {
+    let mut servers = get_mcp_servers()?;
+    if servers.remove(id).is_none() {
+        return Ok(OpenClawWriteOutcome::default());
+    }
+    write_mcp_servers(&servers)
+}
+
+/// 合并：新 spec 的核心字段覆盖，保留 existing 中 OpenClaw 特有的扩展字段
+/// （transport / enabled / description 等，避免往返编辑丢失用户自定义）。
+fn merge_mcp_server_spec(existing: &Value, new_spec: &Value) -> Value {
+    let mut result = Map::new();
+    if let Some(obj) = existing.as_object() {
+        for (k, v) in obj {
+            result.insert(k.clone(), v.clone());
+        }
+    }
+    if let Some(obj) = new_spec.as_object() {
+        for (k, v) in obj {
+            result.insert(k.clone(), v.clone());
+        }
+    }
+    Value::Object(result)
 }
 
 #[cfg(test)]

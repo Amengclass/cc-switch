@@ -161,6 +161,7 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
         hermes: false,
         mcode: false,
         pi: false,
+        openclaw: false,
     };
 
     for app in apps_str.split(',') {
@@ -170,10 +171,8 @@ pub(crate) fn parse_mcp_apps(apps_str: &str) -> Result<McpApps, AppError> {
             "gemini" => apps.gemini = true,
             "grokbuild" | "grok" => apps.grokbuild = true,
             "opencode" => apps.opencode = true,
-            "openclaw" => {
-                // OpenClaw doesn't support MCP, ignore silently
-                log::debug!("OpenClaw doesn't support MCP, ignoring in apps parameter");
-            }
+            // 本补丁层：OpenClaw 4.x 原生 MCP 支持
+            "openclaw" => apps.openclaw = true,
             "hermes" => apps.hermes = true,
             "mcode" => apps.mcode = true,
             "pi" => apps.pi = true,

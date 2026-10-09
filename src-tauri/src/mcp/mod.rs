@@ -16,6 +16,7 @@ mod codex;
 mod gemini;
 mod grokbuild;
 mod hermes;
+mod openclaw;
 mod opencode;
 mod validation;
 
@@ -38,6 +39,15 @@ pub use hermes::{import_from_hermes, remove_server_from_hermes, sync_single_serv
 pub use opencode::{
     import_from_opencode, remove_server_from_opencode, sync_single_server_to_opencode,
 };
+
+// ── 格式转换辅助（本补丁层远端 MCP 用；官方只在 mcp::* 内部用，这里补导出）──
+pub use codex::json_server_to_toml_table;
+pub use hermes::{convert_to_hermes_format, merge_hermes_spec};
+pub use openclaw::{
+    convert_from_openclaw_format, convert_to_openclaw_format, import_from_openclaw,
+    remove_server_from_openclaw, sync_single_server_to_openclaw,
+};
+pub use opencode::convert_to_opencode_format;
 
 pub(crate) mod mcode;
 pub(crate) mod pi;

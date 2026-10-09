@@ -23,6 +23,10 @@ pub struct McpApps {
     pub hermes: bool,
     #[serde(default)]
     pub pi: bool,
+    /// 本补丁层新增：OpenClaw 4.x 原生 MCP 支持（openclaw.json 顶层 mcp.servers）。
+    /// 官方 v4.0.4 没有这个字段（`is_enabled_for` 里 OpenClaw 恒 false）。
+    #[serde(default)]
+    pub openclaw: bool,
 }
 
 impl McpApps {
@@ -34,7 +38,7 @@ impl McpApps {
             AppType::Gemini => self.gemini,
             AppType::GrokBuild => self.grokbuild,
             AppType::OpenCode => self.opencode,
-            AppType::OpenClaw => false, // OpenClaw doesn't support MCP
+            AppType::OpenClaw => self.openclaw, // 本补丁层：OpenClaw 4.x 原生 MCP 支持
             AppType::Hermes => self.hermes,
             AppType::Mcode => self.mcode,
             AppType::Pi => self.pi,
@@ -50,7 +54,7 @@ impl McpApps {
             AppType::Gemini => self.gemini = enabled,
             AppType::GrokBuild => self.grokbuild = enabled,
             AppType::OpenCode => self.opencode = enabled,
-            AppType::OpenClaw => {} // OpenClaw doesn't support MCP, ignore
+            AppType::OpenClaw => self.openclaw = enabled, // 本补丁层：OpenClaw 4.x 原生 MCP
             AppType::Hermes => self.hermes = enabled,
             AppType::Mcode => self.mcode = enabled,
             AppType::Pi => self.pi = enabled,
@@ -85,6 +89,9 @@ impl McpApps {
         if self.pi {
             apps.push(AppType::Pi);
         }
+        if self.openclaw {
+            apps.push(AppType::OpenClaw);
+        }
         apps
     }
 
@@ -98,6 +105,7 @@ impl McpApps {
             && !self.hermes
             && !self.mcode
             && !self.pi
+            && !self.openclaw
     }
 }
 
