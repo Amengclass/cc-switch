@@ -1578,6 +1578,9 @@ function App() {
               currentView === "skillsDiscovery" ? "discover" : "installed"
             }
             onNavigationBlockedChange={setSkillsNavigationBusy}
+            onInteractionBlockedChange={setSkillsNavigationBusy}
+            remoteTargetId={remote.remoteTargetId || undefined}
+            remoteContainerId={remote.remoteContainerId || undefined}
           />
         );
       case "prompts":

@@ -94,6 +94,9 @@ interface UnifiedSkillsPanelProps {
   initialView?: SkillsView;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
+  /** 远端目标（本补丁层）：非空时 Skills 数据源切到该目标自己的 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -119,6 +122,8 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
   initialView = "installed",
   onInteractionBlockedChange,
   onNavigationBlockedChange,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t, i18n } = useTranslation();
   const appIds = useVisibleAppIds(SKILLS_APP_IDS);
@@ -169,24 +174,35 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
     isFetching: isFetchingSkillBackups,
   } = useSkillBackups();
   const deleteBackupMutation = useDeleteSkillBackup();
-  const toggleAppMutation = useToggleSkillApp();
-  const bulkToggleAppMutation = useBulkToggleSkillApp();
-  const uninstallMutation = useUninstallSkill();
+  const toggleAppMutation = useToggleSkillApp(remoteTargetId, remoteContainerId);
+  const bulkToggleAppMutation = useBulkToggleSkillApp(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const uninstallMutation = useUninstallSkill(remoteTargetId, remoteContainerId);
   const restoreBackupMutation = useRestoreSkillBackup();
   // 进入页面时静默扫描一次「本机已有但未管理」的 Skill
   const { data: unmanagedSkills, refetch: scanUnmanaged } =
-    useScanUnmanagedSkills({ enabled: true });
-  const importMutation = useImportSkillsFromApps();
-  const installFromZipMutation = useInstallSkillsFromZip();
+    useScanUnmanagedSkills(remoteTargetId, remoteContainerId, {
+      enabled: true,
+    });
+  const importMutation = useImportSkillsFromApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const installFromZipMutation = useInstallSkillsFromZip(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const {
     data: updateCheck,
     refetch: checkUpdates,
     isFetching: isCheckingUpdates,
     dataUpdatedAt: updatesCheckedAt,
-  } = useCheckSkillUpdates();
+  } = useCheckSkillUpdates(remoteTargetId, remoteContainerId);
   const skillUpdates = updateCheck?.updates;
   const updateRepoFailures = updateCheck?.failures ?? [];
-  const updateSkillMutation = useUpdateSkill();
+  const updateSkillMutation = useUpdateSkill(remoteTargetId, remoteContainerId);
 
   const mutationPending =
     deleteBackupMutation.isPending ||
