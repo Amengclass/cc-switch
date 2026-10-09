@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { isLinux } from "@/lib/platform";
 import { TerminalSelect } from "@/components/settings/TerminalSettings";
 import { FloatingWindowSettings } from "@/components/settings/FloatingWindowSettings";
+import { RemoteProviderSettings } from "@/components/settings/RemoteProviderSettings";
 import {
   SettingsBlock,
   SettingsCard,
@@ -34,12 +35,21 @@ interface GeneralSectionProps {
   settings: SettingsFormState;
   onAutoSave: (updates: Partial<SettingsFormState>) => Promise<boolean>;
   onOpenApps: () => void;
+  /** 远端（本补丁层）：功能总开关 + 自动读入当前配置 */
+  remoteFeatureEnabled?: boolean;
+  onRemoteFeatureEnabledChange?: (next: boolean) => void;
+  remoteAutoImportDefault?: boolean;
+  onRemoteAutoImportDefaultChange?: (next: boolean) => void;
 }
 
 export function GeneralSection({
   settings,
   onAutoSave,
   onOpenApps,
+  remoteFeatureEnabled,
+  onRemoteFeatureEnabledChange,
+  remoteAutoImportDefault,
+  onRemoteAutoImportDefaultChange,
 }: GeneralSectionProps) {
   const { t } = useTranslation();
   const { theme, setTheme } = useTheme();
@@ -133,6 +143,18 @@ export function GeneralSection({
       <SettingsBlock title={t("settings.floatingWindow")}>
         <FloatingWindowSettings settings={settings} onChange={onAutoSave} />
       </SettingsBlock>
+
+      {/* 远端（本补丁层）：功能总开关 + 自动读入当前配置 */}
+      {remoteFeatureEnabled !== undefined &&
+        onRemoteFeatureEnabledChange &&
+        onRemoteAutoImportDefaultChange && (
+          <RemoteProviderSettings
+            featureEnabled={remoteFeatureEnabled}
+            onFeatureEnabledChange={onRemoteFeatureEnabledChange}
+            value={remoteAutoImportDefault ?? true}
+            onChange={onRemoteAutoImportDefaultChange}
+          />
+        )}
 
       <SettingsBlock title={t("settings.general.updates")}>
         <SettingsCard>

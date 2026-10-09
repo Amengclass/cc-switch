@@ -49,8 +49,7 @@ import {
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
-// TODO(远端接线②): BatchApplyPanel（批量应用：把本机一个供应商推到多台主机/容器）
-// 的挂载点待定，先把 import 收起来。
+import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
 // RemoteRouteToggle（远端路由接管开关）暂不接：官方 v4.0.4 对路由态有新样式，
 // 需要先评估适配方式，再决定这个开关放在哪 / 长什么样。
 import { useLastValidValue } from "@/hooks/useLastValidValue";
@@ -378,6 +377,8 @@ function App() {
   } = useProviderActions(
     activeApp,
     isProxyRunning && isCurrentAppTakeoverActive,
+    remote.remoteTargetId || undefined,
+    remote.remoteContainerId || undefined,
   );
   const handleEnablePiProvider = async (provider: Provider) => {
     try {
@@ -1579,7 +1580,10 @@ function App() {
       // 远端功能关闭时侧栏已隐藏入口，这里再加一道保险。
       case "remote":
         return remote.remoteFeatureEnabled ? (
-          <RemoteHostsPanel app={sharedFeatureApp} />
+          <RemoteHostsPanel
+            app={sharedFeatureApp}
+            onBatchApply={() => remote.setBatchApplyOpen(true)}
+          />
         ) : null;
       case "apps":
         return <AppsPage />;
@@ -1596,6 +1600,10 @@ function App() {
           onImportSuccess={handleImportSuccess}
           onOpenApps={() => setCurrentView("apps")}
           onOpenApp={selectApp}
+          remoteFeatureEnabled={remote.remoteFeatureEnabled}
+          onRemoteFeatureEnabledChange={remote.handleRemoteFeatureEnabledChange}
+          remoteAutoImportDefault={remote.autoImportDefault}
+          onRemoteAutoImportDefaultChange={remote.handleAutoImportDefaultChange}
         />
       );
     }
@@ -1666,6 +1674,24 @@ function App() {
           </div>
         </main>
       </div>
+
+      {/* 批量应用 Provider 面板：把「本机」一个供应商推到多台远端主机/容器。
+          Provider 候选池固定取本机 DB（localProvidersQuery），不随当前目标变 ——
+          广播就是用本机这份标准配置推到各远端。 */}
+      {remote.remoteAvailableForApp && (
+        <BatchApplyPanel
+          open={remote.batchApplyOpen}
+          onOpenChange={remote.setBatchApplyOpen}
+          availableApps={APP_IDS.filter(
+            (a) => visibleApps[a] && a !== "claude-desktop",
+          )}
+          app={remote.batchApplyApp}
+          onAppChange={remote.setBatchApplyApp}
+          hosts={remote.servers}
+          providers={localProvidersQuery.data?.providers ?? {}}
+          defaultProviderId={localProvidersQuery.data?.currentProviderId || undefined}
+        />
+      )}
 
       <AddProviderDialog
         open={isAddOpen}

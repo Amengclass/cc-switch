@@ -24,6 +24,7 @@ import {
   MoreHorizontal,
   Check,
   CircleAlert,
+  Send,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -123,8 +124,8 @@ export interface RemoteHostsPanelHandle {
 
 export const RemoteHostsPanel = React.forwardRef<
   RemoteHostsPanelHandle,
-  { app: string }
->(function RemoteHostsPanel({ app }, ref) {
+  { app: string; onBatchApply?: () => void }
+>(function RemoteHostsPanel({ app, onBatchApply }, ref) {
   const { t } = useTranslation();
 
   const [hosts, setHosts] = useState<RemoteHost[]>([]);
@@ -504,6 +505,17 @@ export const RemoteHostsPanel = React.forwardRef<
         }
         actions={
           <>
+            {onBatchApply && (
+              <Button
+                type="button"
+                variant="quiet"
+                size="regular"
+                onClick={onBatchApply}
+              >
+                <Send className="h-4 w-4" strokeWidth={2} />
+                {t("batchApply.title", { defaultValue: "批量应用" })}
+              </Button>
+            )}
             <Button
               type="button"
               variant="solid"

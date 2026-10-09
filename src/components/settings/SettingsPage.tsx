@@ -69,6 +69,11 @@ interface SettingsPageProps {
   onOpenApps: () => void;
   /** 本地路由 →「正在使用路由的应用」的「前往」 */
   onOpenApp: (app: AppId) => void;
+  /** 远端（本补丁层）：功能总开关 + 自动读入当前配置 */
+  remoteFeatureEnabled?: boolean;
+  onRemoteFeatureEnabledChange?: (next: boolean) => void;
+  remoteAutoImportDefault?: boolean;
+  onRemoteAutoImportDefaultChange?: (next: boolean) => void;
 }
 
 /**
@@ -80,6 +85,10 @@ export function SettingsPage({
   onImportSuccess,
   onOpenApps,
   onOpenApp,
+  remoteFeatureEnabled,
+  onRemoteFeatureEnabledChange,
+  remoteAutoImportDefault,
+  onRemoteAutoImportDefaultChange,
 }: SettingsPageProps) {
   const { t } = useTranslation();
   const {
@@ -229,6 +238,10 @@ export function SettingsPage({
             settings={settings}
             onAutoSave={handleAutoSave}
             onOpenApps={onOpenApps}
+            remoteFeatureEnabled={remoteFeatureEnabled}
+            onRemoteFeatureEnabledChange={onRemoteFeatureEnabledChange}
+            remoteAutoImportDefault={remoteAutoImportDefault}
+            onRemoteAutoImportDefaultChange={onRemoteAutoImportDefaultChange}
           />
         );
       case "appConfig":
