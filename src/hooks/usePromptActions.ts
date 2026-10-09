@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { promptsApi, type Prompt, type AppId } from "@/lib/api";
+import { listRemotePrompts, saveRemotePrompts } from "@/lib/api/remote";
 
 const EMPTY_PROMPTS: Record<string, Prompt> = {};
 
@@ -11,9 +12,15 @@ interface PromptActionsOptions {
   notify?: boolean;
 }
 
+// 本补丁层：远端目标（SSH 主机 / Docker 容器）下，Prompts 数据源切到该目标自己的
+// 提示词文件（~/.claude/CLAUDE.md 等）。v3.20.4 在 PromptPanel 里用 isRemote 分支
+// 自管远端状态；v4.0.4 的 PromptPanel 结构变了，这里把远端分支收进 hook，
+// 面板不用改。RemotePrompt 与 Prompt 结构完全一致，无需映射。
 export function usePromptActions(
   appId: AppId,
   { notify = true }: PromptActionsOptions = {},
+  remoteTargetId?: string,
+  remoteContainerId?: string,
 ) {
   const { t } = useTranslation();
   const [prompts, setPrompts] = useState<Record<string, Prompt>>({});
@@ -79,7 +86,16 @@ export function usePromptActions(
     }
     setLoading(!cached);
     try {
-      const data = await promptsApi.getPrompts(requestAppId);
+      const data = remoteTargetId
+        ? (await listRemotePrompts(
+            remoteTargetId,
+            remoteContainerId || undefined,
+            requestAppId,
+          )).reduce((acc, p) => {
+            acc[p.id] = p;
+            return acc;
+          }, {} as Record<string, Prompt>)
+        : await promptsApi.getPrompts(requestAppId);
       if (!isCurrentRequest()) return false;
       latestLoadedRef.current = { appId: requestAppId, prompts: data };
       updatePromptsForApp(requestAppId, () => data);
@@ -109,10 +125,30 @@ export function usePromptActions(
     }
   }, [appId, t, updatePromptsForApp]);
 
+  // 远端写：整表读改写（后端 save_remote_prompts 按数组整写）。
+  const remoteWrite = useCallback(
+    async (updater: (current: Record<string, Prompt>) => Record<string, Prompt>) => {
+      if (!remoteTargetId) return;
+      const current = visiblePrompts;
+      const next = updater(current);
+      await saveRemotePrompts(
+        remoteTargetId,
+        Object.values(next),
+        remoteContainerId || undefined,
+        appId,
+      );
+    },
+    [appId, remoteTargetId, remoteContainerId, visiblePrompts],
+  );
+
   const savePrompt = useCallback(
     async (id: string, prompt: Prompt) => {
       try {
-        await promptsApi.upsertPrompt(appId, id, prompt);
+        if (remoteTargetId) {
+          await remoteWrite((current) => ({ ...current, [id]: prompt }));
+        } else {
+          await promptsApi.upsertPrompt(appId, id, prompt);
+        }
         updatePromptsForApp(appId, (current) => ({
           ...current,
           [id]: prompt,
@@ -134,13 +170,21 @@ export function usePromptActions(
         throw error;
       }
     },
-    [appId, notify, reload, t, updatePromptsForApp],
+    [appId, notify, reload, t, updatePromptsForApp, remoteTargetId, remoteWrite],
   );
 
   const deletePrompt = useCallback(
     async (id: string) => {
       try {
-        await promptsApi.deletePrompt(appId, id);
+        if (remoteTargetId) {
+          await remoteWrite((current) => {
+            const next = { ...current };
+            delete next[id];
+            return next;
+          });
+        } else {
+          await promptsApi.deletePrompt(appId, id);
+        }
         updatePromptsForApp(appId, (current) => {
           const next = { ...current };
           delete next[id];
@@ -157,13 +201,24 @@ export function usePromptActions(
         throw error;
       }
     },
-    [appId, notify, reload, t, updatePromptsForApp],
+    [appId, notify, reload, t, updatePromptsForApp, remoteTargetId, remoteWrite],
   );
 
   const enablePrompt = useCallback(
     async (id: string) => {
       try {
-        await promptsApi.enablePrompt(appId, id);
+        if (remoteTargetId) {
+          await remoteWrite((current) =>
+            Object.fromEntries(
+              Object.entries(current).map(([key, prompt]) => [
+                key,
+                { ...prompt, enabled: key === id },
+              ]),
+            ),
+          );
+        } else {
+          await promptsApi.enablePrompt(appId, id);
+        }
         updatePromptsForApp(appId, (current) =>
           Object.fromEntries(
             Object.entries(current).map(([key, prompt]) => [
@@ -183,7 +238,7 @@ export function usePromptActions(
         throw error;
       }
     },
-    [appId, notify, reload, t, updatePromptsForApp],
+    [appId, notify, reload, t, updatePromptsForApp, remoteTargetId, remoteWrite],
   );
 
   const toggleEnabled = useCallback(
@@ -256,15 +311,33 @@ export function usePromptActions(
 
       try {
         if (enabled) {
-          await promptsApi.enablePrompt(appId, id);
+          if (remoteTargetId) {
+            await remoteWrite((current) =>
+              Object.fromEntries(
+                Object.entries(current).map(([key, prompt]) => [
+                  key,
+                  { ...prompt, enabled: key === id },
+                ]),
+              ),
+            );
+          } else {
+            await promptsApi.enablePrompt(appId, id);
+          }
           if (notify) {
             toast.success(t("prompts.enableSuccess"), { closeButton: true });
           }
         } else {
-          await promptsApi.upsertPrompt(appId, id, {
-            ...visiblePrompts[id],
-            enabled: false,
-          });
+          if (remoteTargetId) {
+            await remoteWrite((current) => ({
+              ...current,
+              [id]: { ...current[id], enabled: false },
+            }));
+          } else {
+            await promptsApi.upsertPrompt(appId, id, {
+              ...visiblePrompts[id],
+              enabled: false,
+            });
+          }
           if (notify) {
             toast.success(t("prompts.disableSuccess"), { closeButton: true });
           }
@@ -283,7 +356,7 @@ export function usePromptActions(
         throw error;
       }
     },
-    [appId, notify, reload, t, updatePromptsForApp, visiblePrompts],
+    [appId, notify, reload, t, updatePromptsForApp, visiblePrompts, remoteTargetId, remoteWrite],
   );
 
   const importFromFile = useCallback(async () => {

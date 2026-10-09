@@ -32,6 +32,9 @@ export interface PromptPanelProps {
   open?: boolean;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
+  /** 远端目标（本补丁层）：非空时 Prompts 数据源切到该目标自己的提示词文件 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 const StandardPromptPanel: React.FC<PromptPanelProps> = ({
@@ -41,6 +44,8 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
   onAppChange,
   onInteractionBlockedChange,
   onNavigationBlockedChange,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -67,7 +72,12 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
     toggleEnabled,
     importFromFile,
     getLatestPrompts,
-  } = usePromptActions(appId, { notify: false });
+  } = usePromptActions(
+    appId,
+    { notify: false },
+    remoteTargetId,
+    remoteContainerId,
+  );
   const reloadRef = React.useRef(reload);
   reloadRef.current = reload;
   const { displayPath, location, fileName, invalidate, moreItems } =

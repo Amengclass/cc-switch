@@ -1596,6 +1596,8 @@ function App() {
               )}
               onAppChange={setPromptsApp}
               onNavigationBlockedChange={setPromptNavigationBusy}
+              remoteTargetId={remote.remoteTargetId || undefined}
+              remoteContainerId={remote.remoteContainerId || undefined}
             />
           </div>
         );
