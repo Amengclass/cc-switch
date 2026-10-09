@@ -44,8 +44,10 @@ import { useTauriEvent } from "@/hooks/useTauriEvent";
 import { useRemoteTarget } from "@/hooks/useRemoteTarget";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
-import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
-import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
+// TODO(远端接线②): BatchApplyPanel（批量应用：把本机一个供应商推到多台主机/容器）
+// 的挂载点待定，先把 import 收起来。
+// RemoteRouteToggle（远端路由接管开关）暂不接：官方 v4.0.4 对路由态有新样式，
+// 需要先评估适配方式，再决定这个开关放在哪 / 长什么样。
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import {
   extractErrorMessage,
@@ -1353,6 +1355,27 @@ function App() {
     );
   };
 
+  // 远端「目标选择器」行（本补丁层新增；方案 A：页头/页签之下、内容之上）。
+  //
+  // 位置：应用页在 `renderAppSegments()` 之后（有页签时在页签下面），全局页在页面
+  // 顶部。远端功能关闭时**整行不渲染** —— 界面即还原原生 CC Switch。
+  const renderTargetRow = () =>
+    remote.remoteFeatureEnabled && remote.remoteAvailableForApp ? (
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-border bg-muted/30 px-6 py-2 text-sm">
+        <TargetBreadcrumb
+          remoteTargetId={remote.remoteTargetId}
+          remoteContainerId={remote.remoteContainerId}
+          setRemoteTargetId={remote.setRemoteTargetId}
+          setRemoteContainerId={remote.setRemoteContainerId}
+          servers={remote.servers}
+          containers={remote.containers}
+          containersLoading={remote.containersLoading}
+          hostsOnline={remote.hostsOnline}
+          onProbeHosts={() => void remote.probeHosts()}
+        />
+      </div>
+    ) : null;
+
   const renderAppPage = () => {
     const body = (() => {
       switch (currentView) {
@@ -1411,6 +1434,8 @@ function App() {
       <>
         {renderAppPageHeader()}
         {renderAppSegments()}
+        {/* 远端目标选择器：页签之下、内容之上（方案 A）。远端关闭时不渲染 */}
+        {renderTargetRow()}
         {isOpenClawView && openclawHealthWarnings.length > 0 && (
           <OpenClawHealthBanner warnings={openclawHealthWarnings} />
         )}
@@ -1525,7 +1550,17 @@ function App() {
         />
       );
     }
-    return isAppPage(currentView) ? renderAppPage() : renderGlobalPage();
+    return isAppPage(currentView) ? (
+      renderAppPage()
+    ) : (
+      <>
+        {/* 全局页（MCP / Skills / 提示词 / 会话 / 用量…）同样要显示目标选择器：
+            这些面板在远端目标下也生效，没有它就看不到「当前在操作哪台机器」。
+            注：全局页的页头由各面板自己画，所以这一行落在页头之上（应用页在页签之下）。 */}
+        {renderTargetRow()}
+        {renderGlobalPage()}
+      </>
+    );
   };
 
   return (
