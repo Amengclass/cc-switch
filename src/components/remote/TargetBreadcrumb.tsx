@@ -110,8 +110,16 @@ export function TargetBreadcrumb({
   // py-1.5 / rounded-sm / text-sm，比官方大一号、圆角也不对。
   // 勾选项再加 ps-8 给左侧勾选标记留位（官方 DropdownMenuCheckboxItem 自带 pl-8，
   // 但这里要覆盖成官方菜单的紧凑规格，所以显式写 ps-8）。
-  const menuItemCls = "h-8 rounded-control px-2.5 text-body";
-  const menuCheckItemCls = cn(menuItemCls, "ps-8");
+  // 条目规格照官方菜单（sessions/SessionItem.tsx 的 sessionMenuItemClass）：
+  // h-8 + rounded-control + px-2.5 + text-body。
+  // 注意 text-body 必须带 ! —— 基类 DropdownMenu*Item 自带 text-sm，而 twMerge
+  // 不把 text-sm / text-body 当同一组去重（一个是 Tailwind 原生档、一个是自定义
+  // fontSize key），两个类都会留下；本仓库编译出的 CSS 里 .text-sm 在 .text-body
+  // 之后，于是 text-sm(14px) 反而赢，条目字就偏大。!text-body 靠 important 稳赢。
+  const menuItemCls = "h-8 !rounded-control px-2.5 !text-body";
+  // pl-8（不是 ps-8）：基类 CheckboxItem 自带 pl-8/pr-2，ps-* 与 pl-* 是两组，
+  // 写 ps-8 会变成 pl-8 + ps-8 双份左内边距；写 pl-8 正好覆盖基类那份。
+  const menuCheckItemCls = cn(menuItemCls, "pl-8");
 
   // 状态标识（实时，不缓存）：检测中=转圈 / 在线=绿点 / 离线=灰点
   const statusDot = (hostId: string) => {
