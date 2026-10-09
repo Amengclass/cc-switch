@@ -294,24 +294,34 @@ export const RemoteHostsPanel = React.forwardRef<
     }
   };
 
-  // 批量测试所有启用中的主机（⋯ 菜单）
+  // 批量测试所有启用中的主机（⋯ 菜单）。
+  // 并发跑（每台独立 SSH 会话，互不依赖），但限并发 6 —— 主机多时
+  // 一次开几十个 SSH 会话对端也吃不消，排队跑既能并行又不至于打爆。
   const [testingAll, setTestingAll] = useState(false);
   const handleTestAll = async () => {
     const targets = hosts.filter((h) => !h.disabled);
     if (targets.length === 0) return;
     setTestingAll(true);
+    const CONCURRENCY = 6;
     let ok = 0;
     try {
-      for (const host of targets) {
-        try {
-          await testRemoteConnection(host.id, app);
-          ok += 1;
-          setTestResults((prev) => ({ ...prev, [host.id]: "ok" }));
-        } catch {
-          setTestResults((prev) => ({ ...prev, [host.id]: "fail" }));
-          // 单台失败不打断整批，最后统一报数
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < targets.length) {
+          const host = targets[cursor++];
+          try {
+            await testRemoteConnection(host.id, app);
+            ok += 1;
+            setTestResults((prev) => ({ ...prev, [host.id]: "ok" }));
+          } catch {
+            setTestResults((prev) => ({ ...prev, [host.id]: "fail" }));
+            // 单台失败不打断整批，最后统一报数
+          }
         }
-      }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker),
+      );
       if (ok === targets.length) {
         toast.success(
           t("remote.testAllOk", {
