@@ -4782,6 +4782,7 @@
     "testAllPartial": "{{ok}}/{{total}} hosts reachable",
     "testOkShort": "Reachable",
     "testFailShort": "Failed",
+    "loadingContainers": "Loading containers…",
     "testingShort": "Testing…",
     "env": "Environment Variables",
     "envTitle": "Conflicting Environment Variables",

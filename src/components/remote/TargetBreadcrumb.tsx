@@ -177,6 +177,12 @@ export function TargetBreadcrumb({
           <div className="max-h-[40vh] overflow-y-auto overflow-x-hidden">
             <DropdownMenuCheckboxItem
               checked={isLocal}
+              // 收起态：选主机不关菜单，让容器在同一菜单里接着选（一次开完）。
+              // 选「本机」没有容器子项，正常关闭。
+              onSelect={(e) => {
+                if (isLocal) return;
+                e.preventDefault();
+              }}
               onCheckedChange={() => handleSelectHost("")}
               className={menuCheckItemCls}
             >
@@ -189,6 +195,8 @@ export function TargetBreadcrumb({
                   <DropdownMenuCheckboxItem
                     key={s.id}
                     checked={remoteTargetId === s.id}
+                    // 选服务器后不关菜单：下面立刻列出它的容器，一次选完
+                    onSelect={(e) => e.preventDefault()}
                     onCheckedChange={() => handleSelectHost(s.id)}
                     className={cn(
                       menuCheckItemCls,
@@ -201,26 +209,38 @@ export function TargetBreadcrumb({
                 ))}
               </>
             )}
-            {!isLocal && containers.length > 0 && (
+            {/* 已选服务器：容器紧跟其后（同一菜单内），选容器才关菜单 */}
+            {!isLocal && (
               <>
                 <DropdownMenuSeparator />
-                <DropdownMenuCheckboxItem
-                  checked={!remoteContainerId}
-                  onCheckedChange={() => setRemoteContainerId("")}
-                  className={menuCheckItemCls}
-                >
-                  {t("remote.targetHost", { defaultValue: "宿主机" })}
-                </DropdownMenuCheckboxItem>
-                {containers.map((c) => (
-                  <DropdownMenuCheckboxItem
-                    key={c}
-                    checked={remoteContainerId === c}
-                    onCheckedChange={() => setRemoteContainerId(c)}
-                    className={menuCheckItemCls}
-                  >
-                    <span className="truncate">{c}</span>
-                  </DropdownMenuCheckboxItem>
-                ))}
+                {containersLoading && containers.length === 0 ? (
+                  <div className="flex items-center gap-1.5 px-2 py-1.5 text-caption text-fg-3">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    {t("remote.loadingContainers", {
+                      defaultValue: "加载容器…",
+                    })}
+                  </div>
+                ) : (
+                  <>
+                    <DropdownMenuCheckboxItem
+                      checked={!remoteContainerId}
+                      onCheckedChange={() => setRemoteContainerId("")}
+                      className={menuCheckItemCls}
+                    >
+                      {t("remote.targetHost", { defaultValue: "宿主机" })}
+                    </DropdownMenuCheckboxItem>
+                    {containers.map((c) => (
+                      <DropdownMenuCheckboxItem
+                        key={c}
+                        checked={remoteContainerId === c}
+                        onCheckedChange={() => setRemoteContainerId(c)}
+                        className={menuCheckItemCls}
+                      >
+                        <span className="truncate">{c}</span>
+                      </DropdownMenuCheckboxItem>
+                    ))}
+                  </>
+                )}
               </>
             )}
           </div>

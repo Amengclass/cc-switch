@@ -4782,6 +4782,7 @@
     "testAllPartial": "{{ok}}/{{total}} 台が接続正常",
     "testOkShort": "接続OK",
     "testFailShort": "失敗",
+    "loadingContainers": "コンテナを読み込み中…",
     "testingShort": "テスト中…",
     "env": "環境変数",
     "envTitle": "競合する環境変数",
