@@ -42,6 +42,9 @@ interface PiPromptPanelProps {
   onAppChange: (app: AppId) => void;
   onInteractionBlockedChange?: (blocked: boolean) => void;
   onNavigationBlockedChange?: (blocked: boolean) => void;
+  /** 远端目标（本补丁层）：非空时 Pi 提示词读/写该目标 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 /** 去掉路径最后一段（AGENTS.md），留下目录，末尾带分隔符。 */
@@ -57,6 +60,8 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
   onAppChange,
   onInteractionBlockedChange,
   onNavigationBlockedChange,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<PiPromptTab>("global");
@@ -79,7 +84,12 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
     toggleEnabled,
     importFromFile,
     getLatestPrompts,
-  } = usePromptActions("pi", { notify: false });
+  } = usePromptActions(
+    "pi",
+    { notify: false },
+    remoteTargetId,
+    remoteContainerId,
+  );
   const { displayPath, location, invalidate, moreItems } =
     usePromptPageCommon("pi");
   const templates = usePiPromptTemplatesQuery();

@@ -599,6 +599,8 @@ const PromptPanel: React.FC<PromptPanelProps> = (props) => {
         onAppChange={props.onAppChange}
         onInteractionBlockedChange={props.onInteractionBlockedChange}
         onNavigationBlockedChange={props.onNavigationBlockedChange}
+        remoteTargetId={props.remoteTargetId}
+        remoteContainerId={props.remoteContainerId}
       />
     );
   }

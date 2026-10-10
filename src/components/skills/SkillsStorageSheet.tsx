@@ -25,6 +25,9 @@ import { extractErrorMessage } from "@/utils/errorUtils";
 interface SkillsStorageSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 远端目标（本补丁层）：非空时计数显示该目标的技能；迁移是本机操作，远端隐藏 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 const appName = (app: string) => APP_DISPLAY_NAME[app as AppId] ?? app;
@@ -59,10 +62,16 @@ const RADIO_LABEL_CLASS =
 export function SkillsStorageSheet({
   open,
   onOpenChange,
+  remoteTargetId,
+  remoteContainerId,
 }: SkillsStorageSheetProps) {
   const { t } = useTranslation();
   const { settings, updateSettings, autoSaveSettings } = useSettings();
-  const { data: installedSkills } = useInstalledSkills();
+  const { data: installedSkills } = useInstalledSkills(
+    remoteTargetId,
+    remoteContainerId,
+  );
+  const isRemote = Boolean(remoteTargetId);
   const { data: ccSwitchDirRaw } = useCcSwitchSkillsDir(open);
   const resyncMutation = useResyncSkillsToApps();
 
@@ -200,6 +209,16 @@ export function SkillsStorageSheet({
 
         {settings && (
           <>
+            {isRemote && (
+              <p className="m-0 text-caption text-fg-2">
+                {t("skills.storageSheet.remoteNote", {
+                  defaultValue:
+                    "远端目标的技能存储在该机器上，存储位置与同步方式仅本机可配置。",
+                })}
+              </p>
+            )}
+            {!isRemote && (
+            <>
             <fieldset className="m-0 flex min-w-0 flex-col gap-2.5 border-0 p-0">
               <legend className={LEGEND_CLASS}>
                 {t("skills.storageSheet.locationTitle")}
@@ -335,6 +354,8 @@ export function SkillsStorageSheet({
                 </Button>
               </div>
             </fieldset>
+            </>
+            )}
           </>
         )}
 

@@ -1035,6 +1035,8 @@ const UnifiedMcpPanel: React.FC<UnifiedMcpPanelProps> = ({
           visibleAppIds={appIds}
           onSave={() => setDrawer(null)}
           onClose={() => setDrawer(null)}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
         />
       )}
 

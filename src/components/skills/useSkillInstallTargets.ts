@@ -33,11 +33,15 @@ function writeStored(apps: AppId[]) {
  * 「安装到」：发现、ZIP、备份恢复都显式装进这里选的应用（默认记住上次的选择）。
  * 后端 install_skill_unified 只收一个应用，所以先装到第一个、再逐个启用其余的，不是原子的。
  */
-export function useSkillInstallTargets(visibleAppIds: readonly AppId[]) {
+export function useSkillInstallTargets(
+  visibleAppIds: readonly AppId[],
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const [stored, setStored] = useState<AppId[]>(
     () => readStored() ?? DEFAULT_TARGETS,
   );
-  const toggleMutation = useToggleSkillApp();
+  const toggleMutation = useToggleSkillApp(remoteTargetId, remoteContainerId);
 
   // 只算看得见的应用；一个都不剩时退回第一个可见应用
   const targets = SKILLS_APP_IDS.filter(

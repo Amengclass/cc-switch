@@ -77,6 +77,9 @@ interface McpFormModalProps {
   visibleAppIds?: McpAppId[];
   onSave: () => void | Promise<void>;
   onClose: () => void;
+  /** 远端目标（本补丁层）：非空时批量写入写该目标 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 const emptyMeta = (): MetaDraft => ({
@@ -121,9 +124,11 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
   visibleAppIds = MCP_APP_IDS,
   onSave,
   onClose,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
-  const upsertMutation = useUpsertMcpServer();
+  const upsertMutation = useUpsertMcpServer(remoteTargetId, remoteContainerId);
   const isEdit = Boolean(editingId);
   const existingIds = useMemo(
     () => Object.keys(existingServers),

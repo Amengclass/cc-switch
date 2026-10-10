@@ -127,7 +127,11 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const appIds = useVisibleAppIds(SKILLS_APP_IDS);
-  const { targets, setTargets, installTo } = useSkillInstallTargets(appIds);
+  const { targets, setTargets, installTo } = useSkillInstallTargets(
+    appIds,
+    remoteTargetId,
+    remoteContainerId,
+  );
 
   const [view, setView] = useState<SkillsView>(initialView);
   // 「发现」段第一次打开后就一直挂着（隐藏而不卸载），来回切不再重新加载仓库列表
@@ -1687,7 +1691,12 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
         onCancel={() => setConfirm(null)}
       />
 
-      <SkillsStorageSheet open={storageOpen} onOpenChange={setStorageOpen} />
+      <SkillsStorageSheet
+        open={storageOpen}
+        onOpenChange={setStorageOpen}
+        remoteTargetId={remoteTargetId}
+        remoteContainerId={remoteContainerId}
+      />
 
       {repoManagerOpen && (
         <RepoManagerContainer onClose={() => setRepoManagerOpen(false)} />
