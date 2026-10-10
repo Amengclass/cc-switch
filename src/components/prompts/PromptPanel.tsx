@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
-import { promptsApi, type AppId, type Prompt } from "@/lib/api";
+import { type AppId, type Prompt } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
@@ -69,9 +69,12 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
     reload,
     savePrompt,
     deletePrompt,
+    enablePrompt,
     toggleEnabled,
     importFromFile,
     getLatestPrompts,
+    copyToApp,
+    deleteFromApp,
   } = usePromptActions(
     appId,
     { notify: false },
@@ -232,7 +235,7 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
         description: t("prompts.toast.deletedSub", { path: displayPath }),
         undoneTitle: t("prompts.toast.restored", { name: original.name }),
         onUndo: async () => {
-          await promptsApi.upsertPrompt(app, id, original);
+          await savePrompt(id, original);
           afterUndo(app);
         },
       });
@@ -274,7 +277,7 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
           }),
           description: effect || undefined,
           onUndo: async () => {
-            await promptsApi.enablePrompt(app, id);
+            await enablePrompt(id);
             afterUndo(app);
           },
         });
@@ -294,16 +297,12 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
       // 撤销只给能原样还原的：之前有启用中的就换回去；之前文件是空的就停用
       const onUndo = previousActive
         ? async () => {
-            await promptsApi.enablePrompt(app, previousActive[0]);
+            await enablePrompt(previousActive[0]);
             afterUndo(app);
           }
         : fileWasBlank && !backup
           ? async () => {
-              const latest = (await promptsApi.getPrompts(app))[id] ?? target;
-              await promptsApi.upsertPrompt(app, id, {
-                ...latest,
-                enabled: false,
-              });
+              await toggleEnabled(id, false);
               afterUndo(app);
             }
           : undefined;
@@ -375,7 +374,7 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
       showPromptToast(t, {
         title: t("prompts.toast.imported", { path: displayPath }),
         onUndo: async () => {
-          await promptsApi.deletePrompt(app, id);
+          await deletePrompt(id);
           afterUndo(app);
         },
       });
@@ -412,22 +411,12 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
     const source = copyingId ? prompts[copyingId] : undefined;
     if (!source) return;
     if (!beginWrite()) return;
-    const timestamp = Math.floor(Date.now() / 1000);
     const created: Array<{ app: AppId; id: string }> = [];
     const failed: AppId[] = [];
     for (const target of targets) {
-      const id = `prompt-${Date.now()}`;
       try {
-        await promptsApi.upsertPrompt(target, id, {
-          id,
-          name: source.name,
-          description: source.description,
-          content: source.content,
-          enabled: false,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-        created.push({ app: target, id });
+        const copy = await copyToApp(source, target);
+        created.push({ app: target, id: copy.id });
       } catch {
         failed.push(target);
       }
@@ -444,7 +433,7 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
         }),
         onUndo: async () => {
           for (const item of created) {
-            await promptsApi.deletePrompt(item.app, item.id);
+            await deleteFromApp(item.app, item.id);
           }
           invalidate();
         },
@@ -532,6 +521,8 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
               resultCount,
             }
       }
+      remoteTargetId={remoteTargetId}
+      remoteContainerId={remoteContainerId}
     >
       {listEmpty ? (
         loading ? (
@@ -584,6 +575,8 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
             if (externalReloadQueuedRef.current) void runExternalReload();
           }}
           onConfirm={(targets) => void handleCopyToApps(targets)}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
         />
       ) : null}
     </PromptPageFrame>

@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/popover";
 import { HoverTip } from "@/components/ui/hover-tip";
 import { promptsApi, type AppId } from "@/lib/api";
+import { listRemotePrompts } from "@/lib/api/remote";
 import { promptKeys } from "@/lib/query/prompts";
 import { SearchField } from "@/components/ui/search-field";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,9 @@ interface PromptPageFrameProps {
   } | null;
   notices?: ReactNode;
   children: ReactNode;
+  /** 远端目标（本补丁层）：非空时应用下拉的条数读该目标 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 /** 提示词全局页的页头 + 工具行（Prompts.dc.html 第 48–137 行）。 */
@@ -85,6 +89,8 @@ export function PromptPageFrame({
   search,
   notices,
   children,
+  remoteTargetId,
+  remoteContainerId,
 }: PromptPageFrameProps) {
   const { t } = useTranslation();
 
@@ -158,6 +164,8 @@ export function PromptPageFrame({
           count={count}
           disabled={appSwitchDisabled}
           onAppChange={onAppChange}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
         />
         {segments}
         {target ? (
@@ -224,20 +232,36 @@ function PromptAppPicker({
   count,
   disabled,
   onAppChange,
+  remoteTargetId,
+  remoteContainerId,
 }: {
   app: AppId;
   apps: AppId[];
   count: number;
   disabled: boolean;
   onAppChange: (app: AppId) => void;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   // 弹层里每个应用的条数：打开时才读，读的是和应用页页头入口同一份缓存
   const counts = useQueries({
     queries: apps.map((id) => ({
-      queryKey: promptKeys.list(id),
-      queryFn: () => promptsApi.getPrompts(id),
+      queryKey: remoteTargetId
+        ? ["remotePromptsList", remoteTargetId, remoteContainerId ?? "__host__", id]
+        : promptKeys.list(id),
+      queryFn: async () => {
+        if (remoteTargetId) {
+          const list = await listRemotePrompts(
+            remoteTargetId,
+            remoteContainerId || undefined,
+            id,
+          );
+          return Object.fromEntries(list.map((p) => [p.id, p]));
+        }
+        return promptsApi.getPrompts(id);
+      },
       enabled: open,
     })),
   });

@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { promptsApi, type AppId, type Prompt } from "@/lib/api";
+import { type AppId, type Prompt } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
@@ -81,9 +81,12 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
     reload,
     savePrompt,
     deletePrompt,
+    enablePrompt,
     toggleEnabled,
     importFromFile,
     getLatestPrompts,
+    copyToApp,
+    deleteFromApp,
   } = usePromptActions(
     "pi",
     { notify: false },
@@ -192,7 +195,7 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
           title: t("prompts.toast.disabledPi", { name: target.name }),
           description: t("pi.prompts.reloadNotice"),
           onUndo: async () => {
-            await promptsApi.enablePrompt("pi", id);
+            await enablePrompt(id);
             afterUndo();
           },
         });
@@ -210,16 +213,12 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
         .join(t("prompts.toast.joiner"));
       const onUndo = previousActive
         ? async () => {
-            await promptsApi.enablePrompt("pi", previousActive[0]);
+            await enablePrompt(previousActive[0]);
             afterUndo();
           }
         : fileWasMissing && !backup
           ? async () => {
-              const latest = (await promptsApi.getPrompts("pi"))[id] ?? target;
-              await promptsApi.upsertPrompt("pi", id, {
-                ...latest,
-                enabled: false,
-              });
+              await toggleEnabled(id, false);
               afterUndo();
             }
           : undefined;
@@ -241,7 +240,7 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
         description: t("prompts.toast.deletedPiSub"),
         undoneTitle: t("prompts.toast.restored", { name: original.name }),
         onUndo: async () => {
-          await promptsApi.upsertPrompt("pi", id, original);
+          await savePrompt(id, original);
           afterUndo();
         },
       });
@@ -285,22 +284,12 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
     const source = copyingId ? prompts[copyingId] : undefined;
     if (!source) return;
     setBusy(true);
-    const timestamp = Math.floor(Date.now() / 1000);
     const created: Array<{ app: AppId; id: string }> = [];
     const failed: AppId[] = [];
     for (const target of targets) {
-      const id = `prompt-${Date.now()}`;
       try {
-        await promptsApi.upsertPrompt(target, id, {
-          id,
-          name: source.name,
-          description: source.description,
-          content: source.content,
-          enabled: false,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-        created.push({ app: target, id });
+        const copy = await copyToApp(source, target);
+        created.push({ app: target, id: copy.id });
       } catch {
         failed.push(target);
       }
@@ -319,7 +308,7 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
         }),
         onUndo: async () => {
           for (const item of created) {
-            await promptsApi.deletePrompt(item.app, item.id);
+            await deleteFromApp(item.app, item.id);
           }
           invalidate();
         },
@@ -480,6 +469,8 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
           </Notice>
         ) : null
       }
+      remoteTargetId={remoteTargetId}
+      remoteContainerId={remoteContainerId}
     >
       {activeTab === "global" ? (
         libEmpty ? (
@@ -560,6 +551,8 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
             if (!busy) setCopyingId(null);
           }}
           onConfirm={(targets) => void handleCopyToApps(targets)}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
         />
       ) : null}
     </PromptPageFrame>

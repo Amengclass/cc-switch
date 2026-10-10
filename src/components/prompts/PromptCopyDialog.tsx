@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { AppGlyph, APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
 import { promptsApi, type AppId, type Prompt } from "@/lib/api";
+import { listRemotePrompts } from "@/lib/api/remote";
 import { promptKeys } from "@/lib/query/prompts";
 import { cn } from "@/lib/utils";
 import { FieldError } from "./PromptFormPanel";
@@ -21,6 +22,9 @@ interface PromptCopyDialogProps {
   pending?: boolean;
   onCancel: () => void;
   onConfirm: (apps: AppId[]) => void;
+  /** 远端目标（本补丁层）：非空时同名检测读该目标各 app 的提示词 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 /**
@@ -33,13 +37,27 @@ export function PromptCopyDialog({
   pending = false,
   onCancel,
   onConfirm,
+  remoteTargetId,
+  remoteContainerId,
 }: PromptCopyDialogProps) {
   const { t } = useTranslation();
   const baseId = useId();
   const lists = useQueries({
     queries: targets.map((app) => ({
-      queryKey: promptKeys.list(app),
-      queryFn: () => promptsApi.getPrompts(app),
+      queryKey: remoteTargetId
+        ? ["remotePromptsList", remoteTargetId, remoteContainerId ?? "__host__", app]
+        : promptKeys.list(app),
+      queryFn: async () => {
+        if (remoteTargetId) {
+          const list = await listRemotePrompts(
+            remoteTargetId,
+            remoteContainerId || undefined,
+            app,
+          );
+          return Object.fromEntries(list.map((p) => [p.id, p]));
+        }
+        return promptsApi.getPrompts(app);
+      },
     })),
   });
   const sameName = (index: number) =>

@@ -383,6 +383,63 @@ export function usePromptActions(
       : null;
   }, []);
 
+  /** 复制一个提示词到指定 app（远端目标：写该目标对应 app 的提示词文件）。 */
+  const copyToApp = useCallback(
+    async (source: Prompt, targetApp: AppId) => {
+      const id = `prompt-${Date.now()}`;
+      const timestamp = Math.floor(Date.now() / 1000);
+      const copy: Prompt = {
+        id,
+        name: source.name,
+        description: source.description,
+        content: source.content,
+        enabled: false,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      if (remoteTargetId) {
+        // 远端：整表读改写（targetApp 的提示词文件）
+        const current = await listRemotePrompts(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          targetApp,
+        );
+        await saveRemotePrompts(
+          remoteTargetId,
+          [...current, copy],
+          remoteContainerId || undefined,
+          targetApp,
+        );
+      } else {
+        await promptsApi.upsertPrompt(targetApp, id, copy);
+      }
+      return copy;
+    },
+    [remoteTargetId, remoteContainerId],
+  );
+
+  /** 从指定 app 删除提示词（远端目标：写该目标对应 app 的提示词文件）。 */
+  const deleteFromApp = useCallback(
+    async (targetApp: AppId, id: string) => {
+      if (remoteTargetId) {
+        const current = await listRemotePrompts(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          targetApp,
+        );
+        await saveRemotePrompts(
+          remoteTargetId,
+          current.filter((p) => p.id !== id),
+          remoteContainerId || undefined,
+          targetApp,
+        );
+      } else {
+        await promptsApi.deletePrompt(targetApp, id);
+      }
+    },
+    [remoteTargetId, remoteContainerId],
+  );
+
   return {
     prompts: visiblePrompts,
     loading,
@@ -395,5 +452,7 @@ export function usePromptActions(
     toggleEnabled,
     importFromFile,
     getLatestPrompts,
+    copyToApp,
+    deleteFromApp,
   };
 }
