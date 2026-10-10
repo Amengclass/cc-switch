@@ -1848,6 +1848,7 @@ pub fn run() {
             remote::commands::delete_remote_pi_prompt_template,
             remote::commands::list_remote_skills,
             remote::commands::delete_remote_skill,
+            remote::commands::resync_remote_skills,
             remote::commands::toggle_remote_skill_app,
             remote::commands::bulk_toggle_remote_skill_app,
             remote::commands::install_remote_skills_from_zip,

@@ -868,6 +868,17 @@ export async function deleteRemoteSkill(
   });
 }
 
+/** 重同步：把远端 SSOT 里所有技能按各自 apps 开关重新投影到各应用目录 */
+export async function resyncRemoteSkills(
+  hostId: string,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("resync_remote_skills", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
 /** 从本地 ZIP 安装技能到远端 SSOT，返回安装的技能完整记录 */
 export async function installRemoteSkillsFromZip(
   hostId: string,

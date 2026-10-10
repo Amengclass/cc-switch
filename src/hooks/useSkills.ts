@@ -23,6 +23,7 @@ import {
   installRemoteSkillFromDiscoverable,
   installRemoteSkillsFromZip,
   listRemoteSkills,
+  resyncRemoteSkills,
   scanRemoteUnmanagedSkills,
   toggleRemoteSkillApp,
   updateRemoteSkill,
@@ -642,13 +643,28 @@ export type {
 
 /**
  * 立即重新同步：按开关和当前同步方式把 Skill 重新投影到各应用目录
+ * 远端目标：重投影该目标 SSOT 到远端各应用目录。
  */
-export function useResyncSkillsToApps() {
+export function useResyncSkillsToApps(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => skillsApi.resyncToApps(),
+    mutationFn: async (): Promise<
+      import("@/lib/api/skills").SkillAppSyncOutcome[]
+    > => {
+      if (remoteTargetId) {
+        await resyncRemoteSkills(remoteTargetId, remoteContainerId);
+        // 远端后端不返回逐应用结果：整体成功即视为全部 ok
+        return [];
+      }
+      return skillsApi.resyncToApps();
+    },
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
+      queryClient.invalidateQueries({
+        queryKey: installedKey(remoteTargetId, remoteContainerId),
+      }),
   });
 }
 

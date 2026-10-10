@@ -2398,6 +2398,24 @@ pub async fn list_remote_skills(
     crate::remote::skill::list_remote_skills(&target, &host.default_home()).await
 }
 
+/// 重同步：把远端 SSOT 里所有技能按各自 apps 开关重新投影到各应用目录。
+#[tauri::command]
+pub async fn resync_remote_skills(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    crate::remote::skill::resync_remote_skills(
+        &session.channel,
+        container.as_deref(),
+        &host.default_home(),
+    )
+    .await
+}
+
 /// 删除远端 SSOT 中的技能（目录 + symlink + skills.json）。
 #[tauri::command]
 pub async fn delete_remote_skill(

@@ -73,7 +73,10 @@ export function SkillsStorageSheet({
   );
   const isRemote = Boolean(remoteTargetId);
   const { data: ccSwitchDirRaw } = useCcSwitchSkillsDir(open);
-  const resyncMutation = useResyncSkillsToApps();
+  const resyncMutation = useResyncSkillsToApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
 
   const location: SkillStorageLocation =
     settings?.skillStorageLocation ?? "cc_switch";
@@ -210,12 +213,39 @@ export function SkillsStorageSheet({
         {settings && (
           <>
             {isRemote && (
-              <p className="m-0 text-caption text-fg-2">
-                {t("skills.storageSheet.remoteNote", {
-                  defaultValue:
-                    "远端目标的技能存储在该机器上，存储位置与同步方式仅本机可配置。",
-                })}
-              </p>
+              <>
+                <p className="m-0 text-caption text-fg-2">
+                  {t("skills.storageSheet.remoteNote", {
+                    defaultValue:
+                      "远端目标的技能存储在该机器上，存储位置与同步方式跟随本机设置（本机改这里也会影响远端）。",
+                  })}
+                </p>
+                <div className="flex items-center justify-between gap-3 pt-0.5">
+                  <p className="m-0 min-w-0 flex-1 text-caption text-fg-2">
+                    {t("skills.storageSheet.remoteResyncHint", {
+                      defaultValue:
+                        "按各技能的启用开关，把远端 SSOT 重新投影到该机器各应用的技能目录。",
+                    })}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="neutral"
+                    size="compact"
+                    className="shrink-0"
+                    disabled={resyncMutation.isPending}
+                    onClick={() => void handleResync()}
+                  >
+                    {resyncMutation.isPending ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+                    )}
+                    {resyncMutation.isPending
+                      ? t("skills.storageSheet.resyncing")
+                      : t("skills.storageSheet.resync")}
+                  </Button>
+                </div>
+              </>
             )}
             {!isRemote && (
             <>

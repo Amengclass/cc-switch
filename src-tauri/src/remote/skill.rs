@@ -301,6 +301,43 @@ pub async fn sync_remote_skill_links(
     Ok(())
 }
 
+/// 重同步：把 SSOT 里所有技能按各自 apps 开关重新投影到远端各应用目录。
+/// 用于「存储与同步」对话框的「立即重新同步」。
+pub async fn resync_remote_skills(
+    channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
+    container: Option<&str>,
+    root: &str,
+) -> Result<(), String> {
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
+    // 读 skills.json（经 exec cat）
+    let json_path = remote_skills_json_path(root);
+    let text = exec_cmd(
+        channel,
+        container,
+        &format!("cat {} 2>/dev/null || true", shell_q(&json_path)),
+    )
+    .await
+    .unwrap_or_default();
+    let records: Vec<RemoteSkillRecord> = if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str(&text).unwrap_or_default()
+    };
+    for record in &records {
+        sync_remote_skill_links(
+            channel,
+            container,
+            root,
+            &record.directory,
+            &record.apps,
+            use_copy,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
 /// 删除技能在所有应用目录下的链接/副本。
 pub async fn remove_remote_skill_links(
     channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
