@@ -167,7 +167,7 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
     isError,
     error: loadError,
     refetch,
-  } = useInstalledSkills();
+  } = useInstalledSkills(remoteTargetId, remoteContainerId);
   const {
     data: skillBackups = [],
     refetch: refetchSkillBackups,
