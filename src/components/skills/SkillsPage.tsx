@@ -122,6 +122,9 @@ interface SkillsPageProps {
     failures: Array<{ id: string; app: AppId; error: unknown }>,
   ) => void;
   initialQuery?: string;
+  /** 远端目标（本补丁层）：非空时「已安装」判断与安装都指向该目标 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 interface DiscoverRow {
@@ -164,6 +167,8 @@ export function SkillsPage({
   onOpenRepoManager,
   onEnableFailures,
   initialQuery = "",
+  remoteTargetId,
+  remoteContainerId,
 }: SkillsPageProps) {
   const { t, i18n } = useTranslation();
   const [source, setSource] = useState<SkillsPageSource>("repos");
@@ -188,7 +193,10 @@ export function SkillsPage({
     refetch: refetchDiscoverable,
   } = useDiscoverableSkills();
   const { data: repoFailures = [] } = useDiscoverableSkillsFailures();
-  const { data: installedSkills = [] } = useInstalledSkills();
+  const { data: installedSkills = [] } = useInstalledSkills(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const {
     data: repos = [],
     isLoading: loadingRepos,
@@ -202,7 +210,7 @@ export function SkillsPage({
     isError: skillsShError,
     refetch: refetchSkillsSh,
   } = useSearchSkillsSh(skillsShQuery, SKILLSSH_PAGE_SIZE, skillsShOffset);
-  const installMutation = useInstallSkill();
+  const installMutation = useInstallSkill(remoteTargetId, remoteContainerId);
   const { setRepoEnabled } = useSkillRepoActions();
 
   useEffect(() => {

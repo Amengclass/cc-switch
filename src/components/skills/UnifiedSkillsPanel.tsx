@@ -126,6 +126,9 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
   remoteContainerId,
 }) => {
   const { t, i18n } = useTranslation();
+  // 远端目标：备份/恢复是本机操作（备份存本机 ~/.cc-switch/skill-backups），
+  // 远端下隐藏这些入口。
+  const isRemote = Boolean(remoteTargetId);
   const appIds = useVisibleAppIds(SKILLS_APP_IDS);
   const { targets, setTargets, installTo } = useSkillInstallTargets(
     appIds,
@@ -987,12 +990,14 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
               >
                 {t("skills.checkUpdates")}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={controlsDisabled}
-                onSelect={() => void handleOpenRestoreFromBackup()}
-              >
-                {t("skillsPage.moreMenu.restore")}
-              </DropdownMenuItem>
+              {!isRemote && (
+                <DropdownMenuItem
+                  disabled={controlsDisabled}
+                  onSelect={() => void handleOpenRestoreFromBackup()}
+                >
+                  {t("skillsPage.moreMenu.restore")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 disabled={controlsDisabled}
                 onSelect={() => setRepoManagerOpen(true)}
@@ -1477,6 +1482,8 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
               onShowInstalled={showInstalled}
               onOpenRepoManager={() => setRepoManagerOpen(true)}
               onEnableFailures={recordEnableFailures}
+              remoteTargetId={remoteTargetId}
+              remoteContainerId={remoteContainerId}
             />
           </div>
         )}
