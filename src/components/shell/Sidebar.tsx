@@ -98,7 +98,8 @@ export function Sidebar(props: SidebarProps) {
           放侧栏而不是主区，是因为 Windows 上窗口是自绘标题栏
           （decorations:false），主区页头必须贴顶，否则窗口按钮被顶下去；
           侧栏与主区左右并排，零主区占用，且每页常驻。 */}
-      <RemoteTargetRow collapsed={collapsed} />
+      {/* 设置页不显示目标选择器：设置是本地偏好，与选哪台机器无关 */}
+      {!inSettings && <RemoteTargetRow collapsed={collapsed} />}
       {inSettings ? (
         <SettingsDirectory {...props} collapsed={collapsed} />
       ) : (
