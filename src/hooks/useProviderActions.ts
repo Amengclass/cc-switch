@@ -18,12 +18,18 @@ import type {
 import type { OpenClawSuggestedDefaults } from "@/config/openclawProviderPresets";
 import type { ProviderEditorSave } from "@/lib/api/providers";
 import { injectCodingPlanUsageScript } from "@/config/codingPlanProviders";
+import { buildProviderId } from "@/utils/providerId";
 import {
   useAddProviderMutation,
   useUpdateProviderMutation,
   useDeleteProviderMutation,
   useSwitchProviderMutation,
 } from "@/lib/query";
+import {
+  useAddRemoteProviderMutation,
+  useUpdateRemoteProviderMutation,
+  useDeleteRemoteProviderMutation,
+} from "@/lib/query/remoteMutations";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { openclawKeys } from "@/hooks/useOpenClaw";
@@ -31,6 +37,10 @@ import { supportsOfficialProxyTakeover } from "@/utils/providerCapabilities";
 import { getRoutingReason } from "@/utils/routingReason";
 import { logFrontendInfo } from "@/lib/frontendLogger";
 import { saveRemoteUsageScript } from "@/lib/api/remoteUsageScript";
+import {
+  getRemoteOpenClawDefaultModel,
+  setRemoteOpenClawDefaultModel,
+} from "@/lib/api/remote";
 
 /**
  * Hook for managing provider actions (add, update, delete, switch)
@@ -50,6 +60,12 @@ export function useProviderActions(
   const updateProviderMutation = useUpdateProviderMutation(activeApp);
   const deleteProviderMutation = useDeleteProviderMutation(activeApp);
   const switchProviderMutation = useSwitchProviderMutation(activeApp);
+
+  // 远端目标（本补丁层）：add/update/delete 走远端 SSOT，本机 mutation 不参与。
+  // 切换（switch）在 App.tsx 直接走 useSwitchRemoteProviderMutation，不在这里。
+  const addRemoteProviderMutation = useAddRemoteProviderMutation();
+  const updateRemoteProviderMutation = useUpdateRemoteProviderMutation();
+  const deleteRemoteProviderMutation = useDeleteRemoteProviderMutation();
 
   // Claude 插件同步逻辑
   const syncClaudePlugin = useCallback(
@@ -91,6 +107,27 @@ export function useProviderActions(
       },
     ) => {
       const enhanced = injectCodingPlanUsageScript(activeApp, provider);
+
+      // 远端目标：写远端 SSOT（addToLive 语义与后端一致），本机逻辑一字不动。
+      // 后端 add_remote_provider 收的是完整 Provider（含 id），所以这里按本机同一套
+      // id 规则（buildProviderId）先算出 id —— 两端「同一供应商同一 id」。
+      if (remoteTargetId) {
+        const remoteProvider: Provider = {
+          ...enhanced,
+          id: buildProviderId(activeApp, enhanced),
+          createdAt: Date.now(),
+        };
+        delete (remoteProvider as { providerKey?: string }).providerKey;
+        await addRemoteProviderMutation.mutateAsync({
+          hostId: remoteTargetId,
+          app: activeApp,
+          provider: remoteProvider,
+          addToLive: provider.addToLive,
+          container: remoteContainerId,
+        });
+        return;
+      }
+
       await addProviderMutation.mutateAsync(enhanced);
 
       // OpenClaw: register models to allowlist after adding provider
@@ -139,7 +176,15 @@ export function useProviderActions(
         }
       }
     },
-    [addProviderMutation, activeApp, queryClient, t],
+    [
+      addProviderMutation,
+      addRemoteProviderMutation,
+      activeApp,
+      queryClient,
+      t,
+      remoteTargetId,
+      remoteContainerId,
+    ],
   );
 
   // 更新供应商
@@ -149,6 +194,18 @@ export function useProviderActions(
       originalId?: string,
       editorSave?: ProviderEditorSave,
     ) => {
+      // 远端目标：更新远端 SSOT（在生效位置时后端重写远端 live）。
+      if (remoteTargetId) {
+        await updateRemoteProviderMutation.mutateAsync({
+          hostId: remoteTargetId,
+          app: activeApp,
+          provider,
+          originalId,
+          container: remoteContainerId,
+        });
+        return;
+      }
+
       await updateProviderMutation.mutateAsync({
         provider,
         originalId,
@@ -165,7 +222,13 @@ export function useProviderActions(
         );
       }
     },
-    [updateProviderMutation],
+    [
+      updateProviderMutation,
+      updateRemoteProviderMutation,
+      activeApp,
+      remoteTargetId,
+      remoteContainerId,
+    ],
   );
 
   // 切换供应商
@@ -297,9 +360,25 @@ export function useProviderActions(
   // 删除供应商
   const deleteProvider = useCallback(
     async (id: string) => {
+      // 远端目标：删远端 SSOT（additive 且已写 live 时后端同时移除 live）。
+      if (remoteTargetId) {
+        await deleteRemoteProviderMutation.mutateAsync({
+          hostId: remoteTargetId,
+          app: activeApp,
+          providerId: id,
+          container: remoteContainerId,
+        });
+        return;
+      }
       await deleteProviderMutation.mutateAsync(id);
     },
-    [deleteProviderMutation],
+    [
+      deleteProviderMutation,
+      deleteRemoteProviderMutation,
+      activeApp,
+      remoteTargetId,
+      remoteContainerId,
+    ],
   );
 
   // 保存用量脚本
@@ -390,6 +469,46 @@ export function useProviderActions(
 
       try {
         const primary = `${provider.id}/${selectedModel.id}`;
+
+        // 远端目标：默认模型写远端 SSOT（读远端现值 → 合并 primary → 写回）。
+        if (remoteTargetId) {
+          const existingDefault = await getRemoteOpenClawDefaultModel(
+            remoteTargetId,
+            remoteContainerId,
+          );
+          const model: OpenClawDefaultModel = {
+            ...(existingDefault ?? {}),
+            primary,
+          };
+          if (existingDefault?.fallbacks) {
+            model.fallbacks = existingDefault.fallbacks.filter(
+              (fallback) => fallback !== primary,
+            );
+          }
+          await setRemoteOpenClawDefaultModel(
+            remoteTargetId,
+            remoteContainerId,
+            {
+              primary: model.primary,
+              fallbacks: model.fallbacks ?? [],
+            },
+          );
+          await queryClient.invalidateQueries({
+            queryKey: [
+              "remoteOpenclawDefaultModel",
+              remoteTargetId,
+              remoteContainerId ?? "",
+            ],
+          });
+          toast.success(
+            t("notifications.openclawDefaultModelSet", {
+              defaultValue: "已设为默认模型",
+            }),
+            { closeButton: true },
+          );
+          return;
+        }
+
         const existingDefault = await openclawApi.getDefaultModel();
         const model: OpenClawDefaultModel = {
           ...(existingDefault ?? {}),
@@ -423,7 +542,7 @@ export function useProviderActions(
         toast.error(detail);
       }
     },
-    [queryClient, t],
+    [queryClient, t, remoteTargetId, remoteContainerId],
   );
 
   return {
@@ -437,6 +556,9 @@ export function useProviderActions(
       addProviderMutation.isPending ||
       updateProviderMutation.isPending ||
       deleteProviderMutation.isPending ||
-      switchProviderMutation.isPending,
+      switchProviderMutation.isPending ||
+      addRemoteProviderMutation.isPending ||
+      updateRemoteProviderMutation.isPending ||
+      deleteRemoteProviderMutation.isPending,
   };
 }

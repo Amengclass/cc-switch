@@ -10,7 +10,7 @@ import {
   extractErrorMessage,
   translatePiProviderMutationError,
 } from "@/utils/errorUtils";
-import { generateUUID } from "@/utils/uuid";
+import { buildProviderId } from "@/utils/providerId";
 import { openclawKeys } from "@/hooks/useOpenClaw";
 import { invalidateHermesProviderCaches } from "@/hooks/useHermes";
 import { proxyKeys } from "@/lib/query/proxy";
@@ -64,28 +64,7 @@ export const useAddProviderMutation = (appId: AppId) => {
 
       let id: string;
 
-      if (
-        appId === "opencode" ||
-        appId === "openclaw" ||
-        appId === "hermes" ||
-        appId === "pi" ||
-        appId === "mcode"
-      ) {
-        if (
-          providerInput.category === "omo" ||
-          providerInput.category === "omo-slim"
-        ) {
-          const prefix = providerInput.category === "omo" ? "omo" : "omo-slim";
-          id = `${prefix}-${generateUUID()}`;
-        } else {
-          if (!providerInput.providerKey) {
-            throw new Error(`Provider key is required for ${appId}`);
-          }
-          id = providerInput.providerKey;
-        }
-      } else {
-        id = generateUUID();
-      }
+      id = buildProviderId(appId, providerInput);
 
       const newProvider: Provider = {
         ...rest,

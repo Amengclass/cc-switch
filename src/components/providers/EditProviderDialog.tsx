@@ -43,6 +43,8 @@ interface EditProviderDialogProps {
   isCurrent?: boolean;
   /** 从供应商页哪一格打开的，见 ProviderForm 的同名参数 */
   modeView?: AppMode;
+  /** 远端目标（本补丁层）：不读本机 live 预填，直接展示该目标 SSOT 配置 */
+  isRemote?: boolean;
 }
 
 /** 直连时保存当前供应商会写进的配置文件 */
@@ -73,6 +75,7 @@ export function EditProviderDialog({
   isProxyTakeover = false,
   isCurrent = false,
   modeView,
+  isRemote = false,
 }: EditProviderDialogProps) {
   const { t } = useTranslation();
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
@@ -146,6 +149,18 @@ export function EditProviderDialog({
 
       // 关键修复：只在首次打开时加载一次
       if (hasLoadedLive) {
+        return;
+      }
+
+      // 远端目标（本补丁层）：live 预填读的是本机配置文件（getEditorView/getCurrent/
+      // getLiveProvider 全是本机 API），远端下会拿错机器的配置。直接回退到 SSOT
+      // （该目标自己的供应商配置），保存仍按远端路径写远端 SSOT。
+      if (isRemote) {
+        if (!cancelled) {
+          setLiveSettings(null);
+          setEditorView(null);
+          setHasLoadedLive(true);
+        }
         return;
       }
 
@@ -251,7 +266,7 @@ export function EditProviderDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover, isRemote]); // 只依赖 provider.id，不依赖整个 provider 对象
 
   const initialSettingsConfig = useMemo(
     () => liveSettings ?? asRecord(provider?.settingsConfig) ?? {},

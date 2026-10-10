@@ -3,6 +3,7 @@ import { toast } from "@/lib/toast";
 import { useTranslation } from "react-i18next";
 import {
   streamCheckProvider,
+  streamCheckRemoteProvider,
   type StreamCheckResult,
 } from "@/lib/api/connectivity-check";
 import type { AppId } from "@/lib/api";
@@ -14,7 +15,12 @@ import type { AppId } from "@/lib/api";
  * 刻意 **不** 重置故障转移熔断器——可达 ≠ 配置正确，一个端口通但鉴权废的供应商
  * 不应被误判为"健康"而切回线上。熔断器只由真实转发流量驱动（见 proxy/forwarder.rs）。
  */
-export function useStreamCheck(appId: AppId) {
+export function useStreamCheck(
+  appId: AppId,
+  /** 远端目标（本补丁层）：非空时从该目标 SSOT 取供应商探测 */
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const { t } = useTranslation();
   const [checkingIds, setCheckingIds] = useState<Set<string>>(new Set());
 
@@ -26,7 +32,14 @@ export function useStreamCheck(appId: AppId) {
       setCheckingIds((prev) => new Set(prev).add(providerId));
 
       try {
-        const result = await streamCheckProvider(appId, providerId);
+        const result = remoteTargetId
+          ? await streamCheckRemoteProvider(
+              remoteTargetId,
+              appId,
+              providerId,
+              remoteContainerId,
+            )
+          : await streamCheckProvider(appId, providerId);
 
         if (result.status === "operational") {
           toast.success(
@@ -82,7 +95,7 @@ export function useStreamCheck(appId: AppId) {
         });
       }
     },
-    [appId, t],
+    [appId, t, remoteTargetId, remoteContainerId],
   );
 
   const isChecking = useCallback(

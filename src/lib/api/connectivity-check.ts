@@ -27,3 +27,21 @@ export async function streamCheckProvider(
 ): Promise<StreamCheckResult> {
   return invoke("stream_check_provider", { appType, providerId });
 }
+
+/**
+ * 连通性检查（远端目标）：从该目标的 SSOT 取供应商 base_url 探测。
+ * 与本机 streamCheckProvider 同构，只是数据源换成远端。
+ */
+export async function streamCheckRemoteProvider(
+  hostId: string,
+  app: string,
+  providerId: string,
+  container?: string,
+): Promise<StreamCheckResult> {
+  return invoke("stream_check_remote_provider", {
+    hostId,
+    app,
+    providerId,
+    container: container ?? null,
+  });
+}

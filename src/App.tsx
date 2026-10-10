@@ -49,6 +49,7 @@ import {
 import {
   deleteRemoteProvider,
   removeRemoteProviderFromLive,
+  updateRemoteProviderSortOrder,
 } from "@/lib/api/remote";
 import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
@@ -1004,28 +1005,33 @@ function App() {
     ) {
       let liveProviderIds: string[] = [];
       try {
-        liveProviderIds =
-          activeApp === "opencode"
-            ? await queryClient.ensureQueryData({
-                queryKey: ["opencodeLiveProviderIds"],
-                queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-              })
-            : activeApp === "openclaw"
+        // 远端目标：live IDs 直接取远端视图（该目标自己的 live），不读本机。
+        if (isRemoteTarget) {
+          liveProviderIds = remoteProvidersQuery.data?.liveIds ?? [];
+        } else {
+          liveProviderIds =
+            activeApp === "opencode"
               ? await queryClient.ensureQueryData({
-                  queryKey: openclawKeys.liveProviderIds,
-                  queryFn: () => providersApi.getOpenClawLiveProviderIds(),
+                  queryKey: ["opencodeLiveProviderIds"],
+                  queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
                 })
-              : activeApp === "hermes"
+              : activeApp === "openclaw"
                 ? await queryClient.ensureQueryData({
-                    queryKey: hermesKeys.liveProviderIds,
-                    queryFn: () => providersApi.getHermesLiveProviderIds(),
+                    queryKey: openclawKeys.liveProviderIds,
+                    queryFn: () => providersApi.getOpenClawLiveProviderIds(),
                   })
-                : (
-                    await queryClient.ensureQueryData({
-                      queryKey: ["pi", "currentState"],
-                      queryFn: () => piApi.getCurrentState(),
+                : activeApp === "hermes"
+                  ? await queryClient.ensureQueryData({
+                      queryKey: hermesKeys.liveProviderIds,
+                      queryFn: () => providersApi.getHermesLiveProviderIds(),
                     })
-                  ).enabledProviderIds;
+                  : (
+                      await queryClient.ensureQueryData({
+                        queryKey: ["pi", "currentState"],
+                        queryFn: () => piApi.getCurrentState(),
+                      })
+                    ).enabledProviderIds;
+        }
       } catch (error) {
         console.error(
           "[App] Failed to load live provider IDs for duplication",
@@ -1071,7 +1077,16 @@ function App() {
 
       if (updates.length > 0) {
         try {
-          await providersApi.updateSortOrder(updates, activeApp);
+          if (isRemoteTarget) {
+            await updateRemoteProviderSortOrder(
+              remote.remoteTargetId,
+              activeApp,
+              updates,
+              remote.remoteContainerId || undefined,
+            );
+          } else {
+            await providersApi.updateSortOrder(updates, activeApp);
+          }
         } catch (error) {
           console.error("[App] Failed to update sort order", error);
           toast.error(
@@ -1332,7 +1347,9 @@ function App() {
     onDuplicate: handleDuplicateProvider,
     onConfigureUsage: setUsageProvider,
     onOpenWebsite: handleOpenWebsite,
-    onOpenTerminal: activeApp === "claude" ? handleOpenTerminal : undefined,
+    // 打开终端用本机 provider 配置起本地终端；远端目标下无此语义（无远端终端 API），隐藏。
+    onOpenTerminal:
+      activeApp === "claude" && !isRemoteTarget ? handleOpenTerminal : undefined,
     onCreate: () => openAddProvider(currentModeView),
   };
 
@@ -1386,6 +1403,8 @@ function App() {
             currentProviderId={currentProviderId}
             appId={activeApp}
             isLoading={isLoading}
+            remoteTargetId={remote.remoteTargetId || undefined}
+            remoteContainerId={remote.remoteContainerId || undefined}
             onSwitch={(provider) => {
               // 远端目标：写远端 live；本机目标：原有本机切换。
               if (isRemoteTarget) {
@@ -1751,6 +1770,7 @@ function App() {
         isProxyTakeover={isCurrentAppTakeoverActive}
         isCurrent={effectiveEditingProvider?.id === currentProviderId}
         modeView={formModeView}
+        isRemote={isRemoteTarget}
       />
 
       {effectiveUsageProvider && (

@@ -12,9 +12,16 @@ import { toast } from "@/lib/toast";
 import { useTranslation } from "react-i18next";
 import type { Provider } from "@/types";
 import { providersApi, type AppId } from "@/lib/api";
+import { updateRemoteProviderSortOrder } from "@/lib/api/remote";
 import { isProxyAppId } from "@/config/appConfig";
 
-export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
+export function useDragSort(
+  providers: Record<string, Provider>,
+  appId: AppId,
+  /** 远端目标（本补丁层）：非空时排序写远端 SSOT，不写本机 DB */
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   const { t, i18n } = useTranslation();
 
@@ -76,24 +83,42 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
       }));
 
       try {
-        await providersApi.updateSortOrder(updates, appId);
-        await queryClient.invalidateQueries({
-          queryKey: ["providers", appId],
-        });
-
-        // Routing apps derive failover order from sort_index.
-        if (isProxyAppId(appId)) {
+        if (remoteTargetId) {
+          // 远端目标：排序写远端 SSOT；invalid 远端视图缓存重新拉取。
+          await updateRemoteProviderSortOrder(
+            remoteTargetId,
+            appId,
+            updates,
+            remoteContainerId || undefined,
+          );
           await queryClient.invalidateQueries({
-            queryKey: ["failoverQueue", appId],
+            queryKey: [
+              "remoteProviders",
+              remoteTargetId,
+              remoteContainerId || "__host__",
+              appId,
+            ],
           });
-        }
+        } else {
+          await providersApi.updateSortOrder(updates, appId);
+          await queryClient.invalidateQueries({
+            queryKey: ["providers", appId],
+          });
 
-        // 更新托盘菜单以反映新的排序（失败不影响主操作）
-        try {
-          await providersApi.updateTrayMenu();
-        } catch (trayError) {
-          console.error("Failed to update tray menu after sort", trayError);
-          // 托盘菜单更新失败不影响排序成功
+          // Routing apps derive failover order from sort_index.
+          if (isProxyAppId(appId)) {
+            await queryClient.invalidateQueries({
+              queryKey: ["failoverQueue", appId],
+            });
+          }
+
+          // 更新托盘菜单以反映新的排序（失败不影响主操作）
+          try {
+            await providersApi.updateTrayMenu();
+          } catch (trayError) {
+            console.error("Failed to update tray menu after sort", trayError);
+            // 托盘菜单更新失败不影响排序成功
+          }
         }
 
         toast.success(
@@ -111,7 +136,7 @@ export function useDragSort(providers: Record<string, Provider>, appId: AppId) {
         );
       }
     },
-    [sortedProviders, appId, queryClient, t],
+    [sortedProviders, appId, queryClient, t, remoteTargetId, remoteContainerId],
   );
 
   return {

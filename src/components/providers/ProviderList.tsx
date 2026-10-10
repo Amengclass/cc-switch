@@ -78,6 +78,9 @@ interface ProviderListProps {
   /** 切换式应用必传：按模式 tab 算卡片 */
   switchMode?: SwitchModeProps;
   isLoading?: boolean;
+  /** 远端目标（本补丁层）：非空时拖拽排序写远端 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export function ProviderList({
@@ -98,12 +101,20 @@ export function ProviderList({
   onSetAsDefault,
   switchMode,
   isLoading = false,
+  remoteTargetId,
+  remoteContainerId,
 }: ProviderListProps) {
   const { t } = useTranslation();
-  const { checkProvider, isChecking } = useStreamCheck(appId);
+  const { checkProvider, isChecking } = useStreamCheck(
+    appId,
+    remoteTargetId,
+    remoteContainerId,
+  );
   const { sortedProviders, sensors, handleDragEnd } = useDragSort(
     providers,
     appId,
+    remoteTargetId,
+    remoteContainerId,
   );
 
   const { data: opencodeLiveIds, isPending: isOpencodeLiveIdsPending } =

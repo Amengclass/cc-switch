@@ -284,13 +284,10 @@ export function useRemoteTarget({
     }
     let active = true;
     const container = remoteContainerId || undefined;
-    getRemoteCurrentProvider(remoteTargetId, sharedFeatureApp, container)
-      .then((id) => {
-        if (active) setRemoteCurrentProviderId(id);
-      })
-      .catch(() => {
-        if (active) setRemoteCurrentProviderId(null);
-      });
+    // 注：这里**不再**单独调 getRemoteCurrentProvider —— 供应商页的
+    // useRemoteProvidersQuery 已经带回 currentProviderId（同一份数据），
+    // 额外一次 SSH 往返纯属浪费（切目标时的延迟来源之一）。remoteCurrentProviderId
+    // 状态保留（下方 refreshInstallStatus 仍写），但切目标的这条快路径省掉一次连接。
     checkRemoteCliInstalled(remoteTargetId, sharedFeatureApp, container)
       .then((s) => {
         if (active) setRemoteInstalled(s);
