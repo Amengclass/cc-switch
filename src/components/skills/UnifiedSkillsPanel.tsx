@@ -129,6 +129,10 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
   // 远端目标：备份/恢复是本机操作（备份存本机 ~/.cc-switch/skill-backups），
   // 远端下隐藏这些入口。
   const isRemote = Boolean(remoteTargetId);
+  // 「导入已有」的措辞随目标变：本机 / 远端
+  const scopeLabel = t(isRemote ? "common.remoteScope" : "common.localScope", {
+    defaultValue: isRemote ? "远端" : "本机",
+  });
   const appIds = useVisibleAppIds(SKILLS_APP_IDS);
   const { targets, setTargets, installTo } = useSkillInstallTargets(
     appIds,
@@ -964,7 +968,9 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
                 {t("skillsPage.addMenu.zip")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void handleOpenImport()}>
-                <span className="flex-1">{t("skillsPage.addMenu.import")}</span>
+                <span className="flex-1">
+                  {t("skillsPage.addMenu.import", { scope: scopeLabel })}
+                </span>
                 {nUnmanaged > 0 && <NeutralBadge>{nUnmanaged}</NeutralBadge>}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1093,7 +1099,9 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
       return (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-10 pb-12 text-center">
           <h2 className="m-0 text-section">{t("skillsPage.emptyTitle")}</h2>
-          <p className="m-0 text-body text-fg-2">{t("skillsPage.emptyBody")}</p>
+          <p className="m-0 text-body text-fg-2">
+            {t("skillsPage.emptyBody", { scope: scopeLabel })}
+          </p>
           <div className="mt-2 flex gap-2">
             <Button
               type="button"
@@ -1111,8 +1119,11 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
               onClick={() => void handleOpenImport()}
             >
               {nUnmanaged
-                ? t("skillsPage.importCount", { count: nUnmanaged })
-                : t("skillsPage.addMenu.import")}
+                ? t("skillsPage.importCount", {
+                    count: nUnmanaged,
+                    scope: scopeLabel,
+                  })
+                : t("skillsPage.addMenu.import", { scope: scopeLabel })}
             </Button>
           </div>
         </div>
@@ -1661,6 +1672,7 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
           isImporting={importMutation.isPending}
           onImport={(imports) => void handleImport(imports)}
           onClose={() => setImportOpen(false)}
+          scope={scopeLabel}
         />
       )}
 

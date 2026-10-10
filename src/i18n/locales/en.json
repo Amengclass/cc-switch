@@ -4,6 +4,8 @@
     "description": "All-in-One Assistant for Claude Code, Codex & Gemini CLI"
   },
   "common": {
+    "localScope": "this computer",
+    "remoteScope": "the remote host",
     "unsavedLeaveTitle": "Unsaved changes",
     "unsavedLeaveMessage": "If you leave, the changes on this editor page will not be saved.",
     "unsavedLeaveConfirm": "Discard and leave",
@@ -4487,7 +4489,7 @@
     "addMenu": {
       "discover": "Browse in Discover",
       "zip": "Install from ZIP",
-      "import": "Import from this computer"
+      "import": "Import from this {{scope}}"
     },
     "moreMenu": {
       "restore": "Restore from backup",
@@ -4545,9 +4547,9 @@
     "clearFilters": "Clear filters",
     "loadFailed": "Couldn't load installed Skills",
     "emptyTitle": "No Skills yet",
-    "emptyBody": "Install one from Discover, or import Skills already on this computer.",
+    "emptyBody": "Install one from Discover, or import Skills already on this {{scope}}.",
     "goDiscover": "Go to Discover",
-    "importCount": "Import from this computer ({{count}})",
+    "importCount": "Import from this {{scope}} ({{count}})",
     "confirm": {
       "uninstallOne": "Uninstall {{name}}?",
       "uninstallMany": "Uninstall {{count}} Skills?",
@@ -4617,8 +4619,8 @@
       "readFailed": "Read failed"
     },
     "import": {
-      "title": "Import Skills from this computer",
-      "helpTitle": "What counts as already on this computer",
+      "title": "Import Skills from this {{scope}}",
+      "helpTitle": "What counts as already on this {{scope}}",
       "help": "Folders that contain a SKILL.md but aren't managed by CC Switch yet.",
       "lead": "Importing copies them into CC Switch's folder; the original files stay as they are.",
       "searchPlaceholder": "Search name or location",

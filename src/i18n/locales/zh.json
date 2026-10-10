@@ -4,6 +4,8 @@
     "description": "Claude Code / Codex / Gemini CLI 全方位辅助工具"
   },
   "common": {
+    "localScope": "本机",
+    "remoteScope": "远端",
     "unsavedLeaveTitle": "有未保存的修改",
     "unsavedLeaveMessage": "离开后，当前编辑页里的修改不会保存。",
     "unsavedLeaveConfirm": "放弃修改并离开",
@@ -4487,7 +4489,7 @@
     "addMenu": {
       "discover": "在发现里浏览",
       "zip": "从 ZIP 安装",
-      "import": "导入本机已有"
+      "import": "导入{{scope}}已有"
     },
     "moreMenu": {
       "restore": "从备份恢复",
@@ -4545,9 +4547,9 @@
     "clearFilters": "清除筛选",
     "loadFailed": "读取已安装的 Skill 失败",
     "emptyTitle": "还没有 Skill",
-    "emptyBody": "从发现里安装，或者导入本机已有的 Skill。",
+    "emptyBody": "从发现里安装，或者导入{{scope}}已有的 Skill。",
     "goDiscover": "去发现",
-    "importCount": "导入本机已有（{{count}}）",
+    "importCount": "导入{{scope}}已有（{{count}}）",
     "confirm": {
       "uninstallOne": "卸载 {{name}}？",
       "uninstallMany": "卸载 {{count}} 个 Skill？",
@@ -4617,8 +4619,8 @@
       "readFailed": "读取失败"
     },
     "import": {
-      "title": "导入本机已有的 Skill",
-      "helpTitle": "哪些算本机已有",
+      "title": "导入{{scope}}已有的 Skill",
+      "helpTitle": "哪些算{{scope}}已有",
       "help": "有 SKILL.md、但还不归 CC Switch 管理的目录。",
       "lead": "导入会复制一份到 CC Switch 的目录，原来的文件不动。",
       "searchPlaceholder": "搜索名称或位置",

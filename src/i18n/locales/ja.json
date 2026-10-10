@@ -4,6 +4,8 @@
     "description": "Claude Code・Codex・Gemini CLI のためのオールインワンアシスタント"
   },
   "common": {
+    "localScope": "このコンピューター",
+    "remoteScope": "リモートホスト",
     "unsavedLeaveTitle": "未保存の変更があります",
     "unsavedLeaveMessage": "移動すると、この編集ページの変更は保存されません。",
     "unsavedLeaveConfirm": "破棄して移動",
@@ -4487,7 +4489,7 @@
     "addMenu": {
       "discover": "「見つける」で探す",
       "zip": "ZIP からインストール",
-      "import": "このコンピューターから取り込む"
+      "import": "この{{scope}}から取り込む"
     },
     "moreMenu": {
       "restore": "バックアップから復元",
@@ -4545,9 +4547,9 @@
     "clearFilters": "絞り込みを解除",
     "loadFailed": "インストール済みの Skill を読み込めませんでした",
     "emptyTitle": "Skill はまだありません",
-    "emptyBody": "「見つける」からインストールするか、このコンピューターにある Skill を取り込みましょう。",
+    "emptyBody": "「見つける」からインストールするか、この{{scope}}にある Skill を取り込みましょう。",
     "goDiscover": "「見つける」へ",
-    "importCount": "このコンピューターから取り込む（{{count}}）",
+    "importCount": "この{{scope}}から取り込む（{{count}}）",
     "confirm": {
       "uninstallOne": "{{name}} をアンインストールしますか？",
       "uninstallMany": "{{count}} 件の Skill をアンインストールしますか？",
@@ -4617,7 +4619,7 @@
       "readFailed": "読み込み失敗"
     },
     "import": {
-      "title": "このコンピューターの Skill を取り込む",
+      "title": "この{{scope}}の Skill を取り込む",
       "helpTitle": "対象になるもの",
       "help": "SKILL.md があり、まだ CC Switch が管理していないフォルダーです。",
       "lead": "取り込むと CC Switch のフォルダーにコピーします。元のファイルはそのままです。",

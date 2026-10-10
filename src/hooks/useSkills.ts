@@ -458,10 +458,13 @@ export function useImportSkillsFromApps(
           .filter(([, on]) => on)
           .map(([app]) => app);
         const firstApp = enabledApps[0] ?? "claude";
+        // 传「目录名」不是显示名：后端 import_remote_skill_local 把 name 当
+        // directory 用（dest = ssot/{name}，skills.json 记 directory: name）。
+        // 扫描时 managed 也按目录名比对，传显示名会导致目录名对不上 → 重复显示。
         const record = await importRemoteSkill(
           remoteTargetId,
           found.path,
-          found.name,
+          found.directory,
           remoteContainerId,
           firstApp,
         );

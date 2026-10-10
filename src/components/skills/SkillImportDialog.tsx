@@ -20,18 +20,21 @@ interface SkillImportDialogProps {
   isImporting: boolean;
   onImport: (imports: ImportSkillSelection[]) => void;
   onClose: () => void;
+  /** 措辞里的作用域：本机 / 远端 */
+  scope?: string;
 }
 
 const isAppId = (value: string): value is AppId =>
   (SKILLS_APP_IDS as string[]).includes(value);
 
-/** 「导入本机已有…」（宽 560）：选目录 + 选导入后在哪些应用启用。 */
+/** 「导入已有…」（宽 560）：选目录 + 选导入后在哪些应用启用。 */
 export function SkillImportDialog({
   skills,
   visibleAppIds,
   isImporting,
   onImport,
   onClose,
+  scope,
 }: SkillImportDialogProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -117,9 +120,9 @@ export function SkillImportDialog({
       <div className="flex shrink-0 flex-col gap-1">
         <div className="flex items-center gap-0.5">
           <DialogTitle className="text-section">
-            {t("skillsPage.import.title")}
+            {t("skillsPage.import.title", { scope })}
           </DialogTitle>
-          <HelpTip title={t("skillsPage.import.helpTitle")}>
+          <HelpTip title={t("skillsPage.import.helpTitle", { scope })}>
             {t("skillsPage.import.help")}
           </HelpTip>
         </div>
