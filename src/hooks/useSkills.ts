@@ -20,6 +20,7 @@ import {
   bulkToggleRemoteSkillApp,
   checkRemoteSkillUpdates,
   deleteRemoteSkill,
+  importRemoteSkill,
   installRemoteSkillFromDiscoverable,
   installRemoteSkillsFromZip,
   listRemoteSkills,
@@ -434,10 +435,49 @@ export function useImportSkillsFromApps(
   const queryClient = useQueryClient();
   const key = installedKey(remoteTargetId, remoteContainerId);
   return useMutation({
-    mutationFn: (imports: ImportSkillSelection[]) =>
-      remoteTargetId
-        ? Promise.resolve([] as InstalledSkill[])
-        : skillsApi.importFromApps(imports),
+    mutationFn: async (
+      imports: ImportSkillSelection[],
+    ): Promise<InstalledSkill[]> => {
+      if (!remoteTargetId) {
+        return skillsApi.importFromApps(imports);
+      }
+      // 远端：先扫未管理技能拿到完整路径，再逐个导入到远端 SSOT，
+      // 其余启用的 app 用 toggle 补上（import_remote_skill 只收单个 app）。
+      const unmanaged = await scanRemoteUnmanagedSkills(
+        remoteTargetId,
+        remoteContainerId,
+      );
+      const byDir = new Map(unmanaged.map((s) => [s.directory, s]));
+      const imported: InstalledSkill[] = [];
+      for (const sel of imports) {
+        const found = byDir.get(sel.directory);
+        if (!found) continue;
+        const enabledApps = (
+          Object.entries(sel.apps) as Array<[string, boolean]>
+        )
+          .filter(([, on]) => on)
+          .map(([app]) => app);
+        const firstApp = enabledApps[0] ?? "claude";
+        const record = await importRemoteSkill(
+          remoteTargetId,
+          found.path,
+          found.name,
+          remoteContainerId,
+          firstApp,
+        );
+        for (const app of enabledApps.slice(1)) {
+          await toggleRemoteSkillApp(
+            remoteTargetId,
+            record.directory,
+            app,
+            true,
+            remoteContainerId,
+          );
+        }
+        imported.push(remoteToInstalled({ ...record, path: "" }));
+      }
+      return imported;
+    },
     onSuccess: (importedSkills) => {
       queryClient.setQueryData<InstalledSkill[]>(key, (oldData) =>
         mergeImportedSkills(oldData, importedSkills),
