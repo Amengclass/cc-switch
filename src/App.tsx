@@ -1366,7 +1366,19 @@ function App() {
           currentProviderId={currentProviderId}
           isLoading={isLoading}
           scrollRef={providerScrollContainerRef}
-          onSwitch={switchProvider}
+          onSwitch={(provider) => {
+            // 远端目标：写远端 live（与本机目标下的 ProviderList.onSwitch 同款分流）。
+            if (isRemoteTarget) {
+              switchRemoteProvider.mutate({
+                hostId: remote.remoteTargetId,
+                providerId: provider.id,
+                app: activeApp,
+                container: remote.remoteContainerId || undefined,
+              });
+              return;
+            }
+            void switchProvider(provider);
+          }}
           onOpenRoutingSettings={() => openSettings("routing")}
           needsRouteRequest={
             trayNeedsRoute?.app === proxyAppId ? trayNeedsRoute : undefined
@@ -1379,6 +1391,8 @@ function App() {
               list.filter((failure) => failure.appType !== proxyAppId),
             )
           }
+          remoteTargetId={remote.remoteTargetId || undefined}
+          remoteContainerId={remote.remoteContainerId || undefined}
           {...listCallbacks}
         />
       );

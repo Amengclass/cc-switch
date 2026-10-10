@@ -8,6 +8,7 @@ import type { ProxyAppId } from "@/config/appConfig";
 import { isStackAppId } from "@/config/appConfig";
 import { settingsApi } from "@/lib/api";
 import { providersApi } from "@/lib/api/providers";
+import { updateRemoteProviderSortOrder } from "@/lib/api/remote";
 import { proxyApi } from "@/lib/api/proxy";
 import { useSettingsQuery } from "@/lib/query";
 import {
@@ -68,6 +69,9 @@ interface SwitchModePanelProps extends ListCallbacks {
   onNeedsRouteHandled?: () => void;
   /** 正在看的那格变了：新增 / 编辑供应商按它选表单布局。需要是稳定的回调 */
   onViewChange?: (app: ProxyAppId, view: AppMode) => void;
+  /** 远端目标（本补丁层）：非空时队列排序写远端 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 /** Gemini CLI、Grok Build 没有聚合模式（Q6）：那一格隐藏，前两格位置不变。 */
@@ -91,6 +95,8 @@ export function SwitchModePanel({
   needsRouteRequest,
   onNeedsRouteHandled,
   onViewChange,
+  remoteTargetId,
+  remoteContainerId,
   ...listCallbacks
 }: SwitchModePanelProps) {
   const { t } = useTranslation();
@@ -188,14 +194,33 @@ export function SwitchModePanel({
       )
       .sort((a, b) => a - b);
     try {
-      await providersApi.updateSortOrder(
-        order.map((id, i) => ({ id, sortIndex: slots[i] })),
-        app,
-      );
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["failoverQueue", app] }),
-        queryClient.invalidateQueries({ queryKey: ["providers", app] }),
-      ]);
+      const sortUpdates = order.map((id, i) => ({ id, sortIndex: slots[i] }));
+      if (remoteTargetId) {
+        // 远端目标：队列顺序 = 远端 SSOT 的排序，写远端。
+        await updateRemoteProviderSortOrder(
+          remoteTargetId,
+          app,
+          sortUpdates,
+          remoteContainerId || undefined,
+        );
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["failoverQueue", app] }),
+          queryClient.invalidateQueries({
+            queryKey: [
+              "remoteProviders",
+              remoteTargetId,
+              remoteContainerId || "__host__",
+              app,
+            ],
+          }),
+        ]);
+      } else {
+        await providersApi.updateSortOrder(sortUpdates, app);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["failoverQueue", app] }),
+          queryClient.invalidateQueries({ queryKey: ["providers", app] }),
+        ]);
+      }
       toast.success(
         t("mode.queueMoved", { name: provider.name, position: target + 1 }),
       );

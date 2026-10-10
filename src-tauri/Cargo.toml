@@ -131,6 +131,12 @@ opt-level = "s"
 panic = "unwind"
 strip = "symbols"
 
+# dev 构建：主 crate 体量大，默认 debuginfo=2 时 rustc/LLVM 峰值内存过高，
+# 16G 机器上会 OOM（rustc-LLVM ERROR: out of memory / STATUS_STACK_BUFFER_OVERRUN）。
+# line-tables-only 保留行号（panic hook 的 backtrace 仍可读），但大幅降低 codegen 内存。
+[profile.dev]
+debug = "line-tables-only"
+
 [dev-dependencies]
 serial_test = "3"
 tempfile = "3"
