@@ -160,7 +160,10 @@ const UnifiedMcpPanel: React.FC<UnifiedMcpPanelProps> = ({
     remoteTargetId,
     remoteContainerId,
   );
-  const resyncMutation = useResyncMcpToApps();
+  const resyncMutation = useResyncMcpToApps(
+    remoteTargetId,
+    remoteContainerId,
+  );
 
   const mutationPending =
     toggleAppMutation.isPending ||

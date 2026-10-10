@@ -5,11 +5,13 @@ import {
   deleteRemoteMcpServer,
   importRemoteMcpFromApps,
   readRemoteMcpServers,
+  reprojectRemoteMcpForApp,
   toggleRemoteMcpApp,
   upsertRemoteMcpServer,
 } from "@/lib/api/remote";
 import type { McpServer, McpServersMap } from "@/types";
 import type { AppId } from "@/lib/api/types";
+import { MCP_APP_IDS } from "@/config/appConfig";
 import { runSequentialBulkAction } from "@/lib/utils/sequentialBulkAction";
 
 // 本补丁层：远端目标（SSH 主机 / Docker 容器）下，MCP 数据源切到该目标自己的
@@ -192,14 +194,33 @@ export function useDeleteMcpServer(
 
 /**
  * 按这里的开关把 MCP 重新写进各应用的配置（不传 apps＝全部受管应用），逐应用返回结果
- * 远端/容器模式无本地 DB，不支持重同步。
+ * 远端/容器模式：重投影该目标各 app 的 live 配置。
  */
-export function useResyncMcpToApps() {
+export function useResyncMcpToApps(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (apps?: AppId[]) => mcpApi.resyncToApps(apps),
+    mutationFn: async (apps?: AppId[]) => {
+      if (remoteTargetId) {
+        // 远端：对每个 app 重投影 live（后端一次 SSH 连接内完成）
+        const targetApps = apps ?? (MCP_APP_IDS as AppId[]);
+        for (const app of targetApps) {
+          await reprojectRemoteMcpForApp(
+            remoteTargetId,
+            app,
+            remoteContainerId,
+          );
+        }
+        return targetApps.map((app) => ({ app, ok: true }));
+      }
+      return mcpApi.resyncToApps(apps);
+    },
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["mcp", "all"] }),
+      queryClient.invalidateQueries({
+        queryKey: ["mcp", "remote", remoteTargetId, remoteContainerId ?? "__host__"],
+      }),
   });
 }
 

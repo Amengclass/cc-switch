@@ -1832,6 +1832,7 @@ pub fn run() {
             remote::commands::read_remote_mcp_json,
             remote::commands::upsert_remote_mcp_server,
             remote::commands::delete_remote_mcp_server,
+            remote::commands::reproject_remote_mcp_for_app,
             remote::commands::toggle_remote_mcp_app,
             remote::commands::bulk_toggle_remote_mcp_app,
             remote::commands::import_remote_mcp_from_apps,

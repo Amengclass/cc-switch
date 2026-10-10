@@ -599,6 +599,19 @@ export async function importRemoteMcpFromApps(
   });
 }
 
+/** 重投影指定 app 的远端 live 配置（对齐本机 resyncToApps 的单 app 语义） */
+export async function reprojectRemoteMcpForApp(
+  hostId: string,
+  app: string,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("reproject_remote_mcp_for_app", {
+    hostId,
+    app,
+    container: container ?? null,
+  });
+}
+
 /** 读取远端 live 提示词文件内容（文件缺失返回空字符串；app 缺省 claude 兼容） */
 export async function readRemotePrompt(
   hostId: string,

@@ -2059,6 +2059,25 @@ pub async fn delete_remote_mcp_server(
     crate::remote::mcp::delete_remote_mcp_server(&target, &host.default_home(), &id).await
 }
 
+/// 重投影指定 app 的远端 live 配置（对齐本机 resyncToApps 的单 app 语义）。
+#[tauri::command]
+pub async fn reproject_remote_mcp_for_app(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::mcp::reproject_remote_mcp_for_app(&target, &host.default_home(), &app).await
+}
+
 /// 切换远端 MCP 服务器在指定 app 的启用状态（改 SSOT + 同步/移除该 app live）。
 #[tauri::command]
 pub async fn toggle_remote_mcp_app(
