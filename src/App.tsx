@@ -55,8 +55,7 @@ import { TargetBreadcrumb } from "@/components/remote/TargetBreadcrumb";
 import { RemoteTargetContext } from "@/components/remote/RemoteTargetContext";
 import { RemoteHostsPanel } from "@/components/remote/RemoteHostsPanel";
 import { BatchApplyPanel } from "@/components/remote/BatchApplyPanel";
-// RemoteRouteToggle（远端路由接管开关）暂不接：官方 v4.0.4 对路由态有新样式，
-// 需要先评估适配方式，再决定这个开关放在哪 / 长什么样。
+import { RemoteRouteToggle } from "@/components/proxy/RemoteRouteToggle";
 import { useLastValidValue } from "@/hooks/useLastValidValue";
 import {
   extractErrorMessage,
@@ -1281,6 +1280,43 @@ function App() {
               <ExternalLink className="h-3.5 w-3.5" />
             </Button>
           )}
+          {/* 远端目标 + 可路由应用：页头放「走本机路由」开关（远端接管）。
+              这是远端路由的入口——开 = 该目标的 app 经 SSH 反向隧道走本机代理；
+              与本机目标的模式 tab（直连/路由/聚合）是两套概念，远端下不显示后者。 */}
+          {currentView === "providers" &&
+            isRemoteTarget &&
+            (activeApp === "claude" ||
+              activeApp === "codex" ||
+              activeApp === "gemini" ||
+              activeApp === "grokbuild") && (
+              <RemoteRouteToggle
+                container={Boolean(remote.remoteContainerId)}
+                host={remote.servers.find(
+                  (s) => s.id === remote.remoteTargetId,
+                )}
+                activeApp={activeApp}
+                appForApi={sharedFeatureApp}
+                containerId={remote.remoteContainerId || undefined}
+                onUpdated={(h) => {
+                  remote.setServers((prev) =>
+                    prev.map((s) => (s.id === h.id ? h : s)),
+                  );
+                  void queryClient.invalidateQueries({
+                    queryKey: [
+                      "remoteProviders",
+                      h.id,
+                      remote.remoteContainerId || "__host__",
+                      activeApp,
+                    ],
+                  });
+                }}
+                onHostRefreshed={(h) => {
+                  remote.setServers((prev) =>
+                    prev.map((s) => (s.id === h.id ? h : s)),
+                  );
+                }}
+              />
+            )}
           {currentView === "providers" && (
             <Button
               variant="solid"
@@ -1354,7 +1390,10 @@ function App() {
   };
 
   const renderProviderList = () => {
-    if (proxyAppId) {
+    // 远端目标：不显示本机的模式 tab（直连/路由/聚合）——那是「本机代理接管」的概念，
+    // 远端下对应的是页头的「走本机路由」开关（RemoteRouteToggle）。远端下走普通
+    // ProviderList（列表 + 切换/编辑/删除/排序，全部已按目标分流）。
+    if (proxyAppId && !isRemoteTarget) {
       const startupFailure = startupFailures.find(
         (failure) => failure.appType === proxyAppId,
       );
