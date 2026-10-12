@@ -74,6 +74,8 @@ interface SwitchModePanelProps extends ListCallbacks {
   remoteContainerId?: string;
   /** 远端目标下该 app 的「走本机路由」接管开关状态（routeProxyEnabled） */
   remoteRouteEnabled?: boolean;
+  /** 远端目标下的 live 供应商 ID 集合（additive 按钮态用） */
+  remoteLiveIds?: string[];
 }
 
 /** Gemini CLI、Grok Build 没有聚合模式（Q6）：那一格隐藏，前两格位置不变。 */
@@ -100,6 +102,7 @@ export function SwitchModePanel({
   remoteTargetId,
   remoteContainerId,
   remoteRouteEnabled = false,
+  remoteLiveIds,
   ...listCallbacks
 }: SwitchModePanelProps) {
   const { t } = useTranslation();
@@ -120,8 +123,14 @@ export function SwitchModePanel({
     : modeView && modes.includes(modeView.mode)
       ? modeView.mode
       : "direct";
-  const directId = modeView?.directProviderId ?? null;
-  const routeId = modeView?.routeProviderId ?? null;
+  // 远端目标：本机模式状态（modeView）不适用，directId/routeId 用该目标的当前供应商
+  // —— 远端下「当前供应商」就是生效那家（直连=它，路由=它经隧道），供卡片高亮/删除禁用判定。
+  const directId = remoteTargetId
+    ? currentProviderId || null
+    : (modeView?.directProviderId ?? null);
+  const routeId = remoteTargetId
+    ? currentProviderId || null
+    : (modeView?.routeProviderId ?? null);
 
   // 离开页面再回来、或生效的模式变了，一律落在生效的那格（「查看中」不持久化）
   const [view, setView] = useState<AppMode>(active);
@@ -316,12 +325,8 @@ export function SwitchModePanel({
   };
 
   // 状态行：只在看生效的那格时显示；路由只写目标，不写本机地址和端口
-  // 远端目标：路由目标 = 该远端 app 的当前供应商（currentProviderId）。
-  const routeTarget = remoteTargetId
-    ? nameOf(currentProviderId || null)
-    : failoverOn
-      ? t("mode.status.byQueue")
-      : nameOf(routeId);
+  // 远端目标：routeId 已 = 当前供应商，直接用（failoverOn 远端恒 false）。
+  const routeTarget = failoverOn ? t("mode.status.byQueue") : nameOf(routeId);
   const otherMembers = (stack?.members ?? []).filter(
     (member) => member.providerId !== routeId,
   );
@@ -589,6 +594,9 @@ export function SwitchModePanel({
           currentProviderId={currentProviderId}
           appId={app}
           isLoading={isLoading}
+          remoteTargetId={remoteTargetId}
+          remoteContainerId={remoteContainerId}
+          remoteLiveIds={remoteLiveIds}
           onSwitch={(provider) => void onSwitch(provider)}
           switchMode={switchMode}
         />

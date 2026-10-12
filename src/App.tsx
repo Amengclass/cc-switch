@@ -1396,6 +1396,9 @@ function App() {
           remoteRouteEnabled={
             remoteProvidersQuery.data?.routeProxyEnabled ?? false
           }
+          remoteLiveIds={
+            isRemoteTarget ? remoteProvidersQuery.data?.liveIds : undefined
+          }
           {...listCallbacks}
         />
       );
@@ -1422,6 +1425,9 @@ function App() {
             isLoading={isLoading}
             remoteTargetId={remote.remoteTargetId || undefined}
             remoteContainerId={remote.remoteContainerId || undefined}
+            remoteLiveIds={
+              isRemoteTarget ? remoteProvidersQuery.data?.liveIds : undefined
+            }
             onSwitch={(provider) => {
               // 远端目标：写远端 live；本机目标：原有本机切换。
               if (isRemoteTarget) {

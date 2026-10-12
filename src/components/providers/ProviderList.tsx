@@ -81,6 +81,8 @@ interface ProviderListProps {
   /** 远端目标（本补丁层）：非空时拖拽排序写远端 SSOT */
   remoteTargetId?: string;
   remoteContainerId?: string;
+  /** 远端目标下的 live 供应商 ID 集合（来自 get_remote_providers，additive 按钮态用） */
+  remoteLiveIds?: string[];
 }
 
 export function ProviderList({
@@ -103,6 +105,7 @@ export function ProviderList({
   isLoading = false,
   remoteTargetId,
   remoteContainerId,
+  remoteLiveIds,
 }: ProviderListProps) {
   const { t } = useTranslation();
   const { checkProvider, isChecking } = useStreamCheck(
@@ -121,15 +124,19 @@ export function ProviderList({
     useQuery({
       queryKey: ["opencodeLiveProviderIds"],
       queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-      enabled: appId === "opencode",
+      // 远端目标：live ID 集来自 get_remote_providers 返回（remoteLiveIds prop），
+      // 不跑本机查询（per-target 独立，本机查询会读到错误数据）。
+      enabled: appId === "opencode" && !remoteTargetId,
     });
   const { data: openclawLiveIds, isPending: isOpenclawLiveIdsPending } =
-    useOpenClawLiveProviderIds(appId === "openclaw");
+    useOpenClawLiveProviderIds(appId === "openclaw" && !remoteTargetId);
   const { data: hermesLiveIds, isPending: isHermesLiveIdsPending } =
-    useHermesLiveProviderIds(appId === "hermes");
-  const { data: hermesModelConfig } = useHermesModelConfig(appId === "hermes");
+    useHermesLiveProviderIds(appId === "hermes" && !remoteTargetId);
+  const { data: hermesModelConfig } = useHermesModelConfig(
+    appId === "hermes" && !remoteTargetId,
+  );
   const { data: openclawDefaultModel } = useOpenClawDefaultModel(
-    appId === "openclaw",
+    appId === "openclaw" && !remoteTargetId,
   );
   const isOpenCode = appId === "opencode";
   const { data: currentOmoId } = useCurrentOmoProviderId(isOpenCode);
@@ -153,15 +160,18 @@ export function ProviderList({
 
   const isInConfig = useCallback(
     (provider: Provider): boolean => {
+      // 远端目标：additive 应用的 live ID 集来自远端视图（remoteLiveIds），
+      // 不读本机 live 查询（那些在远端下被 enabled:false 关掉了）。
+      const liveIds = remoteTargetId ? (remoteLiveIds ?? []) : undefined;
       switch (appId) {
         case "mcode":
           return provider.meta?.liveConfigManaged === true;
         case "opencode":
-          return opencodeLiveIds?.includes(provider.id) ?? false;
+          return (liveIds ?? opencodeLiveIds)?.includes(provider.id) ?? false;
         case "openclaw":
-          return openclawLiveIds?.includes(provider.id) ?? false;
+          return (liveIds ?? openclawLiveIds)?.includes(provider.id) ?? false;
         case "hermes":
-          return hermesLiveIds?.includes(provider.id) ?? false;
+          return (liveIds ?? hermesLiveIds)?.includes(provider.id) ?? false;
         case "pi":
           return isPiStateReady
             ? (piCurrentState?.enabledProviderIds.includes(provider.id) ??
@@ -173,6 +183,8 @@ export function ProviderList({
     },
     [
       appId,
+      remoteTargetId,
+      remoteLiveIds,
       opencodeLiveIds,
       openclawLiveIds,
       hermesLiveIds,
