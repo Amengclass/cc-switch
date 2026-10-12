@@ -69,9 +69,11 @@ interface SwitchModePanelProps extends ListCallbacks {
   onNeedsRouteHandled?: () => void;
   /** 正在看的那格变了：新增 / 编辑供应商按它选表单布局。需要是稳定的回调 */
   onViewChange?: (app: ProxyAppId, view: AppMode) => void;
-  /** 远端目标（本补丁层）：非空时队列排序写远端 SSOT */
+  /** 远端目标（本补丁层）：非空时模式/队列走远端路由接管 API */
   remoteTargetId?: string;
   remoteContainerId?: string;
+  /** 远端目标下该 app 的「走本机路由」接管开关状态（routeProxyEnabled） */
+  remoteRouteEnabled?: boolean;
 }
 
 /** Gemini CLI、Grok Build 没有聚合模式（Q6）：那一格隐藏，前两格位置不变。 */
@@ -97,16 +99,27 @@ export function SwitchModePanel({
   onViewChange,
   remoteTargetId,
   remoteContainerId,
+  remoteRouteEnabled = false,
   ...listCallbacks
 }: SwitchModePanelProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const appName = APP_DISPLAY_NAME[app];
-  const modes = modesFor(app);
+  // 远端目标：只有直连 / 路由两格（stack 是本地 codex 专属概念，远端不适用）。
+  const modes: AppMode[] = remoteTargetId
+    ? ["direct", "route"]
+    : modesFor(app);
 
-  const { data: modeView } = useAppMode(app);
-  const active: AppMode =
-    modeView && modes.includes(modeView.mode) ? modeView.mode : "direct";
+  const { data: modeView } = useAppMode(app, !remoteTargetId);
+  // 远端目标：模式由该目标的「走本机路由」接管开关决定（routeProxyEnabled）——
+  // 开 = route（请求经 SSH 反向隧道走本机代理），关 = direct。远端无 stack 概念。
+  const active: AppMode = remoteTargetId
+    ? remoteRouteEnabled
+      ? "route"
+      : "direct"
+    : modeView && modes.includes(modeView.mode)
+      ? modeView.mode
+      : "direct";
   const directId = modeView?.directProviderId ?? null;
   const routeId = modeView?.routeProviderId ?? null;
 
@@ -130,7 +143,7 @@ export function SwitchModePanel({
   const { data: stack } = useProxyStack(app, isStackAppId(app));
   const setStackMember = useSetProxyStackMember();
   const adoptCatalog = useAdoptCodexStackCatalog();
-  const modeActions = useModeActions(app);
+  const modeActions = useModeActions(app, remoteTargetId, remoteContainerId);
 
   const [dialog, setDialog] = useState<ModeDialogState | null>(null);
   const [routeSettingsOpen, setRouteSettingsOpen] = useState(false);
@@ -251,9 +264,10 @@ export function SwitchModePanel({
     view,
     directId,
     routeId,
-    failoverOn,
-    queue: queueIds,
-    stackMembers,
+    // 远端目标：无本地故障转移队列 / 聚合概念，一律关掉（卡片不显示队列/聚合操作）。
+    failoverOn: remoteTargetId ? false : failoverOn,
+    queue: remoteTargetId ? [] : queueIds,
+    stackMembers: remoteTargetId ? new Map<string, number>() : stackMembers,
     serviceRunning,
     routingReason: (provider: Provider) =>
       getRoutingReason(app, provider, t) ?? "",
@@ -268,12 +282,17 @@ export function SwitchModePanel({
       exitAndUse,
       routeTo: (provider: Provider) => void onSwitch(provider),
       queueAdd: (provider: Provider) =>
-        addToQueue.mutate({ appType: app, providerId: provider.id }),
+        remoteTargetId
+          ? undefined
+          : addToQueue.mutate({ appType: app, providerId: provider.id }),
       queueRemove: (provider: Provider) =>
-        removeFromQueue.mutate({ appType: app, providerId: provider.id }),
+        remoteTargetId
+          ? undefined
+          : removeFromQueue.mutate({ appType: app, providerId: provider.id }),
       queueMove: (provider: Provider, delta: -1 | 1) =>
-        void queueMove(provider, delta),
+        remoteTargetId ? undefined : void queueMove(provider, delta),
       stackAdd: (provider: Provider) => {
+        if (remoteTargetId) return;
         setStackMember.mutate({
           appType: app,
           providerId: provider.id,
@@ -281,6 +300,7 @@ export function SwitchModePanel({
         });
       },
       stackRemove: (provider: Provider) => {
+        if (remoteTargetId) return;
         setStackMember.mutate({
           appType: app,
           providerId: provider.id,
@@ -296,7 +316,12 @@ export function SwitchModePanel({
   };
 
   // 状态行：只在看生效的那格时显示；路由只写目标，不写本机地址和端口
-  const routeTarget = failoverOn ? t("mode.status.byQueue") : nameOf(routeId);
+  // 远端目标：路由目标 = 该远端 app 的当前供应商（currentProviderId）。
+  const routeTarget = remoteTargetId
+    ? nameOf(currentProviderId || null)
+    : failoverOn
+      ? t("mode.status.byQueue")
+      : nameOf(routeId);
   const otherMembers = (stack?.members ?? []).filter(
     (member) => member.providerId !== routeId,
   );
@@ -534,7 +559,7 @@ export function SwitchModePanel({
         onView={setView}
         status={status}
         failover={
-          view === "route" && active === "route"
+          !remoteTargetId && view === "route" && active === "route"
             ? {
                 enabled: failoverOn,
                 disabled: setFailover.isPending,
@@ -543,7 +568,7 @@ export function SwitchModePanel({
             : undefined
         }
         onOpenRouteSettings={
-          view === "route" && active === "route"
+          !remoteTargetId && view === "route" && active === "route"
             ? () => setRouteSettingsOpen(true)
             : undefined
         }

@@ -1393,6 +1393,9 @@ function App() {
           }
           remoteTargetId={remote.remoteTargetId || undefined}
           remoteContainerId={remote.remoteContainerId || undefined}
+          remoteRouteEnabled={
+            remoteProvidersQuery.data?.routeProxyEnabled ?? false
+          }
           {...listCallbacks}
         />
       );
