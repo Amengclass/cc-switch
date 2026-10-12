@@ -147,6 +147,65 @@ impl RequestContext {
                 )
             }
             None => {
+                // 远端接管路由：请求 auth 头带 `PROXY_MANAGED:<host_id>[:<container>]`
+                // → 来自远端隧道。按**该目标器（宿主机/容器）自己**存的当前供应商配置路由
+                // （解耦：不依赖本机当前供应商，也不与同主机的其他容器串台）。
+                // 找不到/解析失败：**不回退本机路由**（远端请求路由到本机供应商是错的），
+                // 明确告警，请求走 NoAvailableProvider 错误路径（用户能即时发现）。
+                let remote_source =
+                    crate::proxy::remote_route::detect_remote_source_from_headers(headers);
+                if let Some(remote) = remote_source {
+                    let provider_config = crate::remote::current::get_current_provider_config(
+                        &state.db,
+                        &remote.host_id,
+                        Some(&remote.container),
+                        app_type_str,
+                    );
+                    if let Ok(Some(config_json)) = provider_config {
+                        if let Ok(remote_provider) =
+                            serde_json::from_str::<crate::provider::Provider>(&config_json)
+                        {
+                            log::info!(
+                                "[{}] 远端路由：host={} container={:?} → provider={}",
+                                tag,
+                                remote.host_id,
+                                if remote.container.is_empty() {
+                                    None
+                                } else {
+                                    Some(&remote.container)
+                                },
+                                remote_provider.name
+                            );
+                            let request_model = body
+                                .get("model")
+                                .and_then(|m| m.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            // 单家、不故障转移（该目标器自己的当前供应商就是唯一路由目标）。
+                            app_config.auto_failover_enabled = false;
+                            return Ok(Self {
+                                start_time,
+                                app_config,
+                                rectifier_config,
+                                optimizer_config,
+                                copilot_optimizer_config,
+                                provider: remote_provider.clone(),
+                                providers: vec![remote_provider.clone()],
+                                current_provider_id: remote_provider.id.clone(),
+                                request_model,
+                                outbound_model: None,
+                                tag,
+                                app_type_str,
+                                app_type,
+                                session_id,
+                                session_client_provided: session_result.client_provided,
+                                is_stack,
+                            });
+                        }
+                    }
+                    return Err(ProxyError::NoAvailableProvider);
+                }
+
                 let current_provider = crate::mode::current::provider_in_use(&state.db, &app_type)
                     .ok()
                     .flatten();

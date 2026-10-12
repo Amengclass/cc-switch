@@ -374,8 +374,13 @@ export async function removeRemoteProviderFromLive(
 export async function clearRemoteProviderRecord(
   hostId: string,
   app: string,
+  container?: string,
 ): Promise<void> {
-  return invoke("clear_remote_provider_record", { hostId, app });
+  return invoke("clear_remote_provider_record", {
+    hostId,
+    app,
+    container: container ?? null,
+  });
 }
 
 /** 扫描远端 shell 配置中的冲突环境变量 */

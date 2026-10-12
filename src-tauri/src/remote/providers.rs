@@ -754,17 +754,19 @@ pub async fn apply_remote_provider_to_live(
                     e.insert(
                         "ANTHROPIC_AUTH_TOKEN".to_string(),
                         serde_json::json!(crate::proxy::remote_route::remote_token_for(
-                            session.host_id()
+                            session.host_id(),
+                            container
                         )),
                     );
                 }
             }
 
-            // prev = 该远端上「上一次写进去的那家」：direct_patch 据此删掉它带进来的
+            // prev = 该**目标器**上「上一次写进去的那家」：direct_patch 据此删掉它带进来的
             // 独有键（与本机 switch_to 的 prev 语义一致）。取不到（首次写入）按无 prev。
             let prev_provider = crate::remote::current::get_current_provider_config(
                 db,
                 session.host_id(),
+                container,
                 "claude",
             )
             .ok()

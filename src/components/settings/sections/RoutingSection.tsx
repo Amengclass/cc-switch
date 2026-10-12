@@ -31,11 +31,16 @@ import {
   SettingsSwitchRow,
 } from "@/components/settings/SettingsLayout";
 import type { AppMode } from "@/types/proxy";
+import type { RemoteHost } from "@/types/remote";
 import { cn } from "@/lib/utils";
 
 interface RoutingSectionProps {
   /** 「前往」打开这个应用的供应商页 */
   onOpenApp: (app: AppId) => void;
+  /** 「前往」打开这个应用在**指定远端目标**的供应商页（本机行复用 onOpenApp） */
+  onOpenAppOnTarget: (app: AppId, targetId: string, containerId?: string) => void;
+  /** 远端主机列表（含各宿主/容器的路由开关），用于列出远端路由态 */
+  remoteServers?: RemoteHost[];
 }
 
 const isValidListenAddress = (address: string): boolean => {
@@ -65,7 +70,11 @@ function formatUptime(seconds: number, t: TFunction) {
  * 设置 → 本地路由（v7）：服务（状态、统计、启停、监听地址、请求日志）→ 正在使用路由的应用
  * → 全部回到直连 → 故障转移参数 → 整流与优化。进出路由在各应用页的模式 tab 里。
  */
-export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
+export function RoutingSection({
+  onOpenApp,
+  onOpenAppOnTarget,
+  remoteServers,
+}: RoutingSectionProps) {
   const { t } = useTranslation();
   const { data: status } = useProxyStatusQuery();
   const running = status?.running ?? false;
@@ -105,15 +114,82 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
     ? providerNeedsRouting("claude-desktop", desktopCurrent)
     : false;
 
-  const usingApps = PROXY_APP_IDS.flatMap((app, index) => {
+  // 「正在使用路由的应用」条目。
+  // - 本机：模式 tab 非直连（claude/codex/gemini/grokbuild）
+  // - 远端宿主机：routeProxyApps[app] === true
+  // - 远端容器：routeProxyContainerApps[容器][app] === true（各自独立）
+  // 每行带目标标识；点「前往」跳到该目标（本机走 onOpenApp，远端走 onOpenAppOnTarget）。
+  type UsingEntry = {
+    key: string;
+    app: AppId;
+    modeLabel: string;
+    dotClass: string;
+    detail: string;
+    targetId?: string;
+    containerId?: string;
+  };
+  const localApps: UsingEntry[] = PROXY_APP_IDS.flatMap((app, index) => {
     const view = modeQueries[index]?.data;
     if (!view || view.mode === "direct") return [];
     const routeName =
       (view.routeProviderId &&
         providerQueries[app]?.providers[view.routeProviderId]?.name) ||
       "—";
-    return [{ app, mode: view.mode as AppMode, routeName }];
+    return [
+      {
+        key: `local-${app}`,
+        app,
+        modeLabel: t(`mode.names.${view.mode}`),
+        dotClass: MODE_TONE[view.mode as AppMode].dot,
+        detail:
+          view.mode === "stack"
+            ? t("routingSettings.stackDetail", { name: routeName })
+            : t("routingSettings.routeDetail", { name: routeName }),
+      },
+    ];
   });
+  const remoteApps: UsingEntry[] = (remoteServers ?? []).flatMap((host) => {
+    const hostTargetId = host.id;
+    const entries: UsingEntry[] = [];
+    // 宿主机×app
+    for (const app of PROXY_APP_IDS as readonly string[]) {
+      if (host.routeProxyApps?.[app] === true) {
+        entries.push({
+          key: `remote-${host.id}-host-${app}`,
+          app: app as AppId,
+          modeLabel: t("routingSettings.remoteRoute"),
+          dotClass: "bg-route",
+          detail: t("routingSettings.remoteRouteDetail", {
+            target: host.name,
+          }),
+          targetId: hostTargetId,
+        });
+      }
+    }
+    // 容器×app（每个容器各自独立开关）
+    for (const [containerName, apps] of Object.entries(
+      host.routeProxyContainerApps ?? {},
+    )) {
+      for (const app of PROXY_APP_IDS as readonly string[]) {
+        if (apps[app] === true) {
+          entries.push({
+            key: `remote-${host.id}-cont-${containerName}-${app}`,
+            app: app as AppId,
+            modeLabel: t("routingSettings.remoteRoute"),
+            dotClass: "bg-route",
+            detail: t("routingSettings.remoteRouteContainerDetail", {
+              target: host.name,
+              container: containerName,
+            }),
+            targetId: hostTargetId,
+            containerId: containerName,
+          });
+        }
+      }
+    }
+    return entries;
+  });
+  const usingApps: UsingEntry[] = [...localApps, ...remoteApps];
   const usingCount = usingApps.length + (desktopMapping ? 1 : 0);
 
   const saveListen = async () => {
@@ -312,18 +388,23 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
           </div>
         ) : (
           <SettingsCard>
-            {usingApps.map(({ app, mode, routeName }) => (
+            {usingApps.map((entry) => (
               <UsingAppRow
-                key={app}
-                app={app}
-                modeLabel={t(`mode.names.${mode}`)}
-                dotClass={MODE_TONE[mode].dot}
-                detail={
-                  mode === "stack"
-                    ? t("routingSettings.stackDetail", { name: routeName })
-                    : t("routingSettings.routeDetail", { name: routeName })
+                key={entry.key}
+                app={entry.app}
+                modeLabel={entry.modeLabel}
+                dotClass={entry.dotClass}
+                detail={entry.detail}
+                onOpen={
+                  entry.targetId
+                    ? () =>
+                        onOpenAppOnTarget(
+                          entry.app,
+                          entry.targetId!,
+                          entry.containerId,
+                        )
+                    : () => onOpenApp(entry.app)
                 }
-                onOpen={() => onOpenApp(app)}
               />
             ))}
             {desktopMapping && desktopCurrent && (

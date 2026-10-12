@@ -69,6 +69,10 @@ interface SettingsPageProps {
   onOpenApps: () => void;
   /** 本地路由 →「正在使用路由的应用」的「前往」 */
   onOpenApp: (app: AppId) => void;
+  /** 本地路由 → 远端行的「前往」（带目标跳转，本补丁层） */
+  onOpenAppOnTarget?: (app: AppId, targetId?: string, containerId?: string) => void;
+  /** 远端主机列表（含路由开关，展示远端路由态，本补丁层） */
+  remoteServers?: import("@/types/remote").RemoteHost[];
   /** 远端（本补丁层）：功能总开关 + 自动读入当前配置 */
   remoteFeatureEnabled?: boolean;
   onRemoteFeatureEnabledChange?: (next: boolean) => void;
@@ -85,6 +89,8 @@ export function SettingsPage({
   onImportSuccess,
   onOpenApps,
   onOpenApp,
+  onOpenAppOnTarget,
+  remoteServers,
   remoteFeatureEnabled,
   onRemoteFeatureEnabledChange,
   remoteAutoImportDefault,
@@ -259,7 +265,13 @@ export function SettingsPage({
           />
         );
       case "routing":
-        return <RoutingSection onOpenApp={onOpenApp} />;
+        return (
+          <RoutingSection
+            onOpenApp={onOpenApp}
+            onOpenAppOnTarget={onOpenAppOnTarget ?? (() => {})}
+            remoteServers={remoteServers}
+          />
+        );
       case "network":
         return (
           <SettingsBlock

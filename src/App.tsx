@@ -722,6 +722,20 @@ function App() {
     setCurrentView("providers");
   };
 
+  // 「前往」带远端目标：设置页路由状态行（本机/远端）点跳转时，同时设目标 + 切 app。
+  const selectAppOnTarget = (app: AppId, targetId?: string, containerId?: string) => {
+    if (managementBusyRef.current) return;
+    if (confirmLeave(() => selectAppOnTarget(app, targetId, containerId))) return;
+    closeProviderPanels();
+    if (targetId) {
+      remote.setRemoteTargetId(targetId);
+      remote.setRemoteContainerId(containerId ?? "");
+    }
+    setActiveApp(app);
+    localStorage.setItem(APP_STORAGE_KEY, app);
+    setCurrentView("providers");
+  };
+
   const openPage = (page: GlobalPage | "settings") => {
     if (page === "settings") {
       openSettings("general");
@@ -1679,6 +1693,8 @@ function App() {
           onImportSuccess={handleImportSuccess}
           onOpenApps={() => setCurrentView("apps")}
           onOpenApp={selectApp}
+          onOpenAppOnTarget={selectAppOnTarget}
+          remoteServers={remote.servers}
           remoteFeatureEnabled={remote.remoteFeatureEnabled}
           onRemoteFeatureEnabledChange={remote.handleRemoteFeatureEnabledChange}
           remoteAutoImportDefault={remote.autoImportDefault}
