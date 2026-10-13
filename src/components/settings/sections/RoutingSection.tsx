@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { ChevronRight, Loader2 } from "lucide-react";
 import type { AppId } from "@/lib/api";
@@ -41,6 +41,8 @@ interface RoutingSectionProps {
   onOpenAppOnTarget: (app: AppId, targetId: string, containerId?: string) => void;
   /** 远端主机列表（含各宿主/容器的路由开关），用于列出远端路由态 */
   remoteServers?: RemoteHost[];
+  /** 「全部回到直连」成功后回调：让上层刷新远端主机列表（本机状态已由 mutation 失效） */
+  onExitAllDone?: () => void;
 }
 
 const isValidListenAddress = (address: string): boolean => {
@@ -74,8 +76,10 @@ export function RoutingSection({
   onOpenApp,
   onOpenAppOnTarget,
   remoteServers,
+  onExitAllDone,
 }: RoutingSectionProps) {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const { data: status } = useProxyStatusQuery();
   const running = status?.running ?? false;
   const { startProxyServer, stopProxyServer, stopWithRestore, isPending } =
@@ -474,7 +478,27 @@ export function RoutingSection({
         confirmText={t("routingSettings.exitAllConfirm")}
         onConfirm={() => {
           setConfirmExitAll(false);
-          void stopWithRestore();
+          // 远端涉及 SSH（每台目标器一次往返），整步要几秒：先弹持久 loading toast，
+          // 让用户看到「正在处理」，跑完再撤（成功/失败 toast 由 mutation 弹）。
+          toast.loading(
+            t("routingSettings.exitingAll", {
+              defaultValue: "正在让所有应用回到直连，请稍候…",
+            }),
+            { id: "route-exit-all", duration: Infinity },
+          );
+          void stopWithRestore()
+            .then(() => {
+              // 远端半场已由后端一并关闭，前端要把远端路由态刷新掉：
+              // ① 失效所有远端供应商视图（远端页模式 tab 的 routeProxyEnabled）；
+              // ② 回调让 App 重拉主机列表（设置页「正在路由的应用」远端行 + 各页开关）。
+              void queryClient.invalidateQueries({
+                queryKey: ["remoteProviders"],
+              });
+              onExitAllDone?.();
+            })
+            .finally(() => {
+              toast.dismiss("route-exit-all");
+            });
         }}
         onCancel={() => setConfirmExitAll(false)}
       />

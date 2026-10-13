@@ -4255,6 +4255,7 @@
     "remoteRouteContainerDetail": "{{target}} container {{container}} via local proxy",
     "goTo": "Open",
     "exitAll": "Switch all back to direct",
+    "exitingAll": "Switching all apps back to direct, please wait…",
     "exitAllTitle": "Switch every app back to direct?",
     "exitAllMessage": "Apps in routing or Aggregation mode get their direct config written back, then the routing service stops. Route targets, queues and aggregation lists are kept.",
     "exitAllConfirm": "Switch all back to direct",

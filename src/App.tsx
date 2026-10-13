@@ -1695,6 +1695,11 @@ function App() {
           onOpenApp={selectApp}
           onOpenAppOnTarget={selectAppOnTarget}
           remoteServers={remote.servers}
+          onExitAllDone={() => {
+            // 「全部回到直连」后端已把远端路由开关全关：重拉主机列表，
+            // 让设置页远端行 / 各页「走本机路由」开关 / 模式 tab 归位到直连。
+            void remote.refreshServers();
+          }}
           remoteFeatureEnabled={remote.remoteFeatureEnabled}
           onRemoteFeatureEnabledChange={remote.handleRemoteFeatureEnabledChange}
           remoteAutoImportDefault={remote.autoImportDefault}

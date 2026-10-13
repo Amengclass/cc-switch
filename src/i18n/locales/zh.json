@@ -4255,6 +4255,7 @@
     "remoteRouteContainerDetail": "「{{target}} 容器 {{container}}」经本机代理",
     "goTo": "前往",
     "exitAll": "全部回到直连",
+    "exitingAll": "正在让所有应用回到直连，请稍候…",
     "exitAllTitle": "让所有应用回到直连？",
     "exitAllMessage": "在路由和聚合模式下的应用都会写回直连配置，然后停止路由服务。路由目标、队列和聚合名单会保留。",
     "exitAllConfirm": "全部回到直连",

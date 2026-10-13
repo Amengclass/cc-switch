@@ -4255,6 +4255,7 @@
     "remoteRouteContainerDetail": "「{{target}} コンテナ {{container}}」はローカルプロキシ経由",
     "goTo": "開く",
     "exitAll": "すべて直接接続に戻す",
+    "exitingAll": "すべてのアプリを直接接続に戻しています。しばらくお待ちください…",
     "exitAllTitle": "すべてのアプリを直接接続に戻しますか？",
     "exitAllMessage": "ルーティング・集約モードのアプリに直接接続の設定を書き戻し、ルーティングサービスを停止します。転送先・キュー・集約のリストは保持されます。",
     "exitAllConfirm": "すべて直接接続に戻す",

@@ -73,6 +73,8 @@ interface SettingsPageProps {
   onOpenAppOnTarget?: (app: AppId, targetId?: string, containerId?: string) => void;
   /** 远端主机列表（含路由开关，展示远端路由态，本补丁层） */
   remoteServers?: import("@/types/remote").RemoteHost[];
+  /** 「全部回到直连」成功后回调：刷新远端主机列表（本补丁层） */
+  onExitAllDone?: () => void;
   /** 远端（本补丁层）：功能总开关 + 自动读入当前配置 */
   remoteFeatureEnabled?: boolean;
   onRemoteFeatureEnabledChange?: (next: boolean) => void;
@@ -91,6 +93,7 @@ export function SettingsPage({
   onOpenApp,
   onOpenAppOnTarget,
   remoteServers,
+  onExitAllDone,
   remoteFeatureEnabled,
   onRemoteFeatureEnabledChange,
   remoteAutoImportDefault,
@@ -270,6 +273,7 @@ export function SettingsPage({
             onOpenApp={onOpenApp}
             onOpenAppOnTarget={onOpenAppOnTarget ?? (() => {})}
             remoteServers={remoteServers}
+            onExitAllDone={onExitAllDone}
           />
         );
       case "network":
