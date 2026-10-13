@@ -25,11 +25,10 @@ export function Toaster() {
           title: "text-body font-medium",
           description: "text-caption text-fg-2",
           // 状态靠图标颜色区分：成功绿、失败红、警告琥珀、提示灰
-          icon: "flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4",
-          // loading 转圈走 sonner 单独的 `loader` 槽（不是 `icon`）：不加约束它会按自身
-          // 默认尺寸渲染，与文字不在一水平线。给同一套尺寸 + 居中，和 icon 对齐。
-          loader:
-            "flex h-4 w-4 shrink-0 items-center justify-center text-fg-2 [&>svg]:h-4 [&>svg]:w-4",
+          // 必须带 `relative`：sonner 的 loading 转圈（.sonner-loading-wrapper）是
+          // `position:absolute; inset:0`，靠 styled 模式下 [data-icon] 自带的 relative 定位。
+          // unstyled:true 下没有那条规则，转圈会跑到整个 toast 上、与文字错位；这里补上。
+          icon: "relative flex h-4 w-4 shrink-0 items-center justify-center [&>svg]:h-4 [&>svg]:w-4",
           success: "[&_[data-icon]]:text-success",
           error: "[&_[data-icon]]:text-danger",
           warning: "[&_[data-icon]]:text-warning",
