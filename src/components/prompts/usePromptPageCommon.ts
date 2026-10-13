@@ -9,7 +9,7 @@ import type { PromptMoreItem } from "./PromptPageFrame";
 import { copyText, promptFileName, showPromptToast } from "./promptUtils";
 
 /** 提示词页公用：目标文件位置、写完刷新别处的缓存、复制到其他应用。 */
-export function usePromptPageCommon(appId: AppId) {
+export function usePromptPageCommon(appId: AppId, isRemote = false) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const location = usePromptFileLocationQuery(appId);
@@ -23,33 +23,38 @@ export function usePromptPageCommon(appId: AppId) {
   const moreItems = (
     importItem: PromptMoreItem,
     copyPath: { label: string; path: string | undefined },
-  ): PromptMoreItem[] => [
-    importItem,
-    {
-      key: "open-folder",
-      label: t("prompts.openFolder"),
-      onSelect: () => {
-        settingsApi.openConfigFolder(appId).catch((error: unknown) => {
-          toast.error(t("prompts.openFolderFailed"), {
-            description: extractErrorMessage(error) || undefined,
+  ): PromptMoreItem[] => {
+    // 远端目标：文件在本机之外，「打开所在文件夹」「复制路径」都指向本机路径，
+    // 没有意义 —— 只保留导入项。
+    if (isRemote) return [importItem];
+    return [
+      importItem,
+      {
+        key: "open-folder",
+        label: t("prompts.openFolder"),
+        onSelect: () => {
+          settingsApi.openConfigFolder(appId).catch((error: unknown) => {
+            toast.error(t("prompts.openFolderFailed"), {
+              description: extractErrorMessage(error) || undefined,
+            });
           });
-        });
+        },
       },
-    },
-    {
-      key: "copy-path",
-      label: copyPath.label,
-      onSelect: () => {
-        const path = copyPath.path;
-        if (!path) return;
-        void copyText(path).then((ok) => {
-          if (ok)
-            showPromptToast(t, { title: t("prompts.copiedPath", { path }) });
-          else toast.error(t("prompts.copyFailed"));
-        });
+      {
+        key: "copy-path",
+        label: copyPath.label,
+        onSelect: () => {
+          const path = copyPath.path;
+          if (!path) return;
+          void copyText(path).then((ok) => {
+            if (ok)
+              showPromptToast(t, { title: t("prompts.copiedPath", { path }) });
+            else toast.error(t("prompts.copyFailed"));
+          });
+        },
       },
-    },
-  ];
+    ];
+  };
 
   return { location, fileName, displayPath, invalidate, moreItems };
 }

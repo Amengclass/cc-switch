@@ -40,6 +40,14 @@ import {
   type PiPromptTemplate,
 } from "@/lib/api/prompts";
 import {
+  deleteRemotePiPromptFile,
+  deleteRemotePiPromptTemplate,
+  getRemotePiPromptFile,
+  listRemotePiPromptTemplates,
+  replaceRemotePiPromptFile,
+  upsertRemotePiPromptTemplate,
+} from "@/lib/api/remote";
+import {
   getPiPromptTemplateDescription,
   getPiPromptTemplateSummary,
   setPiPromptTemplateDescription,
@@ -83,17 +91,124 @@ const EDITABLE_FILES: Array<{
   },
 ];
 
-const promptFileKey = (kind: EditablePiPromptFileKind) =>
-  ["pi", "promptFile", kind] as const;
+/** 远端目标上下文：remoteTargetId 非空时 Pi 提示词资源读写该目标机器（本补丁层）。 */
+export interface PiPromptRemoteCtx {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}
+const remoteOf = (ctx?: PiPromptRemoteCtx): string | undefined =>
+  ctx?.remoteTargetId;
 
-export const promptTemplatesKey = ["pi", "promptTemplates"] as const;
+const promptFileKey = (
+  kind: EditablePiPromptFileKind,
+  ctx?: PiPromptRemoteCtx,
+) =>
+  remoteOf(ctx)
+    ? ([
+        "pi",
+        "promptFile",
+        "remote",
+        ctx!.remoteTargetId,
+        ctx!.remoteContainerId ?? "__host__",
+        kind,
+      ] as const)
+    : (["pi", "promptFile", kind] as const);
+
+const promptTemplatesKey = (ctx?: PiPromptRemoteCtx) =>
+  remoteOf(ctx)
+    ? ([
+        "pi",
+        "promptTemplates",
+        "remote",
+        ctx!.remoteTargetId,
+        ctx!.remoteContainerId ?? "__host__",
+      ] as const)
+    : (["pi", "promptTemplates"] as const);
+
 /** 编辑页保存用的 mutation key：页面据此在保存进行中锁住导航 */
 export const PI_PROMPT_SAVE_MUTATION_KEY = ["pi", "promptSave"] as const;
 
-export function usePiPromptTemplatesQuery() {
+/** Pi 提示词资源的远端感知数据访问：按当前目标分流到该目标的命令。 */
+const piPromptApi = {
+  getFile: (kind: PiPromptFileKind, ctx?: PiPromptRemoteCtx) =>
+    remoteOf(ctx)
+      ? getRemotePiPromptFile(
+          ctx!.remoteTargetId!,
+          kind,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.getPiPromptFile(kind),
+  replaceFile: (
+    kind: PiPromptFileKind,
+    revision: string,
+    content: string,
+    ctx?: PiPromptRemoteCtx,
+  ) =>
+    remoteOf(ctx)
+      ? replaceRemotePiPromptFile(
+          ctx!.remoteTargetId!,
+          kind,
+          revision,
+          content,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.replacePiPromptFile(kind, revision, content),
+  deleteFile: (
+    kind: PiPromptFileKind,
+    revision: string,
+    ctx?: PiPromptRemoteCtx,
+  ) =>
+    remoteOf(ctx)
+      ? deleteRemotePiPromptFile(
+          ctx!.remoteTargetId!,
+          kind,
+          revision,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.deletePiPromptFile(kind, revision),
+  listTemplates: (ctx?: PiPromptRemoteCtx) =>
+    remoteOf(ctx)
+      ? listRemotePiPromptTemplates(
+          ctx!.remoteTargetId!,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.listPiPromptTemplates(),
+  upsertTemplate: (
+    slug: string,
+    revision: string,
+    content: string,
+    originalSlug: string | undefined,
+    ctx?: PiPromptRemoteCtx,
+  ) =>
+    remoteOf(ctx)
+      ? upsertRemotePiPromptTemplate(
+          ctx!.remoteTargetId!,
+          slug,
+          revision,
+          content,
+          originalSlug,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.upsertPiPromptTemplate(slug, revision, content, originalSlug),
+  deleteTemplate: (
+    slug: string,
+    revision: string,
+    ctx?: PiPromptRemoteCtx,
+  ) =>
+    remoteOf(ctx)
+      ? deleteRemotePiPromptTemplate(
+          ctx!.remoteTargetId!,
+          slug,
+          revision,
+          ctx!.remoteContainerId || undefined,
+        )
+      : promptsApi.deletePiPromptTemplate(slug, revision),
+};
+
+export function usePiPromptTemplatesQuery(ctx?: PiPromptRemoteCtx) {
   return useQuery({
-    queryKey: promptTemplatesKey,
-    queryFn: () => promptsApi.listPiPromptTemplates(),
+    queryKey: promptTemplatesKey(ctx),
+    queryFn: () => piPromptApi.listTemplates(ctx),
   });
 }
 
@@ -144,11 +259,13 @@ function PiInstructionFileEditor({
   snapshot,
   onClose,
   onDelete,
+  ctx,
 }: {
   file: (typeof EDITABLE_FILES)[number];
   snapshot: PiPromptFileSnapshot;
   onClose: () => void;
   onDelete: (snapshot: PiPromptFileSnapshot) => void;
+  ctx?: PiPromptRemoteCtx;
 }) {
   const { t } = useTranslation();
   const baseId = useId();
@@ -158,12 +275,12 @@ function PiInstructionFileEditor({
   const [attempted, setAttempted] = useState(false);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
-  const queryKey = promptFileKey(file.kind);
+  const queryKey = promptFileKey(file.kind, ctx);
 
   const save = useMutation({
     mutationKey: PI_PROMPT_SAVE_MUTATION_KEY,
     mutationFn: () =>
-      promptsApi.replacePiPromptFile(file.kind, baseSnapshot.revision, draft),
+      piPromptApi.replaceFile(file.kind, baseSnapshot.revision, draft, ctx),
     onSuccess: (nextSnapshot) => {
       queryClient.setQueryData<PiPromptFileSnapshot>(queryKey, nextSnapshot);
       showPromptToast(t, {
@@ -331,18 +448,18 @@ function PiInstructionFileEditor({
 }
 
 /** Pi · 系统提示：两个固定文件，文件存在就生效，不加启用开关（Pi 规范 §5）。 */
-export function PiSystemPromptFiles() {
+export function PiSystemPromptFiles(ctx?: PiPromptRemoteCtx) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<EditablePiPromptFileKind | null>(null);
   const files = [
     useQuery({
-      queryKey: promptFileKey("system_append"),
-      queryFn: () => promptsApi.getPiPromptFile("system_append"),
+      queryKey: promptFileKey("system_append", ctx),
+      queryFn: () => piPromptApi.getFile("system_append", ctx),
     }),
     useQuery({
-      queryKey: promptFileKey("system_override"),
-      queryFn: () => promptsApi.getPiPromptFile("system_override"),
+      queryKey: promptFileKey("system_override", ctx),
+      queryFn: () => piPromptApi.getFile("system_override", ctx),
     }),
   ];
 
@@ -354,11 +471,13 @@ export function PiSystemPromptFiles() {
     }: {
       kind: EditablePiPromptFileKind;
       snapshot: PiPromptFileSnapshot;
-    }) => promptsApi.deletePiPromptFile(kind, snapshot.revision),
+    }) => piPromptApi.deleteFile(kind, snapshot.revision, ctx),
     onSuccess: async (_removed, { kind, snapshot }) => {
       const file = EDITABLE_FILES.find((item) => item.kind === kind)!;
       setEditing(null);
-      await queryClient.invalidateQueries({ queryKey: promptFileKey(kind) });
+      await queryClient.invalidateQueries({
+        queryKey: promptFileKey(kind, ctx),
+      });
       const blank = !snapshot.content.trim();
       showPromptToast(t, {
         title: t(
@@ -375,20 +494,23 @@ export function PiSystemPromptFiles() {
         onUndo: blank
           ? undefined
           : async () => {
-              await promptsApi.replacePiPromptFile(
+              await piPromptApi.replaceFile(
                 kind,
                 "missing",
                 snapshot.content,
+                ctx,
               );
               await queryClient.invalidateQueries({
-                queryKey: promptFileKey(kind),
+                queryKey: promptFileKey(kind, ctx),
               });
             },
       });
     },
     onError: async (error, { kind }) => {
       showMutationError(error, t("pi.prompts.deleteFailed"));
-      await queryClient.invalidateQueries({ queryKey: promptFileKey(kind) });
+      await queryClient.invalidateQueries({
+        queryKey: promptFileKey(kind, ctx),
+      });
     },
   });
 
@@ -492,6 +614,7 @@ export function PiSystemPromptFiles() {
                 onDelete={(snapshot) =>
                   remove.mutate({ kind: file.kind, snapshot })
                 }
+                ctx={ctx}
               />
             ) : null}
           </li>
@@ -508,6 +631,7 @@ interface PiPromptTemplateEditorProps {
   existingSlugs: Set<string>;
   onClose: () => void;
   onChanged: () => Promise<void>;
+  ctx?: PiPromptRemoteCtx;
 }
 
 function PiPromptTemplateEditor({
@@ -515,6 +639,7 @@ function PiPromptTemplateEditor({
   existingSlugs,
   onClose,
   onChanged,
+  ctx,
 }: PiPromptTemplateEditorProps) {
   const { t } = useTranslation();
   const baseId = useId();
@@ -568,11 +693,12 @@ function PiPromptTemplateEditor({
   const save = useMutation({
     mutationKey: PI_PROMPT_SAVE_MUTATION_KEY,
     mutationFn: () =>
-      promptsApi.upsertPiPromptTemplate(
+      piPromptApi.upsertTemplate(
         normalizedSlug,
         template?.revision ?? "missing",
         serializedContent,
         template?.slug,
+        ctx,
       ),
     onSuccess: async (saved) => {
       await onChanged();
@@ -754,33 +880,37 @@ interface PiPromptTemplatesProps {
   /** 搜索框在页面工具行里，这里只按它过滤 */
   search?: string;
   onClearSearch?: () => void;
+  /** 远端目标上下文（本补丁层）：非空时读写该目标的模板 */
+  ctx?: PiPromptRemoteCtx;
 }
 
 /** Pi · 模板：~/.pi/agent/prompts/<命令>.md，不用启用，在 Pi 里输入 /命令名 调用。 */
 export const PiPromptTemplates = forwardRef<
   PiPromptTemplatesHandle,
   PiPromptTemplatesProps
->(function PiPromptTemplates({ search = "", onClearSearch }, ref) {
+>(function PiPromptTemplates({ search = "", onClearSearch, ctx }, ref) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [editor, setEditor] = useState<
     { mode: "create" } | { mode: "edit"; template: PiPromptTemplate } | null
   >(null);
 
-  const templates = usePiPromptTemplatesQuery();
+  const templates = usePiPromptTemplatesQuery(ctx);
 
   useImperativeHandle(ref, () => ({
     openCreate: () => setEditor({ mode: "create" }),
   }));
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: promptTemplatesKey });
+    await queryClient.invalidateQueries({
+      queryKey: promptTemplatesKey(ctx),
+    });
   };
 
   // 删除不弹确认框：直接删，toast 给「撤销」（按 expectedRevision="missing" 原样写回）
   const remove = useMutation({
     mutationFn: (template: PiPromptTemplate) =>
-      promptsApi.deletePiPromptTemplate(template.slug, template.revision),
+      piPromptApi.deleteTemplate(template.slug, template.revision, ctx),
     onSuccess: async (_removed, template) => {
       setEditor(null);
       await refresh();
@@ -791,10 +921,12 @@ export const PiPromptTemplates = forwardRef<
         })}${t("pi.prompts.reloadAfterDelete")}`,
         undoneTitle: t("pi.prompts.templateRestored", { slug: template.slug }),
         onUndo: async () => {
-          await promptsApi.upsertPiPromptTemplate(
+          await piPromptApi.upsertTemplate(
             template.slug,
             "missing",
             template.content,
+            undefined,
+            ctx,
           );
           await refresh();
         },
@@ -1019,6 +1151,7 @@ export const PiPromptTemplates = forwardRef<
           existingSlugs={existingSlugs}
           onClose={() => setEditor(null)}
           onChanged={refresh}
+          ctx={ctx}
         />
       )}
     </>
@@ -1029,11 +1162,11 @@ export const PiPromptTemplates = forwardRef<
  * Kept as a compatibility export for callers that render the native resources
  * directly. The Pi page itself places these sections in separate segments.
  */
-export function PiNativePromptResources() {
+export function PiNativePromptResources(ctx?: PiPromptRemoteCtx) {
   return (
     <div className="space-y-6">
-      <PiSystemPromptFiles />
-      <PiPromptTemplates />
+      <PiSystemPromptFiles {...ctx} />
+      <PiPromptTemplates ctx={ctx} />
     </div>
   );
 }

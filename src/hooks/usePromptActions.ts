@@ -3,7 +3,12 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { promptsApi, type Prompt, type AppId } from "@/lib/api";
-import { listRemotePrompts, saveRemotePrompts } from "@/lib/api/remote";
+import {
+  listRemotePrompts,
+  readRemotePrompt,
+  saveRemotePrompts,
+} from "@/lib/api/remote";
+import { promptFileName } from "@/components/prompts/promptUtils";
 
 const EMPTY_PROMPTS: Record<string, Prompt> = {};
 
@@ -102,7 +107,15 @@ export function usePromptActions(
       writeLocalCache(cacheKey, data);
 
       try {
-        const content = await promptsApi.getCurrentFileContent(requestAppId);
+        // 远端目标：读该目标机器自己的 live 提示词文件（本机命令会读到本机的，
+        // 导致「远端 CLAUDE.md 有内容却报没有可导入内容」）。
+        const content = remoteTargetId
+          ? await readRemotePrompt(
+              remoteTargetId,
+              remoteContainerId || undefined,
+              requestAppId,
+            )
+          : await promptsApi.getCurrentFileContent(requestAppId);
         if (!isCurrentRequest()) return false;
         setCurrentFileContent(content);
         setCurrentFileAppId(requestAppId);
@@ -123,7 +136,7 @@ export function usePromptActions(
         setLoading(false);
       }
     }
-  }, [appId, t, updatePromptsForApp]);
+  }, [appId, t, updatePromptsForApp, remoteTargetId, remoteContainerId]);
 
   // 远端写：整表读改写（后端 save_remote_prompts 按数组整写）。
   const remoteWrite = useCallback(
@@ -361,7 +374,49 @@ export function usePromptActions(
 
   const importFromFile = useCallback(async () => {
     try {
-      const id = await promptsApi.importFromFile(appId);
+      let id: string;
+      if (remoteTargetId) {
+        // 远端：读该目标的 live 提示词文件 → 作为一条新提示词写入该目标 SSOT。
+        // 语义对齐本机 PromptService::import_from_file（id/name/description 逐字一致），
+        // 只是数据源换成远端。
+        const content = await readRemotePrompt(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          appId,
+        );
+        if (!content.trim()) {
+          throw new Error(
+            t("prompts.importReason.empty", { file: promptFileName(appId) }),
+          );
+        }
+        const timestamp = Math.floor(Date.now() / 1000);
+        id = `imported-${timestamp}`;
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const now = new Date();
+        const name = `导入的提示词 ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const prompt: Prompt = {
+          id,
+          name,
+          content,
+          description: "从现有配置文件导入",
+          enabled: false,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        };
+        const current = await listRemotePrompts(
+          remoteTargetId,
+          remoteContainerId || undefined,
+          appId,
+        );
+        await saveRemotePrompts(
+          remoteTargetId,
+          [...current, prompt],
+          remoteContainerId || undefined,
+          appId,
+        );
+      } else {
+        id = await promptsApi.importFromFile(appId);
+      }
       if (currentAppIdRef.current === appId) {
         await reload();
       }
@@ -373,7 +428,7 @@ export function usePromptActions(
       toast.error(t("prompts.importFailed"));
       throw error;
     }
-  }, [appId, notify, reload, t]);
+  }, [appId, notify, reload, t, remoteTargetId, remoteContainerId]);
 
   /** 最近一次读到的当前应用列表；还没读过或读的是别的应用时返回 null。 */
   const getLatestPrompts = useCallback((): Record<string, Prompt> | null => {

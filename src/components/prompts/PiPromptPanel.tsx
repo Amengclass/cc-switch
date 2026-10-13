@@ -94,8 +94,9 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
     remoteContainerId,
   );
   const { displayPath, location, invalidate, moreItems } =
-    usePromptPageCommon("pi");
-  const templates = usePiPromptTemplatesQuery();
+    usePromptPageCommon("pi", Boolean(remoteTargetId));
+  const piRemoteCtx = { remoteTargetId, remoteContainerId };
+  const templates = usePiPromptTemplatesQuery(piRemoteCtx);
 
   const dialogOpen = copyingId !== null;
   const writePending = Boolean(togglingId) || busy;
@@ -523,12 +524,13 @@ const PiPromptPanel: React.FC<PiPromptPanelProps> = ({
           />
         )
       ) : activeTab === "system" ? (
-        <PiSystemPromptFiles />
+        <PiSystemPromptFiles {...piRemoteCtx} />
       ) : (
         <PiPromptTemplates
           ref={templatesRef}
           search={templateQuery}
           onClearSearch={() => setTemplateQuery("")}
+          ctx={piRemoteCtx}
         />
       )}
 

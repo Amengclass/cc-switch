@@ -84,7 +84,7 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
   const reloadRef = React.useRef(reload);
   reloadRef.current = reload;
   const { displayPath, location, fileName, invalidate, moreItems } =
-    usePromptPageCommon(appId);
+    usePromptPageCommon(appId, Boolean(remoteTargetId));
 
   const dialogOpen = copyingId !== null;
   const interactionBlocked =
