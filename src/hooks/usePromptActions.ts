@@ -260,16 +260,35 @@ export function usePromptActions(
         setTogglingId(id);
         try {
           if (enabled) {
-            await promptsApi.enablePrompt(appId, id);
+            if (remoteTargetId) {
+              // 远端：整表写该目标 SSOT + 把启用项同步到远端 live（AGENTS.md）
+              await remoteWrite((current) =>
+                Object.fromEntries(
+                  Object.entries(current).map(([key, prompt]) => [
+                    key,
+                    { ...prompt, enabled: key === id },
+                  ]),
+                ),
+              );
+            } else {
+              await promptsApi.enablePrompt(appId, id);
+            }
           } else {
             const prompt = visiblePrompts[id];
             if (!prompt) {
               throw new Error(`Prompt ${id} does not exist`);
             }
-            await promptsApi.upsertPrompt(appId, id, {
-              ...prompt,
-              enabled: false,
-            });
+            if (remoteTargetId) {
+              await remoteWrite((current) => ({
+                ...current,
+                [id]: { ...current[id], enabled: false },
+              }));
+            } else {
+              await promptsApi.upsertPrompt(appId, id, {
+                ...prompt,
+                enabled: false,
+              });
+            }
           }
           const refreshed =
             currentAppIdRef.current === appId ? await reload() : false;
