@@ -59,6 +59,25 @@ const unmanagedKey = (remoteTargetId?: string, remoteContainerId?: string) =>
       ]
     : ["skills", "unmanaged"];
 
+/**
+ * 切目标（query key 变化）时不保留上一个目标的旧数据当占位：只比对 key 是否逐元素
+ * 相同（同目标 refetch 才保留），否则返回 undefined 走 loading。避免「A 切 B 时先
+ * 闪一下 A 的列表、过一会才变 B」。与本机供应商列表 useRemoteProvidersQuery 同款处理。
+ */
+const sameKeyPlaceholder =
+  <T,>(key: readonly unknown[]) =>
+  (
+    previousData: T | undefined,
+    previousQuery?: { queryKey: readonly unknown[] },
+  ): T | undefined => {
+    const prevKey = previousQuery?.queryKey;
+    const same =
+      Array.isArray(prevKey) &&
+      prevKey.length === key.length &&
+      key.every((part, i) => prevKey[i] === part);
+    return same ? previousData : undefined;
+  };
+
 /** 把远端技能目录项适配成 InstalledSkill。 */
 function remoteToInstalled(entry: {
   id?: string;
@@ -118,8 +137,9 @@ export function useInstalledSkills(
   remoteTargetId?: string,
   remoteContainerId?: string,
 ) {
+  const key = installedKey(remoteTargetId, remoteContainerId);
   return useQuery({
-    queryKey: installedKey(remoteTargetId, remoteContainerId),
+    queryKey: key,
     queryFn: async () => {
       if (remoteTargetId) {
         const entries = await listRemoteSkills(
@@ -131,7 +151,8 @@ export function useInstalledSkills(
       return skillsApi.getInstalled();
     },
     staleTime: Infinity,
-    placeholderData: keepPreviousData,
+    // 只保留「同一目标」的旧数据：切目标时不显示上一个目标的列表（避免先闪 A 再变 B）
+    placeholderData: sameKeyPlaceholder(key),
   });
 }
 
@@ -412,15 +433,17 @@ export function useScanUnmanagedSkills(
   remoteContainerId?: string,
   options?: { enabled?: boolean },
 ) {
+  const key = unmanagedKey(remoteTargetId, remoteContainerId);
   return useQuery({
-    queryKey: unmanagedKey(remoteTargetId, remoteContainerId),
+    queryKey: key,
     queryFn: () =>
       remoteTargetId
         ? scanRemoteUnmanagedSkills(remoteTargetId, remoteContainerId)
         : skillsApi.scanUnmanaged(),
     enabled: options?.enabled ?? false,
     staleTime: 30 * 1000,
-    placeholderData: keepPreviousData,
+    // 只保留「同一目标」的旧数据：切目标时不显示上一个目标的扫描结果
+    placeholderData: sameKeyPlaceholder(key),
   });
 }
 
