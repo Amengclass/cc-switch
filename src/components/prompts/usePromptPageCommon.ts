@@ -14,7 +14,11 @@ export function usePromptPageCommon(appId: AppId, isRemote = false) {
   const queryClient = useQueryClient();
   const location = usePromptFileLocationQuery(appId);
   const fileName = promptFileName(appId);
-  const displayPath = location.data?.displayPath ?? fileName;
+  // 远端目标：文件在该目标机器上，本机的完整路径没有意义；用相对文件名即可
+  // （远端与本地相对路径相同，如 ~/.claude/CLAUDE.md）。
+  const displayPath = isRemote
+    ? fileName
+    : (location.data?.displayPath ?? fileName);
 
   const invalidate = React.useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: promptKeys.all });
