@@ -347,6 +347,12 @@ function App() {
   const localProvidersQuery = useProvidersQuery(activeApp, {
     isProxyRunning: currentAppUsesProxy && isProxyRunning,
   });
+  // 批量应用面板的供应商来源：按「面板里选的 app」(batchApplyApp) 取，而不是左栏
+  // activeApp —— 否则在面板内切换 app 时供应商下拉不跟着变，得先点左栏应用才行。
+  // batchApplyApp 与 activeApp 相同时 key 相同，react-query 自动复用同一份缓存，无额外请求。
+  const batchApplyProvidersQuery = useProvidersQuery(
+    remote.batchApplyApp as AppId,
+  );
   const remoteProvidersQuery = useRemoteProvidersQuery(
     remote.remoteTargetId || undefined,
     remote.remoteContainerId || undefined,
@@ -688,6 +694,10 @@ function App() {
     setIsAddOpen(false);
     setEditingProvider(null);
     setUsageProvider(null);
+    // 批量应用是盖住内容区的二级页（FullScreenPanel 只盖 #content-area、左栏留着）：
+    // 任何侧栏/页面导航都要一并关掉它，否则点左栏应用后内容区仍被它盖着，
+    // 右侧看起来「没变、还是批量应用页」。
+    remote.setBatchApplyOpen(false);
   };
 
   // 整页编辑器里有未保存的修改：先确认，确认放弃后再执行这次导航
@@ -1788,8 +1798,10 @@ function App() {
           app={remote.batchApplyApp}
           onAppChange={remote.setBatchApplyApp}
           hosts={remote.servers}
-          providers={localProvidersQuery.data?.providers ?? {}}
-          defaultProviderId={localProvidersQuery.data?.currentProviderId || undefined}
+          providers={batchApplyProvidersQuery.data?.providers ?? {}}
+          defaultProviderId={
+            batchApplyProvidersQuery.data?.currentProviderId || undefined
+          }
         />
       )}
 
