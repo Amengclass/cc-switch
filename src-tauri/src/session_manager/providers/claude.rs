@@ -92,7 +92,11 @@ fn scan_session_file(path: &Path) -> std::io::Result<Option<SessionMeta>> {
     Ok(parse_session_lines(path, head, tail))
 }
 
-fn parse_session_lines(path: &Path, head: Vec<String>, tail: Vec<String>) -> Option<SessionMeta> {
+pub(crate) fn parse_session_lines(
+    path: &Path,
+    head: Vec<String>,
+    tail: Vec<String>,
+) -> Option<SessionMeta> {
     let mut session_id: Option<String> = None;
     let mut project_dir: Option<String> = None;
     let mut created_at: Option<i64> = None;
@@ -218,7 +222,7 @@ fn parse_session_lines(path: &Path, head: Vec<String>, tail: Vec<String>) -> Opt
     })
 }
 
-fn is_agent_session(path: &Path) -> bool {
+pub(crate) fn is_agent_session(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.starts_with("agent-") || name == "journal.jsonl")

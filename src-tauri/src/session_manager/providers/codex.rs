@@ -1905,7 +1905,7 @@ fn parse_session_with_titles(
     parse_session_lines(path, head, tail, thread_titles)
 }
 
-fn parse_session_lines(
+pub(crate) fn parse_session_lines(
     path: &Path,
     head: Vec<String>,
     tail: Vec<String>,

@@ -2074,11 +2074,48 @@ pub async fn list_remote_sessions_all(
     host_id: String,
     container: Option<String>,
 ) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
-    // TODO(方案②移植): 远端全部会话。官方 v4.0.4 的 session_manager 解析函数绑死本地
-    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
-    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
-    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
-    Err("远端全部会话尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let home = host.default_home();
+
+    // 6 个文件源 app：FileOps 泛型扫描，复用本机各 provider 的纯解析。
+    let file_apps: Vec<(&str, String)> = vec![
+        ("claude", format!("{home}/.claude/projects")),
+        ("grokbuild", format!("{home}/.grok/sessions")),
+        ("codex", format!("{home}/.codex")),
+        ("gemini", format!("{home}/.gemini/tmp")),
+        ("openclaw", format!("{home}/.openclaw/agents")),
+        ("pi", format!("{home}/.pi/agent/sessions")),
+    ];
+
+    let mut all_sessions: Vec<crate::session_manager::SessionMeta> = Vec::new();
+    for (app, root) in &file_apps {
+        let sessions = match *app {
+            "claude" => crate::remote::sessions::scan_claude_fs(&target, root).await,
+            "grokbuild" => crate::remote::sessions::scan_grokbuild_fs(&target, root).await,
+            "codex" => crate::remote::sessions::scan_codex_fs(&target, root).await,
+            "gemini" => crate::remote::sessions::scan_gemini_fs(&target, root).await,
+            "openclaw" => crate::remote::sessions::scan_openclaw_fs(&target, root).await,
+            "pi" => crate::remote::sessions::scan_pi_fs(&target, root).await,
+            _ => unreachable!(),
+        };
+        all_sessions.extend(sessions);
+    }
+
+    // 时间倒序，与本机 scan_sessions 一致。
+    all_sessions.sort_by(|a, b| {
+        let a_ts = a.last_active_at.or(a.created_at).unwrap_or(0);
+        let b_ts = b.last_active_at.or(b.created_at).unwrap_or(0);
+        b_ts.cmp(&a_ts)
+    });
+
+    Ok(all_sessions)
 }
 
 #[tauri::command]

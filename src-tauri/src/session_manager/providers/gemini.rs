@@ -513,7 +513,17 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
 
 fn parse_session(path: &Path) -> Option<SessionMeta> {
     let value = read_session_document(path).ok()?;
+    session_meta_from_document(path, &value)
+}
 
+/// 从原始文本解析会话元数据（远端：读回文本后调用）。
+pub(crate) fn parse_session_from_text(path: &Path, data: &str) -> Option<SessionMeta> {
+    let value = parse_session_document(data)?;
+    session_meta_from_document(path, &value)
+}
+
+/// 从已解析的会话文档构建元数据（纯函数，供本机/远端共用）。
+pub(crate) fn session_meta_from_document(path: &Path, value: &Value) -> Option<SessionMeta> {
     let session_id = value.get("sessionId").and_then(Value::as_str)?.to_string();
 
     let created_at = value.get("startTime").and_then(parse_timestamp_to_ms);

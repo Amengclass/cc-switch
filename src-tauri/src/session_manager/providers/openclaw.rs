@@ -148,7 +148,16 @@ fn parse_session(
     display_names: Option<&HashMap<String, String>>,
 ) -> Option<SessionMeta> {
     let (head, tail) = read_head_tail_lines(path, 10, 30).ok()?;
+    parse_session_lines(path, head, tail, display_names)
+}
 
+/// 从 head/tail 行构建元数据（纯函数，供远端复用）。
+pub(crate) fn parse_session_lines(
+    path: &Path,
+    head: Vec<String>,
+    tail: Vec<String>,
+    display_names: Option<&HashMap<String, String>>,
+) -> Option<SessionMeta> {
     let mut session_id: Option<String> = None;
     let mut cwd: Option<String> = None;
     let mut created_at: Option<i64> = None;

@@ -327,10 +327,32 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
         .to_str()
         .ok_or_else(|| "Pi session path is not valid UTF-8".to_string())?
         .to_string();
+    let tree = read_tree(&source)?;
+    Ok(session_meta_from_tree(path, &tree, source_path))
+}
+
+/// 从原始文本解析 Pi 会话元数据（远端：读回文本后调用，不做本机 canonicalize）。
+pub(crate) fn parse_session_from_content(
+    path: &Path,
+    content: &str,
+) -> Result<SessionMeta, String> {
+    let tree = read_tree_from_str(content)?;
+    Ok(session_meta_from_tree(
+        path,
+        &tree,
+        path.to_string_lossy().to_string(),
+    ))
+}
+
+fn session_meta_from_tree(
+    path: &Path,
+    tree: &SessionTree,
+    source_path: String,
+) -> SessionMeta {
     let SessionTree {
         header, summary, ..
-    } = read_tree(&source)?;
-    let title = summary.explicit_name.flatten().or_else(|| {
+    } = tree;
+    let title = summary.explicit_name.clone().flatten().or_else(|| {
         summary
             .first_user_message
             .as_deref()
@@ -343,9 +365,9 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
         .as_deref()
         .map(|message| truncate_summary(message, 160))
         .filter(|message| !message.is_empty());
-    Ok(SessionMeta {
+    SessionMeta {
         provider_id: PROVIDER_ID.to_string(),
-        session_id: header.id,
+        session_id: header.id.clone(),
         title,
         summary: summary_text,
         project_dir: (!header.cwd.trim().is_empty()).then(|| header.cwd.clone()),
@@ -356,7 +378,7 @@ fn parse_session(path: &Path) -> Result<SessionMeta, String> {
             "pi --session {}",
             crate::session_manager::terminal::shell_escape(&source_path)
         )),
-    })
+    }
 }
 
 fn read_tree(path: &Path) -> Result<SessionTree, String> {
@@ -364,6 +386,15 @@ fn read_tree(path: &Path) -> Result<SessionTree, String> {
     let reader = BufReader::new(
         File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
     );
+    build_tree(reader)
+}
+
+/// 从文本构建 Pi 会话树（远端用）。
+pub(crate) fn read_tree_from_str(content: &str) -> Result<SessionTree, String> {
+    build_tree(std::io::Cursor::new(content.as_bytes()))
+}
+
+fn build_tree(reader: impl std::io::BufRead) -> Result<SessionTree, String> {
     let mut header = None;
     let mut parents = HashMap::<String, (Option<String>, usize)>::new();
     let mut latest_id = None;

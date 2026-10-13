@@ -188,7 +188,17 @@ fn read_summary(path: &Path) -> Result<GrokSessionSummary, String> {
 
 fn parse_summary(path: &Path) -> Option<SessionMeta> {
     let summary = read_summary(path).ok()?;
-    let session_id = summary.info.id;
+    summary_meta(&summary, path)
+}
+
+/// 从 summary.json 文本构建会话元数据（纯函数，供远端复用）。
+pub(crate) fn parse_summary_text(text: &str, path: &Path) -> Option<SessionMeta> {
+    let summary: GrokSessionSummary = serde_json::from_str(text).ok()?;
+    summary_meta(&summary, path)
+}
+
+fn summary_meta(summary: &GrokSessionSummary, path: &Path) -> Option<SessionMeta> {
+    let session_id = summary.info.id.clone();
     let title = summary
         .generated_title
         .as_deref()
@@ -217,7 +227,7 @@ fn parse_summary(path: &Path) -> Option<SessionMeta> {
         session_id: session_id.clone(),
         title,
         summary: session_summary,
-        project_dir: summary.info.cwd,
+        project_dir: summary.info.cwd.clone(),
         created_at,
         last_active_at,
         source_path: Some(path.to_string_lossy().to_string()),
