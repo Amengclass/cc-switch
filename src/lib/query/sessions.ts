@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { sessionsApi } from "@/lib/api/sessions";
+import { getRemoteSessionMessages } from "@/lib/api/remote";
 import type {
   ContentRef,
   ImageRef,
@@ -185,12 +186,40 @@ export interface SessionTranscriptResult {
 export const useSessionTranscript = (
   providerId?: string,
   sourcePath?: string,
+  /** 远端目标（本补丁层）：非空时一次性读远端会话（无流式） */
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+  remoteSessionId?: string,
 ): SessionTranscriptResult => {
   const queryClient = useQueryClient();
-  const queryKey = sessionKeys.transcript(providerId, sourcePath);
+  const remoteKey = remoteTargetId
+    ? ["sessionTranscript", "remote", remoteTargetId, remoteContainerId ?? "__host__", providerId, sourcePath]
+    : null;
+  const queryKey = remoteKey ?? sessionKeys.transcript(providerId, sourcePath);
   const query = useQuery<TranscriptState>({
     queryKey,
     queryFn: async () => {
+      // 远端：一次性取回消息（后端读远端文件 + 纯解析），无分块流式。
+      if (remoteTargetId) {
+        const messages = await getRemoteSessionMessages(
+          remoteTargetId,
+          sourcePath!,
+          remoteSessionId ?? "",
+          remoteContainerId || undefined,
+          providerId,
+        );
+        return {
+          header: {
+            type: "header",
+            total: messages.length,
+            turns: buildTurnIndex(buildTurns(messages)),
+            cached: false,
+            parseMs: 0,
+          },
+          messages,
+          done: true,
+        };
+      }
       const previous = queryClient.getQueryData<TranscriptState>(queryKey);
       const live = !previous?.done;
       return loadTranscript(providerId!, sourcePath!, (state) => {

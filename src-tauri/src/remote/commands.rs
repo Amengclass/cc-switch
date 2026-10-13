@@ -2127,11 +2127,38 @@ pub async fn get_remote_session_messages(
     container: Option<String>,
     app: String,
 ) -> Result<Vec<crate::session_manager::SessionMessage>, String> {
-    // TODO(方案②移植): 远端会话消息。官方 v4.0.4 的 session_manager 解析函数绑死本地
-    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
-    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
-    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
-    Err("远端会话消息尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
+    let _ = session_id;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    match app.as_str() {
+        "claude" => {
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(crate::session_manager::providers::claude::parse_messages_from_content(
+                content.as_bytes(),
+                std::path::PathBuf::from(&source_path).with_extension(""),
+            ))
+        }
+        "codex" => {
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(crate::session_manager::providers::codex::parse_messages_from_content(
+                content.as_bytes(),
+            ))
+        }
+        other => Err(format!("远端会话管理暂不支持应用 {other}（尚未移植）")),
+    }
 }
 
 #[tauri::command]

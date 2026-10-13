@@ -244,13 +244,19 @@ const INJECTED_USER_PREFIXES: [&str; 4] = [
 ];
 
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
-    let file = File::open(path).map_err(|e| format!("Failed to open session file: {e}"))?;
-    let mut lines = LineSpans::new(BufReader::with_capacity(1 << 20, file));
+    let content =
+        std::fs::read(path).map_err(|e| format!("Failed to open session file: {e}"))?;
+    Ok(parse_messages_from_content(&content))
+}
+
+/// 从会话文件**内容**解析消息（纯函数，供远端复用）。
+pub(crate) fn parse_messages_from_content(content: &[u8]) -> Vec<SessionMessage> {
+    let mut lines = LineSpans::new(BufReader::with_capacity(
+        1 << 20,
+        std::io::Cursor::new(content),
+    ));
     let mut parser = RolloutParser::default();
-    while let Some(line) = lines
-        .next_line()
-        .map_err(|e| format!("Failed to read session file: {e}"))?
-    {
+    while let Some(line) = lines.next_line().ok().flatten() {
         let mut bytes = line.bytes;
         while let [rest @ .., b'\n' | b'\r'] = bytes {
             bytes = rest;
@@ -259,7 +265,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
             parser.process_line(bytes, line.span);
         }
     }
-    Ok(parser.finish())
+    parser.finish()
 }
 
 // ─── 行结构（只声明用得到的字段，其余跳过不分配）──────────────────────────

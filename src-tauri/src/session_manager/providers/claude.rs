@@ -276,9 +276,18 @@ fn remove_path_if_exists(path: &Path) -> std::io::Result<()> {
 // 全文给 `ContentRef::Jsonl`（行的字节区间 + JSON Pointer），由前端按需取。
 
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
-    let file = File::open(path).map_err(|e| format!("Failed to open session file: {e}"))?;
-    let mut lines = LineSpans::new(BufReader::with_capacity(256 * 1024, file));
-    let mut builder = TranscriptBuilder::new(path.with_extension(""));
+    let content =
+        std::fs::read(path).map_err(|e| format!("Failed to open session file: {e}"))?;
+    Ok(parse_messages_from_content(&content, path.with_extension("")))
+}
+
+/// 从会话文件**内容**解析消息（纯函数，供远端复用；sidecar_dir 用于 `ContentRef::Sidecar` 相对路径）。
+pub(crate) fn parse_messages_from_content(
+    content: &[u8],
+    sidecar_dir: PathBuf,
+) -> Vec<SessionMessage> {
+    let mut lines = LineSpans::new(BufReader::with_capacity(256 * 1024, std::io::Cursor::new(content)));
+    let mut builder = TranscriptBuilder::new(sidecar_dir);
 
     // 读错误（文件被截断/替换）时保留已解析部分，与旧实现跳过坏行的行为一致
     while let Ok(Some(span)) = lines.next_line() {
@@ -292,7 +301,7 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
         builder.push(record, span.span);
     }
 
-    Ok(builder.finish())
+    builder.finish()
 }
 
 /// 解析中的消息；全部记录处理完后再统一投影出 `content`（结果记录会回填前面的 ToolCall）。

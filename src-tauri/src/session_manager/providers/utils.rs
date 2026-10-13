@@ -309,10 +309,26 @@ impl<R: BufRead> LineSpans<R> {
 /// 回调返回 `Err` 时立即停止并向上传递。
 pub fn for_each_jsonl_value(
     path: &Path,
-    mut f: impl FnMut(JsonlSpan, Value) -> Result<(), String>,
+    f: impl FnMut(JsonlSpan, Value) -> Result<(), String>,
 ) -> Result<(), String> {
     let file = File::open(path).map_err(|e| format!("Failed to open session file: {e}"))?;
-    let mut lines = LineSpans::new(BufReader::new(file));
+    for_each_jsonl_value_from_reader(BufReader::new(file), f)
+}
+
+/// 同 [`for_each_jsonl_value`]，但从内存字节解析（远端：读回内容后调用）。
+/// 字节区间口径与文件版一致（`LineSpans` 同一实现），保证 `ContentRef::Jsonl` 对齐。
+pub fn for_each_jsonl_value_bytes(
+    content: &[u8],
+    f: impl FnMut(JsonlSpan, Value) -> Result<(), String>,
+) -> Result<(), String> {
+    for_each_jsonl_value_from_reader(std::io::Cursor::new(content), f)
+}
+
+fn for_each_jsonl_value_from_reader(
+    reader: impl BufRead,
+    mut f: impl FnMut(JsonlSpan, Value) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut lines = LineSpans::new(reader);
     while let Some(line) = lines
         .next_line()
         .map_err(|e| format!("Failed to read session file: {e}"))?

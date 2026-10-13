@@ -299,6 +299,9 @@ export function SessionManagerPage({
   const transcript = useSessionTranscript(
     readerSession?.providerId,
     readerSession?.sourcePath,
+    remoteTargetId,
+    remoteContainerId,
+    readerSession?.sessionId,
   );
 
   const deleteSessionMutation = useDeleteSessionMutation();
