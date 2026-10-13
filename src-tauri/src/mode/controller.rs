@@ -873,6 +873,10 @@ pub async fn exit_all(state: &AppState) -> Result<(), String> {
             log::warn!("停止代理服务失败: {error}");
         }
     }
+    // 远端半场：把所有宿主机/容器仍开着的 per-app 路由开关也一并关掉（撤隧道 + live 回直连）。
+    // 否则「全部回到直连」只回退本机，远端目标器仍是路由态。
+    let remote_errors = crate::remote::commands::exit_all_remote_route(state).await;
+    errors.extend(remote_errors);
     if let Err(error) = state.db.clear_all_provider_health().await {
         log::warn!("重置健康状态失败: {error}");
     }

@@ -468,6 +468,11 @@ impl Database {
             [],
         );
 
+        // 增强版自有表 / 列（P2 收敛点：remote 的建表、列、迁移全在 remote::schema，
+        // 这里只留一行调用）。v3.20.4 有此行，官方 v4.0.4 合入时丢失 → 导致
+        // remote_current_providers 旧结构(无 container) 一直没迁移。补回。
+        crate::remote::schema::ensure(conn)?;
+
         Ok(())
     }
 

@@ -8,6 +8,7 @@ import { proxyApi } from "@/lib/api/proxy";
 import {
   reapplyRemoteProvider,
   setRemoteRouteProxyApp,
+  switchRemoteProvider,
 } from "@/lib/api/remote";
 import { proxyKeys } from "@/lib/query/proxy";
 import type { AppMode } from "@/types/proxy";
@@ -72,6 +73,17 @@ export function useModeActions(
         // 远端目标：开启该目标的「走本机路由」接管（写远端 live 为隧道占位配置 +
         // 建反向隧道）。远端只有 route 一种代理模式，stack 不适用（本地才支持）。
         if (remoteTargetId) {
+          // 先把用户选的那家切成该目标的 current——否则 reapply 会重新应用 SSOT 里
+          // 「当前」那家（= 直连正在用的），路由用的就不是刚点开的那家（本机分支把
+          // route 传进 setProxyTakeoverForApp 所以没这问题，远端必须显式先切换）。
+          if (route) {
+            await switchRemoteProvider(
+              remoteTargetId,
+              route,
+              app,
+              remoteContainerId || undefined,
+            );
+          }
           await setRemoteRouteProxyApp(
             remoteTargetId,
             app,

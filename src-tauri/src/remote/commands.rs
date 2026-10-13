@@ -371,18 +371,30 @@ pub async fn set_remote_route_proxy_app(
     enabled: bool,
     container: Option<String>,
 ) -> Result<RemoteHost, String> {
-    let mut host = load_host(&state, &host_id)?;
+    set_route_switch_inner(&state, &host_id, &app, enabled, container.as_deref()).await
+}
+
+/// [`set_remote_route_proxy_app`] 的核心（无 `State` 包装）：命令本体与
+/// 「全部回到直连」的远端半场复用同一份写库 / 起停代理 / 对账隧道逻辑。
+pub(crate) async fn set_route_switch_inner(
+    state: &AppState,
+    host_id: &str,
+    app: &str,
+    enabled: bool,
+    container: Option<&str>,
+) -> Result<RemoteHost, String> {
+    let mut host = load_host(state, host_id)?;
     host.updated_at = chrono::Utc::now().timestamp_millis();
-    if let Some(c) = container.as_deref() {
+    if let Some(c) = container {
         let entry = host
             .route_proxy_container_apps
             .entry(c.to_string())
             .or_default();
-        entry.insert(app.clone(), enabled);
+        entry.insert(app.to_string(), enabled);
     } else if enabled {
-        host.route_proxy_apps.insert(app.clone(), true);
+        host.route_proxy_apps.insert(app.to_string(), true);
     } else {
-        host.route_proxy_apps.insert(app.clone(), false);
+        host.route_proxy_apps.insert(app.to_string(), false);
     }
     state
         .db
@@ -398,7 +410,7 @@ pub async fn set_remote_route_proxy_app(
                 .await
                 .map_err(|e| format!("开启远端接管时启动本机代理失败: {e}"))?;
         }
-    } else if !any_route_consumer(&state).await && state.proxy_service.is_running().await {
+    } else if !any_route_consumer(state).await && state.proxy_service.is_running().await {
         log::info!("[remote] 关闭 {app} 远端接管后无任何接管/路由需要，自动停止本机代理进程");
         let _ = state.proxy_service.stop().await;
     }
@@ -409,6 +421,74 @@ pub async fn set_remote_route_proxy_app(
     connection::sync_tunnel_now(&host).await;
 
     Ok(host)
+}
+
+/// 「全部回到直连」的远端半场：把所有宿主机 / 容器上仍开着的 per-app 路由开关
+/// 逐个关掉（写库 + 撤隧道），并把受影响目标器的 live 重投影回直连。
+///
+/// 本机半场由 `mode::controller::exit_all` 负责；本函数补齐远端 —— 否则远端
+/// 目标器的路由开关仍是 true、隧道仍在、live 仍是隧道占位配置，
+/// 「全部回到直连」对远端形同虚设（用户实测确认）。
+pub(crate) async fn exit_all_remote_route(state: &AppState) -> Vec<String> {
+    let hosts = match state.db.list_remote_hosts() {
+        Ok(h) => h,
+        Err(e) => return vec![format!("读取远端主机列表失败: {e}")],
+    };
+    let mut errors = Vec::new();
+    for host in hosts {
+        // 禁用的主机不操作（其接管意图已不参与判定，live 也不该在未排除故障的情况下被改写）
+        if host.disabled {
+            continue;
+        }
+        // 收集 (app, container) 待关闭项：宿主机开关 + 每个容器的开关。
+        let mut pending: Vec<(String, Option<String>)> = Vec::new();
+        for (app, on) in &host.route_proxy_apps {
+            if *on {
+                pending.push((app.clone(), None));
+            }
+        }
+        for (container, apps) in &host.route_proxy_container_apps {
+            for (app, on) in apps {
+                if *on {
+                    pending.push((app.clone(), Some(container.clone())));
+                }
+            }
+        }
+        if pending.is_empty() {
+            continue;
+        }
+
+        // 逐个关开关（每次写库都会重算 any_route_consumer + 对账隧道）；
+        // 全部关完时最后一次写库会因「全局再无路由消费者」停掉本机代理并撤该主机隧道。
+        for (app, container) in &pending {
+            if let Err(e) =
+                set_route_switch_inner(state, &host.id, app, false, container.as_deref()).await
+            {
+                errors.push(format!(
+                    "{} {app}{}: {e}",
+                    host.name,
+                    container
+                        .as_deref()
+                        .map(|c| format!(" 容器 {c}"))
+                        .unwrap_or_default()
+                ));
+            }
+        }
+
+        // 把每个受影响目标器的 live 重投影回直连（开关已关，reapply 按直连写）。
+        for (app, container) in &pending {
+            if let Err(e) =
+                reapply_remote_provider_target(state, &host.id, app, container.as_deref()).await
+            {
+                // reapply 失败不阻塞其余目标器：开关已关，live 缺的只是回写。
+                log::warn!(
+                    "[remote] 全部回到直连：{} {app} 重投影 live 失败: {e}",
+                    host.name
+                );
+            }
+        }
+    }
+    errors
 }
 
 /// 是否有任何「需要本机代理进程」的使用者：
@@ -835,6 +915,22 @@ async fn build_remote_providers_view(
         state, host_id, target, home, app, container, session, &ssot,
     )
     .await?;
+    // 把该目标器的当前供应商**完整配置**同步进本机表（路由基座）：
+    // 面板显示什么、路由就能用什么——切目标/查看面板即预热路由数据，
+    // 不必等用户「切换一次」才写入（否则开路由时查不到 provider_config）。
+    // 仅非 additive（无「当前供应商」概念的 additive 走 live，不适用）。
+    if let Some(cid) = current_provider_id.as_deref() {
+        if let Some(p) = ssot.providers.iter().find(|p| p.id == cid) {
+            let _ = crate::remote::current::save_current_provider(
+                state.db.as_ref(),
+                host_id,
+                container,
+                app,
+                cid,
+                Some(p),
+            );
+        }
+    }
     let route_proxy_enabled = route_proxy_for_target(&load_host(state, host_id)?, container, app);
     Ok(RemoteProvidersView {
         providers: ssot.providers,
@@ -1494,8 +1590,19 @@ pub async fn reapply_remote_provider(
     app: String,
     container: Option<String>,
 ) -> Result<EffectReport, String> {
+    reapply_remote_provider_target(&state, &host_id, &app, container.as_deref()).await
+}
+
+/// [`reapply_remote_provider`] 的核心（无 `State` 包装）：命令本体与
+/// 「全部回到直连」的远端半场复用。
+pub(crate) async fn reapply_remote_provider_target(
+    state: &AppState,
+    host_id: &str,
+    app: &str,
+    container: Option<&str>,
+) -> Result<EffectReport, String> {
     // additive 无「当前供应商」概念且不走路由改写，直接返回空报告
-    if crate::remote::providers::is_additive_app(&app) {
+    if crate::remote::providers::is_additive_app(app) {
         return Ok(EffectReport {
             target: String::new(),
             provider_name: String::new(),
@@ -1505,17 +1612,17 @@ pub async fn reapply_remote_provider(
             warnings: Vec::new(),
         });
     }
-    let host = load_host(&state, &host_id)?;
+    let host = load_host(state, host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;
     let home = host.default_home();
     let target = crate::remote::docker::RemoteTarget::new(
         &session.sftp,
         &session.channel,
-        container.as_deref(),
+        container,
     )?;
 
-    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
     // 当前供应商：SSOT current 优先，fallback 本地持久化记录
     let provider_id = ssot
         .current_provider_id
@@ -1523,9 +1630,9 @@ pub async fn reapply_remote_provider(
         .or_else(|| {
             crate::remote::current::get_current_provider(
                 state.db.as_ref(),
-                &host_id,
-                container.as_deref(),
-                &app,
+                host_id,
+                container,
+                app,
             )
             .ok()
             .flatten()
@@ -1551,14 +1658,14 @@ pub async fn reapply_remote_provider(
     let report = crate::remote::providers::apply_remote_provider_to_live(
         state.db.as_ref(),
         &session,
-        container.as_deref(),
+        container,
         &home,
         &host.name,
-        &app,
+        app,
         &provider,
         effective_route_proxy(
             &state.proxy_service,
-            route_proxy_for_target(&host, container.as_deref(), &app),
+            route_proxy_for_target(&host, container, app),
         )
         .await,
         current_proxy_port(state.db.as_ref(), &state.proxy_service).await?,
@@ -1570,9 +1677,9 @@ pub async fn reapply_remote_provider(
     // 本机代理按远端路由时才能取到 base_url 与密钥。
     if let Err(e) = crate::remote::current::save_current_provider(
         state.db.as_ref(),
-        &host_id,
-        container.as_deref(),
-        &app,
+        host_id,
+        container,
+        app,
         &provider_id,
         Some(&provider),
     ) {
@@ -1587,8 +1694,7 @@ pub async fn reapply_remote_provider(
     log::debug!("[remote] 跳过重新应用后的 MCP 重投影（方案 A 临时态，app={app}）");
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
-    revert_route_switch_on_tunnel_failure(&state, &report, &host_id, container.as_deref(), &app)
-        .await;
+    revert_route_switch_on_tunnel_failure(state, &report, host_id, container, app).await;
 
     let mut report = report;
     report.current_provider_id = Some(provider_id);
