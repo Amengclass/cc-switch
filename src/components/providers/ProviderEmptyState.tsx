@@ -7,6 +7,8 @@ interface ProviderEmptyStateProps {
   appId: AppId;
   onCreate?: () => void;
   onImport?: () => void;
+  /** 导入按钮禁用（远端目标下导入语义是读本机 live，会读错数据；置灰规避） */
+  importDisabled?: boolean;
 }
 
 /**
@@ -17,6 +19,7 @@ export function ProviderEmptyState({
   appId,
   onCreate,
   onImport,
+  importDisabled,
 }: ProviderEmptyStateProps) {
   const { t } = useTranslation();
   // Pi / MiniMax Code 的"当前供应商"可以是原生应用自管的内置账号（不在可管理的
@@ -44,7 +47,19 @@ export function ProviderEmptyState({
       {(onImport || onCreate) && (
         <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
           {onImport && (
-            <Button variant="neutral" size="regular" onClick={onImport}>
+            <Button
+              variant="neutral"
+              size="regular"
+              onClick={onImport}
+              disabled={importDisabled}
+              title={
+                importDisabled
+                  ? t("provider.importDisabledRemote", {
+                      defaultValue: "远端目标下暂不支持从 live 导入",
+                    })
+                  : undefined
+              }
+            >
               <Download className="h-4 w-4" />
               {appId === "claude-desktop"
                 ? t("provider.importFromClaude")

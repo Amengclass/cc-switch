@@ -108,6 +108,7 @@
     "noProvidersDescription": "If you already have a config, click \"Import Current Config\" — all data will be safely saved in a default provider",
     "noProvidersDescriptionKeyFields": "Switching providers only replaces the key, endpoint and model; plugins and other settings stay in the config file and apply to every provider",
     "importCurrent": "Import Current Config",
+    "importDisabledRemote": "Import from live is not supported for remote targets",
     "importFromClaude": "Import existing providers from Claude Code",
     "importCurrentDescription": "Import current live config as default provider",
     "currentlyUsing": "Currently Using",

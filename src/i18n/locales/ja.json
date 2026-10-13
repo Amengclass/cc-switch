@@ -108,6 +108,7 @@
     "noProvidersDescription": "既存の設定がある場合は「現在の設定をインポート」をクリックしてください。すべてのデータが default プロバイダーに安全に保存されます",
     "noProvidersDescriptionKeyFields": "プロバイダーを切り替えても置き換わるのはキー、リクエスト URL、モデルだけです。プラグインなどのその他の設定は設定ファイルに残り、すべてのプロバイダーに適用されます",
     "importCurrent": "現在の設定をインポート",
+    "importDisabledRemote": "リモートターゲットでは live からのインポートは未対応です",
     "importFromClaude": "Claude Code の既存プロバイダーをインポート",
     "importCurrentDescription": "現在使用中の設定をデフォルトプロバイダーとしてインポート",
     "currentlyUsing": "現在使用中",

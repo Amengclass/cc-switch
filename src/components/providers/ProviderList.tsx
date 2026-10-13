@@ -410,6 +410,8 @@ export function ProviderList({
               ? undefined
               : () => importMutation.mutate()
           }
+          // 远端目标：导入语义是读本机 live 配置，远端下会读到错误数据，置灰。
+          importDisabled={Boolean(remoteTargetId)}
         />
       </div>
     );
