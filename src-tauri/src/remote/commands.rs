@@ -2040,34 +2040,7 @@ pub async fn check_remote_cli_installed(
     }
 }
 
-/// 列出远端 `~/.claude/projects/` 下的会话 jsonl 文件。
-#[tauri::command]
-pub async fn list_remote_sessions(
-    state: State<'_, AppState>,
-    host_id: String,
-    container: Option<String>,
-) -> Result<Vec<serde_json::Value>, String> {
-    // TODO(方案②移植): 远端会话列表。官方 v4.0.4 的 session_manager 解析函数绑死本地
-    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
-    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
-    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
-    Err("远端会话列表尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
-}
-
-#[tauri::command]
-pub async fn list_remote_sessions_detailed(
-    state: State<'_, AppState>,
-    host_id: String,
-    container: Option<String>,
-    app: String,
-) -> Result<Vec<crate::session_manager::SessionMeta>, String> {
-    // TODO(方案②移植): 远端会话元数据。官方 v4.0.4 的 session_manager 解析函数绑死本地
-    // fs（scan_sessions() / load_messages(path) 都不接受 FileOps），远端要的是
-    // 「纯解析 + FileOps」那一层，需要另行拆分或自带解析器。
-    // 临时桩：先让 crate 编过，前端拿到明确错误而不是命令不存在。
-    Err("远端会话元数据尚未移植（当前版本远端仅支持 claude 供应商切换）".to_string())
-}
-
+/// 列出远端所有 app 的会话（对齐本机 sessionsApi.list()，全量返回）。
 #[tauri::command]
 pub async fn list_remote_sessions_all(
     state: State<'_, AppState>,
@@ -2108,15 +2081,21 @@ pub async fn list_remote_sessions_all(
         all_sessions.extend(sessions);
     }
 
-    // 2 个 SQLite 源（hermes / opencode）：经远端 sqlite-helper 查询（复用本机 SQL）。
+    // 3 个 SQLite 源（hermes / opencode / mcode）：经远端 sqlite-helper 查询（复用本机 SQL）。
     let hermes_db = format!("{home}/.hermes/state.db");
     let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
+    let mcode_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
     let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
     let opencode_sql = "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
     if let Ok(helper) = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await {
         let sqlite_apps: Vec<(&str, &str, &str)> = vec![
             ("hermes", &hermes_db, hermes_sql),
             ("opencode", &opencode_db, opencode_sql),
+            (
+                "mcode",
+                &mcode_db,
+                crate::session_manager::providers::mcode::SCAN_SQL,
+            ),
         ];
         for (app, db, sql) in &sqlite_apps {
             if let Ok(v) = run_sqlite_helper(
@@ -2136,15 +2115,15 @@ pub async fn list_remote_sessions_all(
                     .cloned()
                     .unwrap_or_default();
                 for row in rows {
-                    let meta = if *app == "hermes" {
-                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
+                    let meta = match *app {
+                        "hermes" => crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
                             &row,
                             &format!("sqlite:{db}"),
-                        )
-                    } else {
-                        crate::session_manager::providers::opencode::opencode_row_to_session_meta(
+                        ),
+                        "opencode" => crate::session_manager::providers::opencode::opencode_row_to_session_meta(
                             &row, db,
-                        )
+                        ),
+                        _ => crate::session_manager::providers::mcode::row_to_session_meta(&row),
                     };
                     if let Some(m) = meta {
                         all_sessions.push(m);
@@ -2184,10 +2163,32 @@ pub async fn get_remote_session_messages(
         container.as_deref(),
     )?;
 
-    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 查询
-    if app == "hermes" || app == "opencode" {
+    // hermes / opencode / mcode：SQLite 主存储，经远端 sqlite-helper 查询
+    if app == "hermes" || app == "opencode" || app == "mcode" {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
+        if app == "mcode" {
+            let db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
+            let v = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &db,
+                crate::session_manager::providers::mcode::MESSAGES_SQL,
+                &[session_id.as_str()],
+            )
+            .await?;
+            let rows = v
+                .get("rows")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            return Ok(rows
+                .iter()
+                .filter_map(crate::session_manager::providers::mcode::row_to_message)
+                .collect());
+        }
         if app == "hermes" {
             let db = format!("{home}/.hermes/state.db");
             let sql = "SELECT role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC";
@@ -2333,8 +2334,8 @@ pub async fn delete_remote_session(
         container.as_deref(),
     )?;
 
-    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 删除（先校验存在）
-    if app == "hermes" || app == "opencode" {
+    // hermes / opencode / mcode：SQLite 主存储，经远端 sqlite-helper 删除（先校验存在）
+    if app == "hermes" || app == "opencode" || app == "mcode" {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
         let (db, check_sql, delete_sql) = if app == "hermes" {
@@ -2342,6 +2343,12 @@ pub async fn delete_remote_session(
                 format!("{home}/.hermes/state.db"),
                 "SELECT id FROM sessions WHERE id = ?1",
                 "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
+            )
+        } else if app == "mcode" {
+            (
+                format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite"),
+                "SELECT session_id FROM local_runtime_sessions WHERE session_id = ?1",
+                crate::session_manager::providers::mcode::DELETE_SQL,
             )
         } else {
             (

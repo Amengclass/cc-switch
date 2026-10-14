@@ -33,6 +33,84 @@ pub fn scan_sessions() -> Vec<SessionMeta> {
     }
 }
 
+/// 会话列表 SQL（本机与远端 sqlite-helper 共用）。
+pub(crate) const SCAN_SQL: &str = "SELECT session_id, title, workspace_dir, created_at_ms, updated_at_ms
+         FROM local_runtime_sessions WHERE visibility <> 'hidden' AND archived = 0
+         AND parent_session_id IS NULL AND session_kind NOT IN ('peek', 'channel', 'cron')
+         ORDER BY updated_at_ms DESC";
+
+/// 消息 SQL（本机与远端 sqlite-helper 共用）：迁移过的会话走
+/// `local_runtime_message_rows`，未迁移的从 `display_messages_json` 展开。
+pub(crate) const MESSAGES_SQL: &str = "WITH migrated AS (
+            SELECT 1 FROM local_runtime_message_row_migrations WHERE session_id = ?1
+         ), display AS (
+            SELECT role, data_json, created_at_ms, id AS sequence
+            FROM local_runtime_message_rows
+            WHERE session_id = ?1 AND EXISTS (SELECT 1 FROM migrated)
+            UNION ALL
+            SELECT json_extract(message.value, '$.role'), message.value, NULL, message.key
+            FROM local_runtime_messages, json_each(display_messages_json) AS message
+            WHERE session_id = ?1 AND NOT EXISTS (SELECT 1 FROM migrated)
+         )
+         SELECT role, data_json, created_at_ms FROM display
+         WHERE role IN ('user', 'assistant') ORDER BY sequence";
+
+/// 删除 SQL（本机与远端 sqlite-helper 共用）：消息表 + 会话表。
+pub(crate) const DELETE_SQL: &str = "DELETE FROM local_runtime_message_rows WHERE session_id = ?1; DELETE FROM local_runtime_messages WHERE session_id = ?1; DELETE FROM local_runtime_sessions WHERE session_id = ?1;";
+
+/// 远端 sqlite-helper 返回的行 → 会话元数据。
+/// `resume_command` 为空：远端 data_dir 由用户自己知道，命令里带本机路径会误导。
+pub(crate) fn row_to_session_meta(row: &Value) -> Option<SessionMeta> {
+    let id = row.get("session_id").and_then(Value::as_str)?.to_string();
+    Some(SessionMeta {
+        provider_id: "mcode".into(),
+        source_path: Some(format!("mcode:{id}")),
+        resume_command: None,
+        session_id: id,
+        title: row
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        summary: None,
+        project_dir: row
+            .get("workspace_dir")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        created_at: row.get("created_at_ms").and_then(Value::as_i64),
+        last_active_at: row.get("updated_at_ms").and_then(Value::as_i64),
+    })
+}
+
+/// 远端 sqlite-helper 返回的行 → 消息（只暴露展示行：Text）。
+pub(crate) fn row_to_message(row: &Value) -> Option<SessionMessage> {
+    let role = row.get("role").and_then(Value::as_str)?;
+    let data = row.get("data_json").and_then(Value::as_str)?;
+    let value: Value = serde_json::from_str(data).unwrap_or_default();
+    let ts = row
+        .get("created_at_ms")
+        .and_then(Value::as_i64)
+        .or_else(|| {
+            let time = value
+                .get("timestamp")
+                .filter(|v| !v.is_null())
+                .or_else(|| value.get("created_at"))?;
+            time.as_f64()
+                .or_else(|| time.as_str()?.parse::<f64>().ok())
+                .filter(|time| time.is_finite())
+                .map(|time| time.floor() as i64)
+        });
+    // 只暴露展示行，没有执行过程：只有 Text
+    let text = super::utils::extract_text(&value["msg_content"]);
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(SessionMessage::from_blocks(
+        role,
+        ts,
+        vec![SessionBlock::text(text)],
+    ))
+}
+
 fn scan(conn: &Connection, data_dir: &Path) -> rusqlite::Result<Vec<SessionMeta>> {
     #[cfg(not(windows))]
     let command = format!(
@@ -44,12 +122,7 @@ fn scan(conn: &Connection, data_dir: &Path) -> rusqlite::Result<Vec<SessionMeta>
         "$env:MINIMAX_DATA_DIR = '{}'; mcode",
         data_dir.to_string_lossy().replace('\'', "''")
     );
-    let mut query = conn.prepare(
-        "SELECT session_id, title, workspace_dir, created_at_ms, updated_at_ms
-         FROM local_runtime_sessions WHERE visibility <> 'hidden' AND archived = 0
-         AND parent_session_id IS NULL AND session_kind NOT IN ('peek', 'channel', 'cron')
-         ORDER BY updated_at_ms DESC",
-    )?;
+    let mut query = conn.prepare(SCAN_SQL)?;
     let rows = query.query_map([], |row| {
         let id: String = row.get(0)?;
         Ok(SessionMeta {
@@ -79,21 +152,7 @@ pub fn load_messages(source: &str) -> Result<Vec<SessionMessage>, String> {
 }
 
 fn read_messages(conn: &Connection, id: &str) -> rusqlite::Result<Vec<SessionMessage>> {
-    let mut query = conn.prepare(
-        "WITH migrated AS (
-            SELECT 1 FROM local_runtime_message_row_migrations WHERE session_id = ?1
-         ), display AS (
-            SELECT role, data_json, created_at_ms, id AS sequence
-            FROM local_runtime_message_rows
-            WHERE session_id = ?1 AND EXISTS (SELECT 1 FROM migrated)
-            UNION ALL
-            SELECT json_extract(message.value, '$.role'), message.value, NULL, message.key
-            FROM local_runtime_messages, json_each(display_messages_json) AS message
-            WHERE session_id = ?1 AND NOT EXISTS (SELECT 1 FROM migrated)
-         )
-         SELECT role, data_json, created_at_ms FROM display
-         WHERE role IN ('user', 'assistant') ORDER BY sequence",
-    )?;
+    let mut query = conn.prepare(MESSAGES_SQL)?;
     let rows = query.query_map([id], |row| {
         let data: String = row.get(1)?;
         let value: Value = serde_json::from_str(&data).unwrap_or_default();

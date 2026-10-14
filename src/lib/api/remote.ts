@@ -17,7 +17,6 @@ import type {
   RemoteConnectionInfo,
   RemoteEnvConflict,
   RemoteHost,
-  RemoteSessionInfo,
 } from "@/types/remote";
 
 /**
@@ -408,17 +407,6 @@ export async function cleanRemoteEnvConflicts(
   );
 }
 
-/** 列出远端会话 jsonl 文件 */
-export async function listRemoteSessions(
-  hostId: string,
-  container?: string,
-): Promise<RemoteSessionInfo[]> {
-  return invoke<RemoteSessionInfo[]>("list_remote_sessions", {
-    hostId,
-    container: container ?? null,
-  });
-}
-
 /** 读取远端 settings.json 并匹配出当前生效的本地供应商 id（per-app） */
 export async function getRemoteCurrentProvider(
   hostId: string,
@@ -448,19 +436,6 @@ export async function checkRemoteCliInstalled(
 /** 检测本机是否安装指定 app 的 CLI */
 export async function checkLocalCliInstalled(app: string): Promise<boolean> {
   return invoke<boolean>("check_local_cli_installed", { app });
-}
-
-/** 列出远端会话的完整元数据（复用本机 session_manager 解析逻辑） */
-export async function listRemoteSessionsDetailed(
-  hostId: string,
-  container?: string,
-  app?: string,
-): Promise<SessionMeta[]> {
-  return invoke<SessionMeta[]>("list_remote_sessions_detailed", {
-    hostId,
-    container: container ?? null,
-    app: app ?? "claude",
-  });
 }
 
 /** 列出远端所有 app 的会话（对齐本机 sessionsApi.list()，全量返回） */

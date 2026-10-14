@@ -1823,8 +1823,6 @@ pub fn run() {
             remote::commands::clean_remote_env_conflicts,
             remote::commands::check_local_cli_installed,
             remote::commands::check_remote_cli_installed,
-            remote::commands::list_remote_sessions,
-            remote::commands::list_remote_sessions_detailed,
             remote::commands::list_remote_sessions_all,
             remote::commands::get_remote_session_messages,
             remote::commands::delete_remote_session,
