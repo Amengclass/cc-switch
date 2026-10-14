@@ -308,6 +308,9 @@ impl RemoteSession {
     /// 读取远端文件文本（不存在 / 为空时返回 None）。
     /// 走 exec `cat`（宿主机 `sh -c` / 容器 `docker exec`），不依赖 SFTP
     /// （容器目标无 SFTP）。供远端读-改-写类切换（gemini settings.json 等）使用。
+    ///
+    /// 用 [`exec_command_raw`]（不 trim）：文件末尾换行必须原样保留，
+    /// 否则用读回内容算的 sha256 与磁盘真文件对不上。
     pub async fn read_remote_text(
         &self,
         path: &str,
@@ -321,7 +324,7 @@ impl RemoteSession {
                 format!("docker exec {} sh -c {}", ops.container, shell_quote(&cat))
             }
         };
-        let out = exec_command(&self.channel, &cmd).await?;
+        let out = exec_command_raw(&self.channel, &cmd).await?;
         Ok(if out.is_empty() { None } else { Some(out) })
     }
 
@@ -348,7 +351,10 @@ impl RemoteSession {
         let tmp = format!("{path}.ccswitch.tmp");
         let hash_guard = match expected_hash {
             Some(h) if !h.is_empty() => format!(
-                "if [ -f {p} ] && [ \"$(sha256sum {p} 2>/dev/null | cut -d' ' -f1)\" != '{h}' ]; then echo REMOTE_CONFLICT; exit 0; fi; ",
+                // 远端没有 sha256sum（精简容器常见）时算不出真实值，此时**放行**而不是
+                // 拿空串去比：宁可漏过一次校验，也不能误报「已被外部修改」挡住正常切换。
+                "cur=$(sha256sum {p} 2>/dev/null | cut -d' ' -f1); \
+                 if [ -f {p} ] && [ -n \"$cur\" ] && [ \"$cur\" != '{h}' ]; then echo REMOTE_CONFLICT; exit 0; fi; ",
                 p = shell_quote(path),
                 h = h,
             ),
@@ -735,6 +741,31 @@ pub async fn exec_command(
         .await
         .map_err(|e| format!("读取命令输出失败: {e}"))?;
     Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+/// 同 [`exec_command`]，但**不做 trim**：原样返回命令 stdout。
+///
+/// 读取文件内容（`cat`）时必须用这个——`trim()` 会削掉文件末尾换行，
+/// 导致用读回内容算的 sha256 与磁盘真文件对不上（`write_settings_with_backup`
+/// 的 `expected_hash` 校验会误报「已被外部修改」）。
+pub async fn exec_command_raw(
+    session: &Handle<RemoteHandler>,
+    command: &str,
+) -> Result<String, String> {
+    let ch = session
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("打开命令通道失败: {e}"))?;
+    ch.exec(true, command)
+        .await
+        .map_err(|e| format!("执行命令失败: {e}"))?;
+    let mut stream = ch.into_stream();
+    let mut output = Vec::new();
+    stream
+        .read_to_end(&mut output)
+        .await
+        .map_err(|e| format!("读取命令输出失败: {e}"))?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
 }
 
 /// 执行命令并通过 stdin 管道传入数据（不嵌入命令字符串，避免大文件撑爆 SSH 通道）。
