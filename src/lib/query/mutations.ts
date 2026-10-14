@@ -414,6 +414,19 @@ export const useDeleteSessionMutation = () => {
       queryClient.removeQueries({
         queryKey: sessionKeys.messages(input.providerId, input.sourcePath),
       });
+      // 远端会话的 transcript key 带目标三元组，单独移除
+      if (input.remoteTargetId) {
+        queryClient.removeQueries({
+          queryKey: [
+            "sessionTranscript",
+            "remote",
+            input.remoteTargetId,
+            input.remoteContainerId ?? "__host__",
+            input.providerId,
+            input.sourcePath,
+          ],
+        });
+      }
       queryClient.removeQueries({
         queryKey: sessionKeys.transcript(input.providerId, input.sourcePath),
       });
