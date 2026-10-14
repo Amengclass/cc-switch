@@ -1318,6 +1318,7 @@
     "resumeInFor": "在 {{terminal}} 中繼續 {{title}}",
     "copyResumeFor": "複製「{{title}}」的繼續指令",
     "resumeCopiedNoLaunch": "已複製繼續指令。這個平台暫不支援一鍵繼續，請在專案目錄下貼到終端機執行",
+    "resumeCopiedRemote": "已複製繼續指令。請在遠端主機/容器對應目錄下執行（本機終端機無法直接繼續遠端工作階段）",
     "moreFor": "{{title}} 的更多操作",
     "copySessionId": "複製工作階段 ID",
     "sessionIdCopied": "已複製工作階段 ID",

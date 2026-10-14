@@ -1317,6 +1317,7 @@
     "resumeInFor": "{{title}} を {{terminal}} で再開",
     "copyResumeFor": "「{{title}}」の再開コマンドをコピー",
     "resumeCopiedNoLaunch": "再開コマンドをコピーしました。このプラットフォームではワンクリック再開に対応していないため、プロジェクトのディレクトリでターミナルに貼り付けて実行してください",
+    "resumeCopiedRemote": "再開コマンドをコピーしました。リモートホスト/コンテナの対応するディレクトリで実行してください（ローカル端末ではリモートセッションを直接再開できません）",
     "moreFor": "{{title}} のその他の操作",
     "copySessionId": "セッション ID をコピー",
     "sessionIdCopied": "セッション ID をコピーしました",

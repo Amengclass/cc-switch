@@ -8,7 +8,8 @@ use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::blocks::{assign_turn_ids, openai_tool_calls, tool_result_block};
 use super::utils::{
-    extract_text, for_each_jsonl_value, parse_timestamp_to_ms, truncate_summary, TITLE_MAX_CHARS,
+    extract_text, for_each_jsonl_value, for_each_jsonl_value_bytes, parse_timestamp_to_ms,
+    truncate_summary, TITLE_MAX_CHARS,
 };
 
 #[derive(Debug, Deserialize)]
@@ -70,55 +71,80 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     }
     let mut messages = Vec::new();
 
-    for_each_jsonl_value(&chat_path, |span, value| {
-        let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
-        let role = match kind {
-            "system" | "user" | "assistant" | "tool" => kind,
-            // Reasoning records can contain encrypted/internal state and are not
-            // conversation messages shown by Grok's own history view.
-            _ => return Ok(()),
-        };
-        let text = value.get("content").map(extract_text).unwrap_or_default();
-        let blocks = match role {
-            "tool" => vec![tool_result_block(
-                value
-                    .get("tool_call_id")
-                    .or_else(|| value.get("call_id"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default(),
-                ToolStatus::Unknown,
-                &text,
-                || Some(span.content_ref("/content")),
-            )],
-            "assistant" => {
-                let mut blocks = Vec::new();
-                if !text.trim().is_empty() {
-                    blocks.push(SessionBlock::text(text));
-                }
-                blocks.extend(openai_tool_calls(value.get("tool_calls"), |pointer| {
-                    Some(span.content_ref(format!("/tool_calls{pointer}")))
-                }));
-                blocks
-            }
-            _ if text.trim().is_empty() => Vec::new(),
-            _ => vec![SessionBlock::text(text)],
-        };
-        let ts = value
-            .get("timestamp")
-            .or_else(|| value.get("ts"))
-            .and_then(parse_timestamp_to_ms);
-        let mut message = SessionMessage::from_blocks(role, ts, blocks);
-        if message.is_empty() {
-            return Ok(());
-        }
-        // system prompt 属于注入内容，默认隐藏
-        message.injected = role == "system";
-        messages.push(message);
+    let reader = for_each_jsonl_value(&chat_path, |span, value| {
+        push_grok_message(&mut messages, span, value);
         Ok(())
-    })?;
+    });
+    // 文件读不了时给出与本机一致的错误，而不是把空列表当成功
+    if let Err(err) = reader {
+        return Err(err);
+    }
 
     assign_turn_ids(&mut messages);
     Ok(messages)
+}
+
+/// 从 `chat_history.jsonl` 的**内容**解析消息（纯函数，供远端复用）。
+/// 字节区间口径与文件版一致（`LineSpans` 同一实现），保证 `ContentRef::Jsonl` 对齐。
+pub(crate) fn parse_messages_from_content(content: &[u8]) -> Vec<SessionMessage> {
+    let mut messages = Vec::new();
+    let _ = for_each_jsonl_value_bytes(content, |span, value| {
+        push_grok_message(&mut messages, span, value);
+        Ok(())
+    });
+    assign_turn_ids(&mut messages);
+    messages
+}
+
+/// 单条 `chat_history.jsonl` 记录 → 会话消息（文件版与内容版共用）。
+fn push_grok_message(
+    messages: &mut Vec<SessionMessage>,
+    span: super::utils::JsonlSpan,
+    value: Value,
+) {
+    let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+    let role = match kind {
+        "system" | "user" | "assistant" | "tool" => kind,
+        // Reasoning records can contain encrypted/internal state and are not
+        // conversation messages shown by Grok's own history view.
+        _ => return,
+    };
+    let text = value.get("content").map(extract_text).unwrap_or_default();
+    let blocks = match role {
+        "tool" => vec![tool_result_block(
+            value
+                .get("tool_call_id")
+                .or_else(|| value.get("call_id"))
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            ToolStatus::Unknown,
+            &text,
+            || Some(span.content_ref("/content")),
+        )],
+        "assistant" => {
+            let mut blocks = Vec::new();
+            if !text.trim().is_empty() {
+                blocks.push(SessionBlock::text(text));
+            }
+            blocks.extend(openai_tool_calls(value.get("tool_calls"), |pointer| {
+                Some(span.content_ref(format!("/tool_calls{pointer}")))
+            }));
+            blocks
+        }
+        _ if text.trim().is_empty() => Vec::new(),
+        _ => vec![SessionBlock::text(text)],
+    };
+    let ts = value
+        .get("timestamp")
+        .or_else(|| value.get("ts"))
+        .and_then(parse_timestamp_to_ms);
+    let mut message = SessionMessage::from_blocks(role, ts, blocks);
+    if message.is_empty() {
+        return;
+    }
+    // system prompt 属于注入内容，默认隐藏
+    message.injected = role == "system";
+    messages.push(message);
 }
 
 pub fn delete_session(root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {

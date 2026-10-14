@@ -180,7 +180,25 @@ fn read_session_document(path: &Path) -> Result<Value, String> {
 
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
     let value = read_session_document(path)?;
+    parse_messages_from_value(path, &value)
+}
 
+/// 从会话文件**内容**解析消息（纯函数，供远端复用）。
+/// 会话文档是单个 JSON（非 JSONL），`rel_path` 由 `source_path` 推导。
+pub(crate) fn parse_messages_from_content(
+    content: &str,
+    source_path: &str,
+) -> Result<Vec<SessionMessage>, String> {
+    let value =
+        parse_session_document(content).ok_or_else(|| "Failed to parse session JSON".to_string())?;
+    parse_messages_from_value(Path::new(source_path), &value)
+}
+
+/// 消息数组 → `SessionMessage`（文件版与内容版共用）。
+fn parse_messages_from_value(
+    path: &Path,
+    value: &Value,
+) -> Result<Vec<SessionMessage>, String> {
     let messages = value
         .get("messages")
         .and_then(Value::as_array)

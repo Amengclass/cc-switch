@@ -1828,6 +1828,8 @@ pub fn run() {
             remote::commands::list_remote_sessions_all,
             remote::commands::get_remote_session_messages,
             remote::commands::delete_remote_session,
+            remote::commands::get_remote_session_block_content,
+            remote::commands::get_remote_session_image,
             remote::commands::read_remote_mcp_servers,
             remote::commands::read_remote_mcp_json,
             remote::commands::upsert_remote_mcp_server,

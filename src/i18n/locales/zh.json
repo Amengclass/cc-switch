@@ -1317,6 +1317,7 @@
     "resumeInFor": "在 {{terminal}} 中恢复 {{title}}",
     "copyResumeFor": "复制「{{title}}」的恢复命令",
     "resumeCopiedNoLaunch": "已复制恢复命令。这个平台暂不支持一键恢复，请在项目目录下粘贴到终端运行",
+    "resumeCopiedRemote": "已复制恢复命令。请在远端主机/容器对应目录下运行（本机终端无法直接恢复远端会话）",
     "moreFor": "{{title}} 的更多操作",
     "copySessionId": "复制会话 ID",
     "sessionIdCopied": "已复制会话 ID",

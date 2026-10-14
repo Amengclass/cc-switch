@@ -203,7 +203,7 @@ fn decode_content(raw: &str) -> String {
     }
 }
 
-fn sqlite_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMeta> {
+pub(crate) fn sqlite_row_to_session_meta(row: &Value, db_source: &str) -> Option<SessionMeta> {
     let obj = row.as_object()?;
 
     let session_id = obj.get("id").and_then(Value::as_str)?.to_string();
@@ -549,6 +549,30 @@ pub(crate) fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
         return None;
     }
     Some((db_path, session_id))
+}
+
+/// 远端 SQLite 行 → 消息（远端 sqlite-helper 返回的 JSON 行）。
+/// 本机走 `load_messages_from_conn`（带工具调用/思考块），远端只取纯文本行，
+/// 足够列表预览与阅读；结构化块仍以本机为准。
+pub(crate) fn sqlite_row_to_message(row: &Value) -> Option<SessionMessage> {
+    let role = row.get("role").and_then(Value::as_str).unwrap_or("");
+    if role.is_empty() {
+        return None;
+    }
+    let raw = row.get("content").and_then(Value::as_str).unwrap_or("");
+    if raw.trim().is_empty() {
+        return None;
+    }
+    let text = decode_content(raw);
+    if text.trim().is_empty() {
+        return None;
+    }
+    let ts = row.get("created_at").and_then(parse_timestamp_to_ms);
+    Some(SessionMessage::from_blocks(
+        role,
+        ts,
+        vec![SessionBlock::text(text)],
+    ))
 }
 
 // ── JSONL scanning ──────────────────────────────────────────────────

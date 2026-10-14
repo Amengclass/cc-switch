@@ -10,6 +10,9 @@ export interface ReaderContextValue {
   sourcePath?: string;
   /** 会话项目目录：路径显示为相对路径 */
   projectDir?: string;
+  /** 远端目标（本补丁层）：非空时块全文/图片走远端命令 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   style: AgentReaderStyle;
   /** 助手名（Claude Code / Codex …） */
   appName: string;

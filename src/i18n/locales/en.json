@@ -1317,6 +1317,7 @@
     "resumeInFor": "Resume {{title}} in {{terminal}}",
     "copyResumeFor": "Copy the resume command for “{{title}}”",
     "resumeCopiedNoLaunch": "Resume command copied. One-click resume isn’t available on this platform; paste it into a terminal in the project folder.",
+    "resumeCopiedRemote": "Resume command copied. Run it in the matching folder on the remote host/container (a local terminal can’t resume a remote session).",
     "moreFor": "More actions for {{title}}",
     "copySessionId": "Copy session ID",
     "sessionIdCopied": "Session ID copied",

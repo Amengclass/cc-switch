@@ -9,7 +9,7 @@ use serde_json::Value;
 use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::pi_blocks::PiTranscript;
-use super::utils::for_each_jsonl_value;
+use super::utils::LineSpans;
 use super::utils::{
     extract_text, parse_timestamp_to_ms, path_basename, truncate_summary, TITLE_MAX_CHARS,
 };
@@ -502,11 +502,34 @@ fn update_session_summary(summary: &mut SessionSummary, value: &Value) {
 
 fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMessage>, String> {
     validate_file_size(path)?;
+    let reader = BufReader::new(
+        File::open(path).map_err(|error| format!("Failed to open Pi session: {error}"))?,
+    );
+    read_active_messages_from_reader(reader, tree)
+        .map_err(|error| error.replace("Pi session", "session file"))
+}
+
+/// 从会话文件**内容**解析消息（纯函数，供远端复用：树与正文都从同一份内容得出）。
+pub(crate) fn parse_messages_from_content(content: &str) -> Result<Vec<SessionMessage>, String> {
+    let tree = read_tree_from_str(content)?;
+    if (content.len() as u64) > MAX_SESSION_BYTES {
+        return Err(format!(
+            "Pi session exceeds the {MAX_SESSION_BYTES}-byte safety limit"
+        ));
+    }
+    read_active_messages_from_reader(std::io::Cursor::new(content.as_bytes()), &tree)
+}
+
+/// 逐行推进正文（文件版与内容版共用；口径与 `for_each_jsonl_value` 一致）。
+fn read_active_messages_from_reader(
+    reader: impl std::io::BufRead,
+    tree: &SessionTree,
+) -> Result<Vec<SessionMessage>, String> {
     let mut transcript = PiTranscript::new();
     let mut saw_header = false;
     let mut entry_index = 0usize;
     let mut legacy_previous_id = None;
-    for_each_jsonl_value(path, |span, value| {
+    let mut collect = |span: super::utils::JsonlSpan, value: Value| -> Result<(), String> {
         if !saw_header {
             if value.get("type").and_then(Value::as_str) == Some("session") {
                 saw_header = true;
@@ -532,8 +555,23 @@ fn read_active_messages(path: &Path, tree: &SessionTree) -> Result<Vec<SessionMe
             transcript.push_entry(&value, span, Some(id));
         }
         Ok(())
-    })
-    .map_err(|error| error.replace("session file", "Pi session"))?;
+    };
+    // 文件版与内容版只是数据源不同，逐行口径一致
+    let mut lines = LineSpans::new(reader);
+    while let Some(line) = lines
+        .next_line()
+        .map_err(|error| format!("Failed to read Pi session: {error}"))?
+    {
+        let bytes = line.bytes.trim_ascii();
+        if bytes.is_empty() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<Value>(bytes) else {
+            continue;
+        };
+        collect(line.span, value)?;
+    }
+    drop(collect);
     Ok(transcript.finish())
 }
 

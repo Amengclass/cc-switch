@@ -82,11 +82,20 @@ export const BlockText = memo(function BlockText({
   className,
 }: BlockTextProps) {
   const rt = useReaderT();
-  const { providerId, sourcePath, searchQuery, onCopy } = useReaderContext();
+  const {
+    providerId,
+    sourcePath,
+    searchQuery,
+    onCopy,
+    remoteTargetId,
+    remoteContainerId,
+  } = useReaderContext();
   const [showAll, setShowAll] = useState(false);
   const needsFetch = truncated && Boolean(full);
   const content = useBlockContent(providerId, sourcePath, full, {
     enabled: showAll && needsFetch,
+    remoteTargetId,
+    remoteContainerId,
   });
 
   const previewRows = useMemo(() => preview.split("\n"), [preview]);
@@ -269,8 +278,12 @@ const DiffFromRef = ({
   formatPath: (path: string) => string;
 }) => {
   const rt = useReaderT();
-  const { providerId, sourcePath, searchQuery } = useReaderContext();
-  const content = useBlockContent(providerId, sourcePath, diffRef);
+  const { providerId, sourcePath, searchQuery, remoteTargetId, remoteContainerId } =
+    useReaderContext();
+  const content = useBlockContent(providerId, sourcePath, diffRef, {
+    remoteTargetId,
+    remoteContainerId,
+  });
   if (content.isLoading) {
     return (
       <div className="h-16 rounded-[8px] border border-border bg-subtle motion-safe:animate-pulse" />

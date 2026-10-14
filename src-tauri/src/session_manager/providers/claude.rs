@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};

@@ -5,7 +5,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { sessionsApi } from "@/lib/api/sessions";
-import { getRemoteSessionMessages } from "@/lib/api/remote";
+import {
+  getRemoteSessionBlockContent,
+  getRemoteSessionImage,
+  getRemoteSessionMessages,
+} from "@/lib/api/remote";
 import type {
   ContentRef,
   ImageRef,
@@ -24,9 +28,18 @@ export const sessionKeys = {
     ["sessionMessages", providerId, sourcePath] as const,
   transcript: (providerId?: string, sourcePath?: string) =>
     ["sessionTranscript", providerId, sourcePath] as const,
-  blockContent: (providerId?: string, sourcePath?: string, ref?: ContentRef) =>
+  blockContent: (
+    providerId?: string,
+    sourcePath?: string,
+    ref?: ContentRef,
+    remoteTargetId?: string,
+    remoteContainerId?: string,
+  ) =>
     [
       "sessionBlockContent",
+      ...(remoteTargetId
+        ? (["remote", remoteTargetId, remoteContainerId ?? "__host__"] as const)
+        : ([] as const)),
       providerId,
       sourcePath,
       ref ? stableKey(ref) : null,
@@ -270,15 +283,35 @@ export const useBlockContent = (
   providerId: string | undefined,
   sourcePath: string | undefined,
   ref: ContentRef | undefined,
-  options: { enabled?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    remoteTargetId?: string;
+    remoteContainerId?: string;
+  } = {},
 ): BlockContentResult => {
+  const { remoteTargetId, remoteContainerId } = options;
   const query = useInfiniteQuery({
-    queryKey: sessionKeys.blockContent(providerId, sourcePath, ref),
+    queryKey: sessionKeys.blockContent(
+      providerId,
+      sourcePath,
+      ref,
+      remoteTargetId,
+      remoteContainerId,
+    ),
     queryFn: ({ pageParam }) =>
-      sessionsApi.getBlockContent(providerId!, sourcePath!, ref!, {
-        offset: pageParam,
-        limit: BLOCK_PAGE_CHARS,
-      }),
+      remoteTargetId
+        ? getRemoteSessionBlockContent(
+            remoteTargetId,
+            sourcePath!,
+            ref!,
+            providerId!,
+            { offset: pageParam, limit: BLOCK_PAGE_CHARS },
+            remoteContainerId,
+          )
+        : sessionsApi.getBlockContent(providerId!, sourcePath!, ref!, {
+            offset: pageParam,
+            limit: BLOCK_PAGE_CHARS,
+          }),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => {
       const loaded = pages.reduce((sum, page) => sum + page.text.length, 0);
@@ -351,11 +384,21 @@ const loadImageUrl = (
   providerId: string,
   sourcePath: string,
   image: ImageRef,
+  remoteTargetId?: string,
+  remoteContainerId?: string,
 ) => {
   let pending = imageLoads.get(key);
   if (!pending) {
-    pending = sessionsApi
-      .getImage(providerId, sourcePath, image)
+    pending = (remoteTargetId
+      ? getRemoteSessionImage(
+          remoteTargetId,
+          sourcePath,
+          image,
+          providerId,
+          remoteContainerId,
+        )
+      : sessionsApi.getImage(providerId, sourcePath, image)
+    )
       .then((bytes) => {
         const url = URL.createObjectURL(
           new Blob([bytes], { type: image.mediaType }),
@@ -407,11 +450,18 @@ export const useSessionImage = (
   providerId: string | undefined,
   sourcePath: string | undefined,
   image: ImageRef | undefined,
-  options: { enabled?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    remoteTargetId?: string;
+    remoteContainerId?: string;
+  } = {},
 ): SessionImageResult => {
+  const { remoteTargetId, remoteContainerId } = options;
   const enabled =
     Boolean(providerId && sourcePath && image) && options.enabled !== false;
-  const key = image ? `${providerId}|${sourcePath}|${stableKey(image)}` : "";
+  const key = image
+    ? `${remoteTargetId ?? ""}|${remoteContainerId ?? ""}|${providerId}|${sourcePath}|${stableKey(image)}`
+    : "";
   const [state, setState] = useState<SessionImageResult>({
     url: null,
     isLoading: false,
@@ -432,7 +482,14 @@ export const useSessionImage = (
     } else {
       setState({ url: null, isLoading: true, error: null });
       startWaiting(key);
-      loadImageUrl(key, providerId!, sourcePath!, image!).then(
+      loadImageUrl(
+        key,
+        providerId!,
+        sourcePath!,
+        image!,
+        remoteTargetId,
+        remoteContainerId,
+      ).then(
         () => {
           stopWaiting(key);
           // 已卸载就不占用；不再等它了，补一次淘汰以免超出上限

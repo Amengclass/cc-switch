@@ -32,6 +32,12 @@ pub trait FileOps {
     async fn remove_dir_all(&self, path: &str) -> Result<(), String>;
     /// 读取整个文本文件；文件不存在时返回 None。
     async fn read_text_optional(&self, path: &str) -> Result<Option<String>, String>;
+    /// 读取整个文件字节；文件不存在时返回 None（图片、按偏移取行用）。
+    async fn read_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+    /// 读文件中 `[offset, offset + len)` 的字节（JSONL 行回取）；越界返回 Err。
+    async fn read_range(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String>;
+    /// 文件大小（字节）；不存在时返回 None。
+    async fn file_size(&self, path: &str) -> Option<u64>;
     /// 原子写回整个文本文件（临时文件 + rename），自动确保父目录存在。
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String>;
 }
@@ -96,6 +102,36 @@ impl FileOps for LocalFileOps {
         std::fs::read_to_string(p)
             .map(Some)
             .map_err(|e| format!("读取文件失败 {path}: {e}"))
+    }
+
+    async fn read_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        let p = Path::new(path);
+        if !p.exists() {
+            return Ok(None);
+        }
+        std::fs::read(p)
+            .map(Some)
+            .map_err(|e| format!("读取文件失败 {path}: {e}"))
+    }
+
+    async fn read_range(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut file = std::fs::File::open(path).map_err(|_| "无法读取文件".to_string())?;
+        let file_len = file.metadata().map_err(|_| "无法读取文件".to_string())?.len();
+        let end = offset
+            .checked_add(len)
+            .filter(|end| *end <= file_len)
+            .ok_or_else(|| "会话已更新，请重新读取".to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|_| "无法读取文件".to_string())?;
+        let mut buf = vec![0u8; (end - offset) as usize];
+        file.read_exact(&mut buf)
+            .map_err(|_| "无法读取文件".to_string())?;
+        Ok(buf)
+    }
+
+    async fn file_size(&self, path: &str) -> Option<u64> {
+        std::fs::metadata(path).ok().map(|m| m.len())
     }
 
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {
@@ -246,6 +282,33 @@ impl FileOps for RemoteSftpFileOps<'_> {
 
     async fn read_text_optional(&self, path: &str) -> Result<Option<String>, String> {
         crate::remote::sftp_io::read_remote_text_optional(self.sftp, path).await
+    }
+
+    async fn read_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        if !self.exists(path).await {
+            return Ok(None);
+        }
+        self.sftp
+            .read(path)
+            .await
+            .map(Some)
+            .map_err(|e| format!("远端读取失败 {path}: {e}"))
+    }
+
+    async fn read_range(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        let mut file = self
+            .sftp
+            .open(path)
+            .await
+            .map_err(|_| "无法读取文件".to_string())?;
+        file.seek(SeekFrom::Start(offset))
+            .await
+            .map_err(|_| "无法读取文件".to_string())?;
+        read_up_to(&mut file, len, path).await
+    }
+
+    async fn file_size(&self, path: &str) -> Option<u64> {
+        self.sftp.metadata(path).await.ok().and_then(|m| m.size)
     }
 
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {

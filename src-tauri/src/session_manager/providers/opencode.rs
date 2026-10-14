@@ -138,6 +138,95 @@ pub(crate) fn parse_sqlite_source(source: &str) -> Option<(PathBuf, String)> {
     Some((db_path, session_id))
 }
 
+/// 远端 SQLite 行 → 会话元数据（远端 sqlite-helper 返回的 JSON 行）。
+/// 列与本机 `parse_sqlite_session_row` 的 SELECT 一致（id/title/directory/time_created/time_updated）。
+pub(crate) fn opencode_row_to_session_meta(row: &Value, db_display: &str) -> Option<SessionMeta> {
+    let session_id = row.get("id").and_then(Value::as_str)?.to_string();
+    let title = row.get("title").and_then(Value::as_str).unwrap_or("");
+    let directory = row.get("directory").and_then(Value::as_str).unwrap_or("");
+    let created = row.get("time_created").and_then(Value::as_i64)?;
+    let updated = row
+        .get("time_updated")
+        .and_then(Value::as_i64)
+        .unwrap_or(created);
+
+    let display_title = if title.trim().is_empty() {
+        path_basename(directory)
+    } else {
+        Some(title.to_string())
+    };
+    Some(SessionMeta {
+        provider_id: PROVIDER_ID.to_string(),
+        session_id: session_id.clone(),
+        title: display_title.clone(),
+        summary: display_title,
+        project_dir: (!directory.is_empty()).then(|| directory.to_string()),
+        created_at: Some(created),
+        last_active_at: Some(updated),
+        source_path: Some(format!("sqlite:{db_display}:{session_id}")),
+        resume_command: Some(format!("opencode -s {session_id}")),
+    })
+}
+
+/// 远端 SQLite 行 → 消息列表（v1：`message` + `part` 两个结果集）。
+/// part 的全文引用指向远端 db 的 `part` 表（`ContentRef::Sqlite`），本机 content 解析用不到，
+/// 阅读页只展示预览文本。
+pub(crate) fn assemble_opencode_messages(
+    message_rows: &[Value],
+    part_rows: &[Value],
+) -> Vec<SessionMessage> {
+    let mut parts_map: HashMap<String, Vec<(PartLocator, Value)>> = HashMap::new();
+    for row in part_rows {
+        let Some(part_id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(message_id) = row.get("message_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Ok(part) = serde_json::from_str::<Value>(
+            row.get("data").and_then(Value::as_str).unwrap_or(""),
+        ) else {
+            continue;
+        };
+        parts_map
+            .entry(message_id.to_string())
+            .or_default()
+            .push((
+                PartLocator::Sqlite {
+                    table: "part",
+                    id: part_id.to_string(),
+                    base: String::new(),
+                },
+                part,
+            ));
+    }
+
+    let mut messages = Vec::new();
+    for row in message_rows {
+        let Some(msg_id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let ts = row.get("time_created").and_then(Value::as_i64);
+        let Ok(msg_value) = serde_json::from_str::<Value>(
+            row.get("data").and_then(Value::as_str).unwrap_or(""),
+        ) else {
+            continue;
+        };
+        let role = msg_value
+            .get("role")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let parts = parts_map.remove(msg_id).unwrap_or_default();
+        let message = message_from_parts(role, Some(msg_id.to_string()), ts, &msg_value, &parts);
+        if !message.is_empty() {
+            messages.push(message);
+        }
+    }
+
+    assign_turn_ids(&mut messages);
+    messages
+}
+
 fn scan_sessions_sqlite() -> Vec<SessionMeta> {
     let db_path = get_opencode_db_path();
     if !db_path.exists() {

@@ -349,7 +349,7 @@ fn read_jsonl_line(path: &Path, offset: u64, len: u32) -> Result<Vec<u8>, String
 /// - 数组 → 字符串项或 `{text}` 项按行拼接（Claude tool_result 的 content 数组）
 /// - 对象 / 无文本项的数组 → 格式化 JSON（工具参数 `input_full`）
 /// - 数字 / 布尔 / null → 拒绝
-fn extract_text(value: &Value, pointer: &str) -> Result<String, String> {
+pub(crate) fn extract_text(value: &Value, pointer: &str) -> Result<String, String> {
     let target = if pointer.is_empty() {
         value
     } else {
@@ -497,7 +497,7 @@ pub fn load_image(source: &ValidatedSource, image: &ImageRef) -> Result<Vec<u8>,
 }
 
 /// 去掉 `data:<mime>;base64,` 前缀后解码；编码长度先粗检，解码后再精确检查上限。
-fn decode_inline_image(encoded: &str, max: u64) -> Result<Vec<u8>, String> {
+pub(crate) fn decode_inline_image(encoded: &str, max: u64) -> Result<Vec<u8>, String> {
     let data = match encoded.strip_prefix("data:") {
         Some(rest) => rest
             .split_once(',')

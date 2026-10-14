@@ -383,8 +383,17 @@ export const useDeleteSessionMutation = () => {
       return input;
     },
     onSuccess: async (input) => {
+      // 远端列表的 query key 带目标三元组；本机是 ["sessions"]
+      const listKey = input.remoteTargetId
+        ? [
+            "sessions",
+            "remote",
+            input.remoteTargetId,
+            input.remoteContainerId ?? "__host__",
+          ]
+        : ["sessions"];
       const deleted = queryClient
-        .getQueryData<SessionMeta[]>(["sessions"])
+        .getQueryData<SessionMeta[]>(listKey)
         ?.find(
           (session) =>
             session.providerId === input.providerId &&
@@ -392,7 +401,7 @@ export const useDeleteSessionMutation = () => {
             session.sourcePath === input.sourcePath,
         );
       const deletedTitle = deleted?.title?.trim() || deleted?.summary?.trim();
-      queryClient.setQueryData<SessionMeta[]>(["sessions"], (current) =>
+      queryClient.setQueryData<SessionMeta[]>(listKey, (current) =>
         (current ?? []).filter(
           (session) =>
             !(

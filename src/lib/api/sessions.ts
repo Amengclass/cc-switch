@@ -11,6 +11,9 @@ export interface DeleteSessionOptions {
   providerId: string;
   sessionId: string;
   sourcePath: string;
+  /** 远端目标（本补丁层）：非空时删除走远端命令 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export interface DeleteSessionResult extends DeleteSessionOptions {
@@ -107,7 +110,17 @@ export const sessionsApi = {
   },
 
   async delete(options: DeleteSessionOptions): Promise<boolean> {
-    const { providerId, sessionId, sourcePath } = options;
+    const { providerId, sessionId, sourcePath, remoteTargetId, remoteContainerId } = options;
+    if (remoteTargetId) {
+      const { deleteRemoteSession } = await import("./remote");
+      return await deleteRemoteSession(
+        remoteTargetId,
+        sourcePath,
+        sessionId,
+        remoteContainerId,
+        providerId,
+      );
+    }
     return await invoke("delete_session", {
       providerId,
       sessionId,
@@ -118,6 +131,39 @@ export const sessionsApi = {
   async deleteMany(
     items: DeleteSessionOptions[],
   ): Promise<DeleteSessionResult[]> {
+    // 远端：逐条走远端命令（后端无批量远端删除命令），聚合同款结果
+    const remoteItems = items.filter((item) => item.remoteTargetId);
+    if (remoteItems.length > 0) {
+      const { deleteRemoteSession } = await import("./remote");
+      const outcomes: DeleteSessionResult[] = [];
+      for (const item of items) {
+        if (!item.remoteTargetId) {
+          outcomes.push({
+            ...item,
+            success: false,
+            error: "远端目标下不能删除本机会话",
+          });
+          continue;
+        }
+        try {
+          await deleteRemoteSession(
+            item.remoteTargetId,
+            item.sourcePath,
+            item.sessionId,
+            item.remoteContainerId,
+            item.providerId,
+          );
+          outcomes.push({ ...item, success: true });
+        } catch (error) {
+          outcomes.push({
+            ...item,
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return outcomes;
+    }
     return await invoke("delete_sessions", { items });
   },
 

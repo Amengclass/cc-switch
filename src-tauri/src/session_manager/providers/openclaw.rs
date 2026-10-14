@@ -12,8 +12,8 @@ use crate::{
 use super::pi_blocks::PiTranscript;
 use super::utils::for_each_jsonl_value;
 use super::utils::{
-    extract_text, parse_timestamp_to_ms, path_basename, read_head_tail_lines, truncate_summary,
-    TITLE_MAX_CHARS,
+    extract_text, for_each_jsonl_value_bytes, parse_timestamp_to_ms, path_basename,
+    read_head_tail_lines, truncate_summary, TITLE_MAX_CHARS,
 };
 
 const PROVIDER_ID: &str = "openclaw";
@@ -83,6 +83,17 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
         Ok(())
     })?;
     Ok(transcript.finish())
+}
+
+/// 从会话文件**内容**解析消息（纯函数，供远端复用）。
+pub(crate) fn parse_messages_from_content(content: &[u8]) -> Vec<SessionMessage> {
+    let mut transcript = PiTranscript::new();
+    let _ = for_each_jsonl_value_bytes(content, |span, value| {
+        let id = value.get("id").and_then(Value::as_str).map(str::to_string);
+        transcript.push_entry(&value, span, id);
+        Ok(())
+    });
+    transcript.finish()
 }
 
 pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<bool, String> {

@@ -102,6 +102,27 @@ impl FileOps for RemoteTarget<'_> {
         }
     }
 
+    async fn read_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        match self {
+            RemoteTarget::Sftp(f) => f.read_bytes_optional(path).await,
+            RemoteTarget::Docker(f) => f.read_bytes_optional(path).await,
+        }
+    }
+
+    async fn read_range(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        match self {
+            RemoteTarget::Sftp(f) => f.read_range(path, offset, len).await,
+            RemoteTarget::Docker(f) => f.read_range(path, offset, len).await,
+        }
+    }
+
+    async fn file_size(&self, path: &str) -> Option<u64> {
+        match self {
+            RemoteTarget::Sftp(f) => f.file_size(path).await,
+            RemoteTarget::Docker(f) => f.file_size(path).await,
+        }
+    }
+
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {
         match self {
             RemoteTarget::Sftp(f) => f.write_text_atomic(path, content).await,
@@ -312,6 +333,62 @@ impl FileOps for DockerExecFileOps<'_> {
             Ok(text) => Ok(if text.is_empty() { None } else { Some(text) }),
             Err(_) => Ok(None),
         }
+    }
+
+    async fn read_bytes_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        // base64 编码回传，避免二进制经 shell stdout 被破坏
+        let out = self
+            .exec(&format!(
+                "if test -f {p}; then base64 {p}; else echo __CCSWITCH_MISSING__; fi",
+                p = shell_quote(path)
+            ))
+            .await;
+        match out {
+            Ok(text) => {
+                let trimmed = text.trim();
+                if trimmed == "__CCSWITCH_MISSING__" || trimmed.is_empty() {
+                    return Ok(None);
+                }
+                use base64::Engine as _;
+                let compact: String = trimmed.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                base64::engine::general_purpose::STANDARD
+                    .decode(compact)
+                    .map(Some)
+                    .map_err(|e| format!("容器内读取失败 {path}: {e}"))
+            }
+            Err(_) => Ok(None),
+        }
+    }
+
+    async fn read_range(&self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        // dd 从 offset 起读 len 字节，再 base64 回传
+        use base64::Engine as _;
+        let out = self
+            .exec(&format!(
+                "dd if={p} bs=1 skip={off} count={len} 2>/dev/null | base64",
+                p = shell_quote(path),
+                off = offset,
+                len = len
+            ))
+            .await?;
+        let compact: String = out.trim().chars().filter(|c| !c.is_ascii_whitespace()).collect();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(compact)
+            .map_err(|_| "会话已更新，请重新读取".to_string())?;
+        if bytes.len() as u64 != len {
+            return Err("会话已更新，请重新读取".to_string());
+        }
+        Ok(bytes)
+    }
+
+    async fn file_size(&self, path: &str) -> Option<u64> {
+        self.exec(&format!(
+            "stat -c %s {} 2>/dev/null || echo 0",
+            shell_quote(path)
+        ))
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
     }
 
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {

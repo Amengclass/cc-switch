@@ -346,6 +346,17 @@ export function SessionManagerPage({
   const handleLaunch = async (session: SessionMeta) => {
     const command = session.resumeCommand;
     if (!command) return;
+    // 远端会话：恢复命令必须在远端机上跑，本机终端够不到 → 只复制命令
+    if (remoteTargetId) {
+      handleCopy(
+        command,
+        t("sessionManager.resumeCopiedRemote", {
+          defaultValue:
+            "已复制恢复命令。请在远端主机/容器对应目录下运行（本机终端无法直接恢复远端会话）",
+        }),
+      );
+      return;
+    }
     if (!terminalName) {
       handleCopy(
         command,
@@ -484,6 +495,8 @@ export function SessionManagerPage({
           providerId: target.providerId,
           sessionId: target.sessionId,
           sourcePath: target.sourcePath!,
+          remoteTargetId,
+          remoteContainerId,
         });
       } catch {
         // 失败的 toast 由 mutation 统一给
@@ -509,6 +522,8 @@ export function SessionManagerPage({
           providerId: session.providerId,
           sessionId: session.sessionId,
           sourcePath: session.sourcePath!,
+          remoteTargetId,
+          remoteContainerId,
         })),
       );
 
@@ -524,7 +539,10 @@ export function SessionManagerPage({
 
       if (deletedKeys.length > 0) {
         const deletedKeySet = new Set(deletedKeys);
-        queryClient.setQueryData<SessionMeta[]>(["sessions"], (current) =>
+        const listKey = remoteTargetId
+          ? ["sessions", "remote", remoteTargetId, remoteContainerId ?? "__host__"]
+          : ["sessions"];
+        queryClient.setQueryData<SessionMeta[]>(listKey, (current) =>
           (current ?? []).filter(
             (session) => !deletedKeySet.has(getSessionKey(session)),
           ),
@@ -1034,6 +1052,8 @@ export function SessionManagerPage({
             session={readerSession}
             appName={appName(readerSession.providerId)}
             transcript={transcript}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
             listQuery={trimmedQuery}
             launchTerminal={terminalName}
             hasPrev={readerIndex > 0}

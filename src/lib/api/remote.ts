@@ -1,11 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ContentRef,
   HermesModelConfig,
+  ImageRef,
   McpServer,
   Provider,
   SessionMessage,
   SessionMeta,
 } from "@/types";
+import type { BlockContent } from "./sessions";
 import type {
   ProviderSortUpdate,
 } from "./providers";
@@ -502,6 +505,43 @@ export async function deleteRemoteSession(
     sessionId,
     container: container ?? null,
     app: app ?? "claude",
+  });
+}
+
+/** 远端会话按需取块全文（阅读页「加载更多」） */
+export async function getRemoteSessionBlockContent(
+  hostId: string,
+  sourcePath: string,
+  contentRef: ContentRef,
+  app: string,
+  page: { offset?: number; limit?: number } = {},
+  container?: string,
+): Promise<BlockContent> {
+  return invoke<BlockContent>("get_remote_session_block_content", {
+    hostId,
+    sourcePath,
+    container: container ?? null,
+    app,
+    contentRef,
+    offset: page.offset,
+    limit: page.limit,
+  });
+}
+
+/** 远端会话图片原始字节（阅读页图片预览） */
+export async function getRemoteSessionImage(
+  hostId: string,
+  sourcePath: string,
+  image: ImageRef,
+  app: string,
+  container?: string,
+): Promise<ArrayBuffer> {
+  return invoke<ArrayBuffer>("get_remote_session_image", {
+    hostId,
+    sourcePath,
+    container: container ?? null,
+    app,
+    image,
   });
 }
 

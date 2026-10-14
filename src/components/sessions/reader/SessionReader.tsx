@@ -131,6 +131,9 @@ export interface SessionReaderProps {
   session: SessionMeta;
   appName: string;
   transcript: SessionTranscriptResult;
+  /** 远端目标（本补丁层）：非空时块全文/图片走远端命令 */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   /** 列表的搜索词：阅读页里照样高亮 */
   listQuery: string;
   /** 一键恢复用的终端名；不是 macOS 时为 null（只能复制命令） */
@@ -155,6 +158,8 @@ export function SessionReader({
   session,
   appName,
   transcript,
+  remoteTargetId,
+  remoteContainerId,
   listQuery,
   launchTerminal,
   hasPrev,
@@ -463,6 +468,8 @@ export function SessionReader({
       providerId: session.providerId,
       sourcePath: session.sourcePath ?? undefined,
       projectDir: session.projectDir ?? undefined,
+      remoteTargetId,
+      remoteContainerId,
       style,
       appName,
       searchQuery: highlightQuery || undefined,
@@ -472,6 +479,8 @@ export function SessionReader({
       appName,
       highlightQuery,
       onCopy,
+      remoteContainerId,
+      remoteTargetId,
       session.projectDir,
       session.providerId,
       session.sourcePath,
