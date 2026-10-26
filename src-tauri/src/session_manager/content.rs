@@ -382,7 +382,7 @@ fn pretty_json(value: &Value) -> Result<String, String> {
 }
 
 /// 各 provider 允许回取的 (表, 列)；id 与 session_id 用参数绑定，确保只能读本会话的行
-fn sqlite_allowed(provider_id: &str, table: &str, column: &str) -> bool {
+pub(crate) fn sqlite_allowed(provider_id: &str, table: &str, column: &str) -> bool {
     let (tables, columns): (&[&str], &[&str]) = match provider_id {
         "opencode" => (
             &["part", "message", "session_message"],

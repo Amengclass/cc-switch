@@ -197,7 +197,8 @@ export function SessionManagerPage({
   const piSessionDiscovery = useQuery({
     queryKey: piKeys.sessionDiscovery,
     queryFn: () => piApi.getSessionDiscovery(),
-    enabled: appFilter === "pi",
+    // 远端目标下不查本机 Pi 配置：那会把本机的目录状态当成远端状态提示
+    enabled: appFilter === "pi" && !remoteTargetId,
     staleTime: 30 * 1000,
   });
 
@@ -1416,6 +1417,7 @@ export function SessionManagerPage({
       <SessionSourcesDialog
         open={whereOpen}
         onClose={() => setWhereOpen(false)}
+        remote={Boolean(remoteTargetId)}
       />
     </div>
   );

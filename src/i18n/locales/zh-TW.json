@@ -1282,6 +1282,7 @@
     "whereMenu": "工作階段記錄在哪裡",
     "whereTitle": "工作階段記錄在哪裡",
     "whereLead": "CC Switch 從這些位置讀取工作階段。Claude Desktop 沒有單獨的工作階段記錄。",
+    "whereLeadRemote": "CC Switch 從遠端目標（所選主機/容器）的這些位置讀取工作階段，~ 指遠端使用者的 home。",
     "whereNote": "在設定裡改過設定目錄的應用，按改過的目錄讀取。",
     "appPrefix": "應用：",
     "chooseApp": "選擇應用",

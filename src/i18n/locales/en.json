@@ -1281,6 +1281,7 @@
     "whereMenu": "Where sessions are stored",
     "whereTitle": "Where sessions are stored",
     "whereLead": "CC Switch reads sessions from these locations. Claude Desktop has no session records of its own.",
+    "whereLeadRemote": "CC Switch reads sessions from these locations on the remote target (selected host/container). ~ means the remote user's home.",
     "whereNote": "Apps with a custom config directory in Settings are read from that directory.",
     "appPrefix": "App: ",
     "chooseApp": "Choose app",

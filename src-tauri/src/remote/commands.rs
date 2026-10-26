@@ -2334,8 +2334,15 @@ pub async fn delete_remote_session(
         container.as_deref(),
     )?;
 
-    // hermes / opencode / mcode：SQLite 主存储，经远端 sqlite-helper 删除（先校验存在）
-    if app == "hermes" || app == "opencode" || app == "mcode" {
+    // mcode：与本机一致——会话只能在 MCode 内删（runtime state 与历史要一起移除）
+    if app == "mcode" {
+        return Err(
+            "请在 MiniMax Code 中删除该会话（其运行时状态与历史需由 MCode 一起清理）".to_string(),
+        );
+    }
+
+    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 删除（先校验存在）
+    if app == "hermes" || app == "opencode" {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
         let (db, check_sql, delete_sql) = if app == "hermes" {
@@ -2343,12 +2350,6 @@ pub async fn delete_remote_session(
                 format!("{home}/.hermes/state.db"),
                 "SELECT id FROM sessions WHERE id = ?1",
                 "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
-            )
-        } else if app == "mcode" {
-            (
-                format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite"),
-                "SELECT session_id FROM local_runtime_sessions WHERE session_id = ?1",
-                crate::session_manager::providers::mcode::DELETE_SQL,
             )
         } else {
             (
@@ -2391,6 +2392,104 @@ pub async fn delete_remote_session(
     crate::remote::sessions::delete_session_fs(&target, &app, &source_path).await
 }
 
+/// 远端会话根（File 引用的相对路径以它为基，与本机 provider_roots 一致）。
+fn remote_session_root(app: &str, home: &str) -> String {
+    match app {
+        "claude" => format!("{home}/.claude/projects"),
+        "codex" => format!("{home}/.codex"),
+        "gemini" => format!("{home}/.gemini/tmp"),
+        "grokbuild" => format!("{home}/.grok"),
+        "openclaw" => format!("{home}/.openclaw/agents"),
+        "pi" => format!("{home}/.pi/agent/sessions"),
+        "opencode" => format!("{home}/.local/share/opencode/storage"),
+        "hermes" => format!("{home}/.hermes"),
+        "mcode" => format!("{home}/.minimax"),
+        _ => home.to_string(),
+    }
+}
+
+/// 远端 SQLite 会话的数据库路径。
+fn remote_sqlite_db(app: &str, home: &str) -> Option<String> {
+    match app {
+        "hermes" => Some(format!("{home}/.hermes/state.db")),
+        "opencode" => Some(format!("{home}/.local/share/opencode/opencode.db")),
+        "mcode" => Some(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite")),
+        _ => None,
+    }
+}
+
+/// 从 sourcePath 取出 SQLite 会话 id（hermes/opencode/mcode 三种源格式）。
+fn remote_sqlite_session_id(app: &str, source_path: &str) -> Option<String> {
+    match app {
+        "hermes" => crate::session_manager::providers::hermes::parse_sqlite_source(source_path)
+            .map(|(_, id)| id),
+        "opencode" => crate::session_manager::providers::opencode::parse_sqlite_source(source_path)
+            .map(|(_, id)| id),
+        "mcode" => source_path.strip_prefix("mcode:").map(str::to_string),
+        _ => None,
+    }
+}
+
+/// 远端 SQLite 单元格 → 文本（对齐本机 `content::read_sqlite_cell`：
+/// 表/列白名单 + id 与 session_id 双绑定，只能读本会话的行）。
+#[allow(clippy::too_many_arguments)]
+async fn resolve_remote_sqlite_cell(
+    session: &connection::RemoteSession,
+    container: Option<&str>,
+    home: &str,
+    app: &str,
+    source_path: &str,
+    table: &str,
+    id: &str,
+    column: &str,
+    pointer: &str,
+) -> Result<String, String> {
+    if !crate::session_manager::content::sqlite_allowed(app, table, column) {
+        return Err("不支持的内容引用".to_string());
+    }
+    let session_id = remote_sqlite_session_id(app, source_path)
+        .ok_or_else(|| format!("Invalid SQLite source reference: {source_path}"))?;
+    let db = remote_sqlite_db(app, home).ok_or_else(|| format!("应用 {app} 没有 SQLite 会话"))?;
+    let helper = ensure_remote_sqlite_helper(session, container, home).await?;
+    // 表名/列名已过白名单，可安全拼接；id/session_id 用参数绑定
+    let sql = format!(
+        "SELECT length(CAST({column} AS BLOB)) AS __len, {column} AS __cell FROM {table} WHERE id = ?1 AND session_id = ?2"
+    );
+    let v = run_sqlite_helper(
+        session,
+        container,
+        &helper,
+        "query",
+        &db,
+        &sql,
+        &[id, session_id.as_str()],
+    )
+    .await?;
+    let rows = v
+        .get("rows")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let row = rows
+        .first()
+        .ok_or_else(|| "会话已更新，请重新读取".to_string())?;
+    let size = row.get("__len").and_then(Value::as_i64).unwrap_or(0);
+    if size as u64 > crate::remote::sessions::MAX_TEXT_BYTES {
+        return Err("内容超过 32MB，请直接打开源文件查看".to_string());
+    }
+    let raw = row
+        .get("__cell")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "引用的内容不是文本".to_string())?
+        .to_string();
+    if pointer.is_empty() {
+        return Ok(raw);
+    }
+    let value: Value =
+        serde_json::from_str(&raw).map_err(|_| "会话已更新，请重新读取".to_string())?;
+    crate::session_manager::content::extract_text(&value, pointer)
+}
+
 /// 远端会话按需取块全文（阅读页「加载更多」），使用与本机一致的字符分页。
 #[tauri::command]
 pub async fn get_remote_session_block_content(
@@ -2411,9 +2510,40 @@ pub async fn get_remote_session_block_content(
         &session.channel,
         container.as_deref(),
     )?;
-    let full =
-        crate::remote::sessions::resolve_content_ref_fs(&target, &app, &source_path, &content_ref)
-            .await?;
+    let home = host.default_home();
+    let full = match &content_ref {
+        // SQLite 引用（opencode 的 part / hermes 的 content 等）走 sqlite-helper
+        crate::session_manager::model::ContentRef::Sqlite {
+            table,
+            id,
+            column,
+            pointer,
+        } => {
+            resolve_remote_sqlite_cell(
+                &session,
+                container.as_deref(),
+                &home,
+                &app,
+                &source_path,
+                table,
+                id,
+                column,
+                pointer,
+            )
+            .await?
+        }
+        _ => {
+            let root = remote_session_root(&app, &home);
+            crate::remote::sessions::resolve_content_ref_fs(
+                &target,
+                &app,
+                &source_path,
+                &root,
+                &content_ref,
+            )
+            .await?
+        }
+    };
     Ok(crate::session_manager::content::paginate(&full, offset, limit))
 }
 
@@ -2435,7 +2565,41 @@ pub async fn get_remote_session_image(
         &session.channel,
         container.as_deref(),
     )?;
-    let bytes = crate::remote::sessions::load_image_fs(&target, &app, &source_path, &image).await?;
+    let home = host.default_home();
+    let bytes = match &image.source {
+        // 内联图片存在 SQLite 列里（opencode/hermes）→ helper 取回后解码
+        crate::session_manager::model::ImageSource::Inline {
+            content:
+                crate::session_manager::model::ContentRef::Sqlite {
+                    table,
+                    id,
+                    column,
+                    pointer,
+                },
+        } => {
+            let encoded = resolve_remote_sqlite_cell(
+                &session,
+                container.as_deref(),
+                &home,
+                &app,
+                &source_path,
+                table,
+                id,
+                column,
+                pointer,
+            )
+            .await?;
+            crate::session_manager::content::decode_inline_image(
+                &encoded,
+                crate::remote::sessions::MAX_IMAGE_BYTES,
+            )?
+        }
+        _ => {
+            let root = remote_session_root(&app, &home);
+            crate::remote::sessions::load_image_fs(&target, &app, &source_path, &root, &image)
+                .await?
+        }
+    };
     Ok(tauri::ipc::Response::new(bytes))
 }
 

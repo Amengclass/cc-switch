@@ -152,11 +152,13 @@ const NOT_TEXT: &str = "引用的内容不是文本";
 const TOO_LARGE_TEXT: &str = "内容超过 32MB，请直接打开源文件查看";
 
 /// 按 [`ContentRef`] 校验并读取远端全文（对齐本机 `content::resolve_content_ref`）。
-/// `source_path` 是列表里那一条的 sourcePath；`app` 决定 Jsonl / File 的落点规则。
+/// `source_path` 是列表里那一条的 sourcePath；`app` 决定 Jsonl / File 的落点规则；
+/// `root` 是该 app 的会话根（File 引用的相对路径以它为基，如 gemini 的 `~/.gemini/tmp`）。
 pub async fn resolve_content_ref_fs<F: FileOps>(
     fs: &F,
     app: &str,
     source_path: &str,
+    root: &str,
     content: &crate::session_manager::model::ContentRef,
 ) -> Result<String, String> {
     use crate::session_manager::model::ContentRef;
@@ -182,12 +184,8 @@ pub async fn resolve_content_ref_fs<F: FileOps>(
             crate::session_manager::content::extract_text(&value, pointer)
         }
         ContentRef::File { rel_path, pointer } => {
-            // 相对路径拼到源文件所在会话根：取 sourcePath 的父目录作为基
-            let base = std::path::Path::new(source_path)
-                .parent()
-                .map(|p| p.to_string_lossy().to_string())
-                .ok_or_else(|| OUTSIDE.to_string())?;
-            let file = safe_join_fs(base, rel_path)?;
+            // 相对路径以该 app 的会话根为基（与本机 `safe_join(root, rel_path)` 一致）
+            let file = safe_join_fs(root.to_string(), rel_path)?;
             let bytes = fs
                 .read_bytes_optional(&file)
                 .await?
@@ -296,12 +294,13 @@ pub async fn load_image_fs<F: FileOps>(
     fs: &F,
     app: &str,
     source_path: &str,
+    root: &str,
     image: &crate::session_manager::model::ImageRef,
 ) -> Result<Vec<u8>, String> {
     use crate::session_manager::model::ImageSource;
     match &image.source {
         ImageSource::Inline { content } => {
-            let encoded = resolve_content_ref_fs(fs, app, source_path, content).await?;
+            let encoded = resolve_content_ref_fs(fs, app, source_path, root, content).await?;
             crate::session_manager::content::decode_inline_image(&encoded, MAX_IMAGE_BYTES)
         }
         ImageSource::LocalFile { path } => {

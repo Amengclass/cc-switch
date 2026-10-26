@@ -55,9 +55,6 @@ pub(crate) const MESSAGES_SQL: &str = "WITH migrated AS (
          SELECT role, data_json, created_at_ms FROM display
          WHERE role IN ('user', 'assistant') ORDER BY sequence";
 
-/// 删除 SQL（本机与远端 sqlite-helper 共用）：消息表 + 会话表。
-pub(crate) const DELETE_SQL: &str = "DELETE FROM local_runtime_message_rows WHERE session_id = ?1; DELETE FROM local_runtime_messages WHERE session_id = ?1; DELETE FROM local_runtime_sessions WHERE session_id = ?1;";
-
 /// 远端 sqlite-helper 返回的行 → 会话元数据。
 /// `resume_command` 为空：远端 data_dir 由用户自己知道，命令里带本机路径会误导。
 pub(crate) fn row_to_session_meta(row: &Value) -> Option<SessionMeta> {

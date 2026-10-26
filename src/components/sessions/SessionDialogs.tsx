@@ -169,12 +169,15 @@ export function SessionDeleteDialog({
 interface SessionSourcesDialogProps {
   open: boolean;
   onClose: () => void;
+  /** 远端目标：路径为远端用户 home 下的位置 */
+  remote?: boolean;
 }
 
 /** 「会话记录在哪里」：列出 9 个来源的默认位置。 */
 export function SessionSourcesDialog({
   open,
   onClose,
+  remote = false,
 }: SessionSourcesDialogProps) {
   const { t } = useTranslation();
   return (
@@ -192,10 +195,15 @@ export function SessionSourcesDialog({
               })}
             </DialogTitle>
             <DialogDescription className="text-body text-fg-2">
-              {t("sessionManager.whereLead", {
-                defaultValue:
-                  "CC Switch 从这些位置读取会话。Claude Desktop 没有单独的会话记录。",
-              })}
+              {remote
+                ? t("sessionManager.whereLeadRemote", {
+                    defaultValue:
+                      "CC Switch 从远端目标（所选主机/容器）的这些位置读取会话，`~` 指远端用户的 home。",
+                  })
+                : t("sessionManager.whereLead", {
+                    defaultValue:
+                      "CC Switch 从这些位置读取会话。Claude Desktop 没有单独的会话记录。",
+                  })}
             </DialogDescription>
           </div>
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
@@ -220,11 +228,14 @@ export function SessionSourcesDialog({
               </li>
             ))}
           </ul>
-          <p className="m-0 text-caption text-fg-2">
-            {t("sessionManager.whereNote", {
-              defaultValue: "在设置里改过配置目录的应用，按改过的目录读取。",
-            })}
-          </p>
+          {/* 自定义目录是「本机设置」的概念，远端目标不适用 */}
+          {!remote && (
+            <p className="m-0 text-caption text-fg-2">
+              {t("sessionManager.whereNote", {
+                defaultValue: "在设置里改过配置目录的应用，按改过的目录读取。",
+              })}
+            </p>
+          )}
           <div className="flex justify-end">
             <Button
               variant="neutral"

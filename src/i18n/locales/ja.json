@@ -1281,6 +1281,7 @@
     "whereMenu": "セッションの保存場所",
     "whereTitle": "セッションの保存場所",
     "whereLead": "CC Switch は次の場所からセッションを読み取ります。Claude Desktop には独自のセッション記録はありません。",
+    "whereLeadRemote": "CC Switch はリモートターゲット（選択中のホスト/コンテナ）の次の場所からセッションを読み取ります。~ はリモートユーザーの home を指します。",
     "whereNote": "設定で構成ディレクトリを変更したアプリは、変更後のディレクトリから読み取ります。",
     "appPrefix": "アプリ：",
     "chooseApp": "アプリを選択",
