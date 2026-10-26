@@ -73,14 +73,31 @@ pub async fn scan_codex_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
     out
 }
 
-/// openclaw：`<root>/**/*.jsonl`。
+/// openclaw：`<root>/**/*.jsonl`（同名目录下若有 `sessions.json` 索引，读显示名）。
 pub async fn scan_openclaw_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
+    use std::collections::HashMap;
     use crate::session_manager::providers::openclaw;
     let files = collect_files_fs(fs, root, |p| p.ends_with(".jsonl")).await;
+    let mut names: HashMap<String, HashMap<String, String>> = HashMap::new();
     let mut out = Vec::new();
     for f in files {
+        let dir = Path::new(&f)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !names.contains_key(&dir) {
+            let index_path = format!("{dir}/sessions.json");
+            let map = match fs.read_text_optional(&index_path).await {
+                Ok(Some(text)) => openclaw::parse_display_names(&text),
+                _ => HashMap::new(),
+            };
+            names.insert(dir.clone(), map);
+        }
+        let display_names = names.get(&dir);
         if let Ok((head, tail)) = fs.read_head_tail_lines(&f, 10, 30).await {
-            if let Some(m) = openclaw::parse_session_lines(Path::new(&f), head, tail, None) {
+            if let Some(m) =
+                openclaw::parse_session_lines(Path::new(&f), head, tail, display_names)
+            {
                 out.push(m);
             }
         }
@@ -103,19 +120,34 @@ pub async fn scan_grokbuild_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMet
     out
 }
 
-/// gemini：`<root>/<project>/chats/*.json`（同名 .jsonl 存在则跳过）。
+/// gemini：`<root>/<project>/chats/*.json` 或新版 `*.jsonl`（同名 .jsonl 存在时旧 .json 跳过）。
 pub async fn scan_gemini_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
     use crate::session_manager::providers::gemini;
-    let files = collect_files_fs(fs, root, |p| p.ends_with(".json")).await;
+    let files = collect_files_fs(fs, root, |p| p.ends_with(".jsonl") || p.ends_with(".json")).await;
     let mut out = Vec::new();
     for f in files {
-        let jsonl = format!("{}.jsonl", &f[..f.len() - ".json".len()]);
-        if fs.exists(&jsonl).await {
-            continue;
+        // 与本机 is_session_file 一致：resume 迁移后同名 .json 残留，只认 .jsonl
+        if f.ends_with(".json") {
+            let jsonl = format!("{}.jsonl", &f[..f.len() - ".json".len()]);
+            if fs.exists(&jsonl).await {
+                continue;
+            }
         }
         if let Ok(Some(text)) = fs.read_text_optional(&f).await {
-            if let Some(m) = gemini::parse_session_from_text(Path::new(&f), &text) {
-                out.push(m);
+            if let Some(mut meta) = gemini::parse_session_from_text(Path::new(&f), &text) {
+                // 与本机一致：项目目录取 `<project>/.project_root` 的内容
+                if let Some(chats_dir) = Path::new(&f).parent() {
+                    if let Some(project_dir) = chats_dir.parent() {
+                        let project_root = format!(
+                            "{}/.project_root",
+                            project_dir.to_string_lossy().trim_end_matches('/')
+                        );
+                        if let Ok(Some(text)) = fs.read_text_optional(&project_root).await {
+                            meta.project_dir = Some(text.trim().to_string());
+                        }
+                    }
+                }
+                out.push(meta);
             }
         }
     }

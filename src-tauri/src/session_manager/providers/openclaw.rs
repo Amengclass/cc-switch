@@ -131,17 +131,21 @@ pub fn delete_session(_root: &Path, path: &Path, session_id: &str) -> Result<boo
 /// Returns an empty map if the file does not exist or cannot be parsed.
 fn load_display_names(sessions_dir: &Path) -> HashMap<String, String> {
     let index_path = sessions_dir.join("sessions.json");
-    let content = match std::fs::read_to_string(&index_path) {
-        Ok(c) => c,
-        Err(_) => return HashMap::new(),
-    };
-    let index: serde_json::Map<String, Value> = match serde_json::from_str(&content) {
+    match std::fs::read_to_string(&index_path) {
+        Ok(content) => parse_display_names(&content),
+        Err(_) => HashMap::new(),
+    }
+}
+
+/// 从 `sessions.json` 文本构建 sessionId → displayName 映射（纯函数，供远端复用）。
+pub(crate) fn parse_display_names(content: &str) -> HashMap<String, String> {
+    let index: serde_json::Map<String, Value> = match serde_json::from_str(content) {
         Ok(m) => m,
         Err(_) => return HashMap::new(),
     };
 
     let mut map = HashMap::new();
-    for (_key, entry) in &index {
+    for entry in index.values() {
         if let (Some(id), Some(name)) = (
             entry.get("sessionId").and_then(Value::as_str),
             entry.get("displayName").and_then(Value::as_str),
