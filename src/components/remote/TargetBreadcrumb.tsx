@@ -268,19 +268,22 @@ export function TargetBreadcrumb({
     // 内圆角 = 外圆角 − 内衬 = 5px。选中段自己贴 bg-surface + shadow-v7-sm。
     <div className="inline-flex h-7 w-full min-w-0 items-stretch rounded-[8px] bg-subtle p-[3px]">
       <DropdownMenu onOpenChange={(open) => { handleHostOpen(open); if (open) { onRefreshServers?.(); onProbeHosts?.(); } }}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(segmentCls, "bg-surface shadow-v7-sm")}
-          >
-            {isLocal ? (
-              <Laptop className="h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <Server className="h-3.5 w-3.5 shrink-0" />
-            )}
-            <span className="min-w-0 truncate">{hostLabel}</span>
-          </button>
-        </DropdownMenuTrigger>
+        {/* 侧栏窄，主机名会 truncate；悬停显示完整目标名 */}
+        <HoverTip content={hostLabel} disableHoverableContent>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(segmentCls, "bg-surface shadow-v7-sm")}
+            >
+              {isLocal ? (
+                <Laptop className="h-3.5 w-3.5 shrink-0" />
+              ) : (
+                <Server className="h-3.5 w-3.5 shrink-0" />
+              )}
+              <span className="min-w-0 truncate">{hostLabel}</span>
+            </button>
+          </DropdownMenuTrigger>
+        </HoverTip>
         <DropdownMenuContent
           align="start"
           className="min-w-[150px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"
@@ -363,19 +366,22 @@ export function TargetBreadcrumb({
             aria-hidden="true"
           />
           <DropdownMenu onOpenChange={handleContainerOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className={cn(segmentCls, "bg-surface shadow-v7-sm")}
-              >
-                <Container className="h-3.5 w-3.5 shrink-0" />
-                {containersLoading && !containers.length ? (
-                  <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
-                ) : (
-                  <span className="min-w-0 truncate">{containerLabel}</span>
-                )}
-              </button>
-            </DropdownMenuTrigger>
+            {/* 容器名同样会 truncate；悬停显示完整名称 */}
+            <HoverTip content={containerLabel} disableHoverableContent>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(segmentCls, "bg-surface shadow-v7-sm")}
+                >
+                  <Container className="h-3.5 w-3.5 shrink-0" />
+                  {containersLoading && !containers.length ? (
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
+                  ) : (
+                    <span className="min-w-0 truncate">{containerLabel}</span>
+                  )}
+                </button>
+              </DropdownMenuTrigger>
+            </HoverTip>
             <DropdownMenuContent
               align="start"
               className="min-w-[180px] max-h-[50vh] overflow-hidden rounded-panel p-1 shadow-v7-md [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border"

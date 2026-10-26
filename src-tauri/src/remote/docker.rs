@@ -129,6 +129,13 @@ impl FileOps for RemoteTarget<'_> {
             RemoteTarget::Docker(f) => f.write_text_atomic(path, content).await,
         }
     }
+
+    async fn list_files_recursive(&self, root: &str) -> Vec<String> {
+        match self {
+            RemoteTarget::Sftp(f) => f.list_files_recursive(root).await,
+            RemoteTarget::Docker(f) => f.list_files_recursive(root).await,
+        }
+    }
 }
 
 /// 容器内文件操作：每个方法都通过 `docker exec <container> sh -c '<cmd>'` 封装。
@@ -394,6 +401,15 @@ impl FileOps for DockerExecFileOps<'_> {
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String> {
         // 复用 write_bytes_atomic（text → bytes → base64 → stdin 管道）
         self.write_bytes_atomic(path, content.as_bytes()).await
+    }
+
+    /// 容器内一次 `find` 拿全部文件：逐目录 read_dir 每次都是一趟 docker exec，
+    /// `.codex` 这类多层目录会慢到不可用。
+    async fn list_files_recursive(&self, root: &str) -> Vec<String> {
+        self.exec(&format!("find {} -type f 2>/dev/null", shell_quote(root)))
+            .await
+            .map(|out| out.lines().map(str::to_string).collect())
+            .unwrap_or_default()
     }
 }
 

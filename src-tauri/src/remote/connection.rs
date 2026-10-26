@@ -727,20 +727,8 @@ pub async fn exec_command(
     session: &Handle<RemoteHandler>,
     command: &str,
 ) -> Result<String, String> {
-    let ch = session
-        .channel_open_session()
-        .await
-        .map_err(|e| format!("打开命令通道失败: {e}"))?;
-    ch.exec(true, command)
-        .await
-        .map_err(|e| format!("执行命令失败: {e}"))?;
-    let mut stream = ch.into_stream();
-    let mut output = Vec::new();
-    stream
-        .read_to_end(&mut output)
-        .await
-        .map_err(|e| format!("读取命令输出失败: {e}"))?;
-    Ok(String::from_utf8_lossy(&output).trim().to_string())
+    let raw = exec_command_raw(session, command).await?;
+    Ok(raw.trim().to_string())
 }
 
 /// 同 [`exec_command`]，但**不做 trim**：原样返回命令 stdout。
@@ -752,21 +740,32 @@ pub async fn exec_command_raw(
     session: &Handle<RemoteHandler>,
     command: &str,
 ) -> Result<String, String> {
-    let ch = session
-        .channel_open_session()
+    // 硬超时：容器/远端命令挂住时（docker exec 卡死、磁盘卡住等）不能无限转圈，
+    // 超时后把明确错误抛给前端。
+    let fut = async {
+        let ch = session
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("打开命令通道失败: {e}"))?;
+        ch.exec(true, command)
+            .await
+            .map_err(|e| format!("执行命令失败: {e}"))?;
+        let mut stream = ch.into_stream();
+        let mut output = Vec::new();
+        stream
+            .read_to_end(&mut output)
+            .await
+            .map_err(|e| format!("读取命令输出失败: {e}"))?;
+        Ok::<Vec<u8>, String>(output)
+    };
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, fut)
         .await
-        .map_err(|e| format!("打开命令通道失败: {e}"))?;
-    ch.exec(true, command)
-        .await
-        .map_err(|e| format!("执行命令失败: {e}"))?;
-    let mut stream = ch.into_stream();
-    let mut output = Vec::new();
-    stream
-        .read_to_end(&mut output)
-        .await
-        .map_err(|e| format!("读取命令输出失败: {e}"))?;
+        .map_err(|_| format!("远端命令超时（{}s）：{command}", COMMAND_TIMEOUT.as_secs()))??;
     Ok(String::from_utf8_lossy(&output).into_owned())
 }
+
+/// 单条远端命令的硬超时。
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// 执行命令并通过 stdin 管道传入数据（不嵌入命令字符串，避免大文件撑爆 SSH 通道）。
 ///

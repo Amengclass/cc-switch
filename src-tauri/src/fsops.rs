@@ -40,6 +40,28 @@ pub trait FileOps {
     async fn file_size(&self, path: &str) -> Option<u64>;
     /// 原子写回整个文本文件（临时文件 + rename），自动确保父目录存在。
     async fn write_text_atomic(&self, path: &str, content: &str) -> Result<(), String>;
+
+    /// 递归列出 `root` 下所有文件的绝对路径。
+    ///
+    /// 默认实现逐目录 `read_dir`（本机/SFTP 便宜）；容器实现覆盖成**一次 `find`**——
+    /// 容器每次 exec 都是一次 SSH 往返（约 0.2~0.5s），逐目录遍历几十层会非常慢。
+    async fn list_files_recursive(&self, root: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_string()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = self.read_dir(&dir).await else {
+                continue;
+            };
+            for entry in entries {
+                if entry.is_dir {
+                    stack.push(entry.path);
+                } else {
+                    out.push(entry.path);
+                }
+            }
+        }
+        out
+    }
 }
 
 /// 本机实现：直接走 std::fs。

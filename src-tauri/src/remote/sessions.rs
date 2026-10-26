@@ -12,27 +12,20 @@ use crate::session_manager::SessionMeta;
 // 远端会话「列表」扫描（FileOps 泛型）：把本机各 provider 的 meta 解析复用到远端
 // ============================================================================
 
-/// 递归收集远端目录下满足谓词的文件路径（迭代，避免 async 递归）。
+/// 递归收集远端目录下满足谓词的文件路径。
+///
+/// 走 `FileOps::list_files_recursive`：本机/SFTP 逐目录 `read_dir`，容器一次 `find`
+/// ——容器逐目录遍历时每次都是一趟 docker exec，多层目录会慢到不可用。
 pub async fn collect_files_fs<F: FileOps>(
     fs: &F,
     root: &str,
     pred: impl Fn(&str) -> bool,
 ) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut stack = vec![root.to_string()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs.read_dir(&dir).await else {
-            continue;
-        };
-        for e in entries {
-            if e.is_dir {
-                stack.push(e.path);
-            } else if pred(&e.path) {
-                out.push(e.path);
-            }
-        }
-    }
-    out
+    fs.list_files_recursive(root)
+        .await
+        .into_iter()
+        .filter(|p| pred(p))
+        .collect()
 }
 
 /// claude：`<root>/**/*.jsonl`，跳过 agent-*/journal。

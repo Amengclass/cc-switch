@@ -98,6 +98,35 @@ use crate::store::AppState;
 const SQLITE_HELPER_X86_64: &[u8] = include_bytes!("../../resources/sqlite-helper-x86_64-linux");
 const SQLITE_HELPER_AARCH64: &[u8] = include_bytes!("../../resources/sqlite-helper-aarch64-linux");
 
+/// 在宿主机（`sh -c`）或容器内（`docker exec ... sh -c`）执行一段 POSIX sh 脚本。
+async fn exec_in_target(
+    session: &connection::RemoteSession,
+    container: Option<&str>,
+    script: &str,
+) -> Result<String, String> {
+    match container {
+        None => {
+            connection::exec_command(
+                &session.channel,
+                &format!("sh -c {}", connection::shell_quote(script)),
+            )
+            .await
+        }
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            connection::exec_command(
+                &session.channel,
+                &format!(
+                    "docker exec {} sh -c {}",
+                    ops.container,
+                    connection::shell_quote(script)
+                ),
+            )
+            .await
+        }
+    }
+}
+
 /// 确保远端 `~/.cc-switch/sqlite-helper` 已部署（按远端架构从内嵌资源上传），
 /// 返回 helper 的绝对路径。仅首次上传（`test -x` 命中即跳过）。
 async fn ensure_remote_sqlite_helper(
@@ -106,23 +135,40 @@ async fn ensure_remote_sqlite_helper(
     root: &str,
 ) -> Result<String, String> {
     let path = format!("{root}/.cc-switch/sqlite-helper");
+    let parent = format!("{root}/.cc-switch");
+    // 注意：`test -x` 无论成功失败都没有 stdout，而 exec 通道不看退出码——
+    // 必须显式 echo yes/no，否则永远误判「已存在」而从不真正上传。
+    let probe = format!("if test -x {path}; then echo yes; else echo no; fi");
     let check_cmd = match container {
-        None => format!(
-            "sh -c {}",
-            connection::shell_quote(&format!("test -x {path}"))
-        ),
+        None => format!("sh -c {}", connection::shell_quote(&probe)),
         Some(c) => {
             let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
             format!(
                 "docker exec {} sh -c {}",
                 ops.container,
-                connection::shell_quote(&format!("test -x {path}"))
+                connection::shell_quote(&probe)
             )
         }
     };
     if let Ok(out) = connection::exec_command(&session.channel, &check_cmd).await {
-        if out.trim().is_empty() {
+        if out.trim() == "yes" {
             return Ok(path);
+        }
+    }
+
+    // 确保目录存在（首次使用时 ~/.cc-switch 可能还没建）
+    let mkdir = format!("sh -c {}", connection::shell_quote(&format!("mkdir -p {parent}")));
+    match container {
+        None => {
+            connection::exec_command(&session.channel, &mkdir).await?;
+        }
+        Some(c) => {
+            let ops = crate::remote::docker::DockerExecFileOps::new(&session.channel, c)?;
+            connection::exec_command(
+                &session.channel,
+                &format!("docker exec {} {}", ops.container, mkdir),
+            )
+            .await?;
         }
     }
 
@@ -2058,27 +2104,43 @@ pub async fn list_remote_sessions_all(
     let home = host.default_home();
 
     // 6 个文件源 app：FileOps 泛型扫描，复用本机各 provider 的纯解析。
-    let file_apps: Vec<(&str, String)> = vec![
-        ("claude", format!("{home}/.claude/projects")),
-        ("grokbuild", format!("{home}/.grok/sessions")),
-        ("codex", format!("{home}/.codex")),
-        ("gemini", format!("{home}/.gemini/tmp")),
-        ("openclaw", format!("{home}/.openclaw/agents")),
-        ("pi", format!("{home}/.pi/agent/sessions")),
+    // 根目录与本机 `session_roots()` 对齐——尤其 codex 不能扫整个 `~/.codex`
+    // （那里还有 .tmp/plugins、skills 等几百个无关文件，容器下每个目录都是一趟 exec）。
+    let file_apps: Vec<(&str, Vec<String>)> = vec![
+        ("claude", vec![format!("{home}/.claude/projects")]),
+        (
+            "grokbuild",
+            vec![
+                format!("{home}/.grok/sessions"),
+                format!("{home}/.grok/archived_sessions"),
+            ],
+        ),
+        (
+            "codex",
+            vec![
+                format!("{home}/.codex/sessions"),
+                format!("{home}/.codex/archived_sessions"),
+            ],
+        ),
+        ("gemini", vec![format!("{home}/.gemini/tmp")]),
+        ("openclaw", vec![format!("{home}/.openclaw/agents")]),
+        ("pi", vec![format!("{home}/.pi/agent/sessions")]),
     ];
 
     let mut all_sessions: Vec<crate::session_manager::SessionMeta> = Vec::new();
-    for (app, root) in &file_apps {
-        let sessions = match *app {
-            "claude" => crate::remote::sessions::scan_claude_fs(&target, root).await,
-            "grokbuild" => crate::remote::sessions::scan_grokbuild_fs(&target, root).await,
-            "codex" => crate::remote::sessions::scan_codex_fs(&target, root).await,
-            "gemini" => crate::remote::sessions::scan_gemini_fs(&target, root).await,
-            "openclaw" => crate::remote::sessions::scan_openclaw_fs(&target, root).await,
-            "pi" => crate::remote::sessions::scan_pi_fs(&target, root).await,
-            _ => unreachable!(),
-        };
-        all_sessions.extend(sessions);
+    for (app, roots) in &file_apps {
+        for root in roots {
+            let sessions = match *app {
+                "claude" => crate::remote::sessions::scan_claude_fs(&target, root).await,
+                "grokbuild" => crate::remote::sessions::scan_grokbuild_fs(&target, root).await,
+                "codex" => crate::remote::sessions::scan_codex_fs(&target, root).await,
+                "gemini" => crate::remote::sessions::scan_gemini_fs(&target, root).await,
+                "openclaw" => crate::remote::sessions::scan_openclaw_fs(&target, root).await,
+                "pi" => crate::remote::sessions::scan_pi_fs(&target, root).await,
+                _ => unreachable!(),
+            };
+            all_sessions.extend(sessions);
+        }
     }
 
     // 3 个 SQLite 源（hermes / opencode / mcode）：经远端 sqlite-helper 查询（复用本机 SQL）。
@@ -2087,7 +2149,24 @@ pub async fn list_remote_sessions_all(
     let mcode_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
     let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
     let opencode_sql = "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
-    if let Ok(helper) = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await {
+
+    // 先一次性探测哪些 SQLite 库真的存在：一个都没有就完全跳过 helper
+    // （首次上传 helper 约 2.6MB，容器上很贵，不能为不存在的库付这个成本）。
+    let db_paths = [&hermes_db, &opencode_db, &mcode_db];
+    let probe = format!(
+        "for f in {}; do [ -f \"$f\" ] && echo \"$f\"; done",
+        db_paths
+            .iter()
+            .map(|p| connection::shell_quote(p))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let existing_dbs = exec_in_target(&session, container.as_deref(), &probe)
+        .await
+        .unwrap_or_default();
+
+    if !existing_dbs.trim().is_empty() {
+      if let Ok(helper) = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await {
         let sqlite_apps: Vec<(&str, &str, &str)> = vec![
             ("hermes", &hermes_db, hermes_sql),
             ("opencode", &opencode_db, opencode_sql),
@@ -2098,6 +2177,9 @@ pub async fn list_remote_sessions_all(
             ),
         ];
         for (app, db, sql) in &sqlite_apps {
+            if !existing_dbs.lines().any(|line| line.trim() == *db) {
+                continue;
+            }
             if let Ok(v) = run_sqlite_helper(
                 &session,
                 container.as_deref(),
@@ -2132,6 +2214,7 @@ pub async fn list_remote_sessions_all(
             }
             // db 不存在/查询失败 → 跳过该 app，不影响文件源结果
         }
+      }
     }
 
     // 时间倒序，与本机 scan_sessions 一致。
