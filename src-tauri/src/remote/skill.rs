@@ -1147,6 +1147,172 @@ pub async fn check_remote_skill_updates_impl<F: FileOps>(
     Ok(updates)
 }
 
+// ========================================================================
+// 卸载备份 / 从备份恢复（A4）
+// ========================================================================
+
+/// 远端备份根目录：`~/.cc-switch/skill-backups/`（与本机同构）。
+pub fn remote_skill_backups_root(root: &str) -> String {
+    format!("{root}/.cc-switch/skill-backups")
+}
+
+/// 备份 meta.json（与本机 `SkillBackupMetadata` 同构，前端可复用同一类型）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSkillBackupMeta {
+    pub skill: crate::app_config::InstalledSkill,
+    pub backup_created_at: i64,
+    pub source_path: String,
+}
+
+fn validate_backup_id(id: &str) -> Result<&str, String> {
+    if id.trim().is_empty() || id.contains("..") || id.contains('/') || id.contains('\\') {
+        return Err(format!("Invalid backup id: {id}"));
+    }
+    Ok(id)
+}
+
+/// 列出远端技能备份（读每个目录下的 meta.json）。
+pub async fn list_remote_skill_backups<F: FileOps>(
+    fs: &F,
+    root: &str,
+) -> Result<Vec<crate::services::skill::SkillBackupEntry>, String> {
+    let dir = remote_skill_backups_root(root);
+    let entries = match fs.read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let mut out = Vec::new();
+    for entry in entries {
+        if !entry.is_dir {
+            continue;
+        }
+        let meta_path = format!("{}/meta.json", entry.path);
+        let Ok(Some(text)) = fs.read_text_optional(&meta_path).await else {
+            continue;
+        };
+        let Ok(meta) = serde_json::from_str::<RemoteSkillBackupMeta>(&text) else {
+            log::warn!("[remote-skill] 解析备份失败: {meta_path}");
+            continue;
+        };
+        out.push(crate::services::skill::SkillBackupEntry {
+            backup_id: entry.name,
+            backup_path: entry.path,
+            created_at: meta.backup_created_at,
+            skill: meta.skill,
+        });
+    }
+    out.sort_by_key(|entry| std::cmp::Reverse(entry.created_at));
+    Ok(out)
+}
+
+/// 删除一个远端技能备份目录。
+pub async fn delete_remote_skill_backup<F: FileOps>(
+    fs: &F,
+    root: &str,
+    backup_id: &str,
+) -> Result<(), String> {
+    let id = validate_backup_id(backup_id)?;
+    let path = format!("{}/{}", remote_skill_backups_root(root), id);
+    if fs.exists(&path).await {
+        fs.remove_dir_all(&path).await?;
+    }
+    Ok(())
+}
+
+/// 从远端备份恢复技能：复制回 SSOT → 写 skills.json（仅启用当前 app）→ 建链接。
+/// 语义对齐本机 `SkillService::restore_from_backup`。
+pub async fn restore_remote_skill_backup<F: FileOps>(
+    fs: &F,
+    channel: &russh::client::Handle<crate::remote::connection::RemoteHandler>,
+    container: Option<&str>,
+    root: &str,
+    backup_id: &str,
+    current_app: &str,
+) -> Result<crate::app_config::InstalledSkill, String> {
+    let id = validate_backup_id(backup_id)?;
+    let backup_dir = format!("{}/{}", remote_skill_backups_root(root), id);
+    let meta_text = fs
+        .read_text_optional(&format!("{backup_dir}/meta.json"))
+        .await?
+        .ok_or_else(|| format!("备份不存在: {backup_id}"))?;
+    let meta: RemoteSkillBackupMeta =
+        serde_json::from_str(&meta_text).map_err(|e| format!("备份 meta.json 解析失败: {e}"))?;
+    let mut skill = meta.skill;
+
+    let directory = sanitize_name(&skill.directory);
+    if directory.is_empty() {
+        return Err("备份中的技能目录非法".to_string());
+    }
+    let backup_skill_dir = format!("{backup_dir}/skill");
+    if !fs
+        .exists(&format!("{backup_skill_dir}/SKILL.md"))
+        .await
+    {
+        return Err("备份无效或缺少 SKILL.md".to_string());
+    }
+
+    let mut records = read_remote_skills_json(fs, root).await?;
+    if records
+        .iter()
+        .any(|r| r.id == skill.id || r.directory.eq_ignore_ascii_case(&directory))
+    {
+        return Err(format!(
+            "技能已存在，请先卸载当前技能: {}",
+            skill.directory
+        ));
+    }
+
+    let ssot_dir = remote_ssot_path(root);
+    let restore_path = format!("{ssot_dir}/{directory}");
+    if fs.exists(&restore_path).await {
+        return Err(format!("恢复目标已存在: {restore_path}"));
+    }
+
+    exec_cmd(
+        channel,
+        container,
+        &format!(
+            "mkdir -p {} && cp -r {} {}",
+            shell_q(&ssot_dir),
+            shell_q(&backup_skill_dir),
+            shell_q(&restore_path)
+        ),
+    )
+    .await?;
+
+    // 恢复后只启用当前 app（对齐本机 SkillApps::only(current_app)）
+    let mut apps = RemoteSkillApps::default();
+    apps.set_enabled(current_app, true);
+    let now = chrono::Utc::now().timestamp_millis();
+    skill.directory = directory.clone();
+    skill.installed_at = now;
+    skill.updated_at = 0;
+
+    let record = RemoteSkillRecord {
+        id: skill.id.clone(),
+        name: skill.name.clone(),
+        description: skill.description.clone(),
+        directory: directory.clone(),
+        apps: apps.clone(),
+        installed_at: now,
+        updated_at: 0,
+        repo_owner: skill.repo_owner.clone(),
+        repo_name: skill.repo_name.clone(),
+        repo_branch: skill.repo_branch.clone(),
+        readme_url: skill.readme_url.clone(),
+        content_hash: skill.content_hash.clone(),
+    };
+    records.push(record);
+    write_remote_skills_json(fs, root, &records).await?;
+
+    let use_copy =
+        crate::settings::get_skill_sync_method() == crate::services::skill::SyncMethod::Copy;
+    sync_remote_skill_links(channel, container, root, &directory, &apps, use_copy).await?;
+
+    Ok(skill)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

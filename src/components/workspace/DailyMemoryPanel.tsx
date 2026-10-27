@@ -16,12 +16,13 @@ import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import {
-  workspaceApi,
+  workspaceApiFor,
   type DailyMemoryFileInfo,
   type DailyMemorySearchResult,
+  type WorkspaceRemoteTarget,
 } from "@/lib/api/workspace";
 
-interface DailyMemoryPanelProps {
+interface DailyMemoryPanelProps extends WorkspaceRemoteTarget {
   isOpen: boolean;
   onClose: () => void;
 }
@@ -43,8 +44,15 @@ function formatFileSize(bytes: number): string {
 const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   isOpen,
   onClose,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
+  const isRemote = Boolean(remoteTargetId);
+  const api = useMemo(
+    () => workspaceApiFor({ remoteTargetId, remoteContainerId }),
+    [remoteTargetId, remoteContainerId],
+  );
 
   // List state
   const [files, setFiles] = useState<DailyMemoryFileInfo[]>([]);
@@ -100,7 +108,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
       }
       setSearching(true);
       try {
-        const results = await workspaceApi.searchDailyMemoryFiles(query.trim());
+        const results = await api.searchDailyMemoryFiles(query.trim());
         setSearchResults(results);
       } catch (err) {
         console.error("Failed to search daily memory files:", err);
@@ -182,7 +190,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   const loadFiles = useCallback(async () => {
     setLoadingList(true);
     try {
-      const list = await workspaceApi.listDailyMemoryFiles();
+      const list = await api.listDailyMemoryFiles();
       setFiles(list);
     } catch (err) {
       console.error("Failed to load daily memory files:", err);
@@ -190,7 +198,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
     } finally {
       setLoadingList(false);
     }
-  }, [t]);
+  }, [t, api]);
 
   useEffect(() => {
     if (isOpen) {
@@ -204,7 +212,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
       setLoadingContent(true);
       setEditingFile(filename);
       try {
-        const data = await workspaceApi.readDailyMemoryFile(filename);
+        const data = await api.readDailyMemoryFile(filename);
         setContent(data ?? "");
       } catch (err) {
         console.error("Failed to read daily memory file:", err);
@@ -237,7 +245,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
     if (!editingFile) return;
     setSaving(true);
     try {
-      await workspaceApi.writeDailyMemoryFile(editingFile, content);
+      await api.writeDailyMemoryFile(editingFile, content);
       toast.success(t("workspace.saveSuccess"));
     } catch (err) {
       console.error("Failed to save daily memory file:", err);
@@ -251,7 +259,7 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
   const handleDelete = useCallback(async () => {
     if (!deletingFile) return;
     try {
-      await workspaceApi.deleteDailyMemoryFile(deletingFile);
+      await api.deleteDailyMemoryFile(deletingFile);
       toast.success(t("workspace.dailyMemory.deleteSuccess"));
       setDeletingFile(null);
       // If we were editing this file, go back to list
@@ -353,15 +361,22 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
         <div className="space-y-4">
           {/* Header with path, search, and create button */}
           <div className="flex items-center justify-between gap-2">
-            <HoverTip content={t("workspace.openDirectory")}>
-              <p
-                className="text-sm text-fg-2 shrink-0 cursor-pointer hover:text-fg-1 transition-colors inline-flex items-center gap-1"
-                onClick={() => workspaceApi.openDirectory("memory")}
-              >
+            {isRemote ? (
+              // 远端没有本机文件管理器：只展示路径
+              <p className="text-sm text-fg-2 shrink-0 inline-flex items-center gap-1">
                 ~/.openclaw/workspace/memory/
-                <FolderOpen className="w-3.5 h-3.5" />
               </p>
-            </HoverTip>
+            ) : (
+              <HoverTip content={t("workspace.openDirectory")}>
+                <p
+                  className="text-sm text-fg-2 shrink-0 cursor-pointer hover:text-fg-1 transition-colors inline-flex items-center gap-1"
+                  onClick={() => api.openDirectory("memory")}
+                >
+                  ~/.openclaw/workspace/memory/
+                  <FolderOpen className="w-3.5 h-3.5" />
+                </p>
+              </HoverTip>
+            )}
             <div className="flex items-center gap-1.5">
               <HoverTip content={t("workspace.dailyMemory.searchScopeHint")}>
                 <Button

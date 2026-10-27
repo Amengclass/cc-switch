@@ -19,7 +19,7 @@ const ALLOWED_FILES: &[&str] = &[
     "BOOT.md",
 ];
 
-fn validate_filename(filename: &str) -> Result<(), String> {
+pub(crate) fn validate_filename(filename: &str) -> Result<(), String> {
     if !ALLOWED_FILES.contains(&filename) {
         return Err(format!(
             "Invalid workspace filename: {filename}. Allowed: {}",
@@ -34,7 +34,7 @@ fn validate_filename(filename: &str) -> Result<(), String> {
 static DAILY_MEMORY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}\.md$").unwrap());
 
-fn validate_daily_memory_filename(filename: &str) -> Result<(), String> {
+pub(crate) fn validate_daily_memory_filename(filename: &str) -> Result<(), String> {
     if !DAILY_MEMORY_RE.is_match(filename) {
         return Err(format!(
             "Invalid daily memory filename: {filename}. Expected: YYYY-MM-DD.md"
@@ -51,6 +51,24 @@ pub struct DailyMemoryFileInfo {
     pub size_bytes: u64,
     pub modified_at: u64,
     pub preview: String,
+}
+
+/// 由文件名与内容构建列表项（本机与远端共用同一口径）。
+pub(crate) fn daily_memory_info(
+    filename: String,
+    size_bytes: u64,
+    modified_at: u64,
+    content: &str,
+) -> DailyMemoryFileInfo {
+    let date = filename.trim_end_matches(".md").to_string();
+    let preview = content.chars().take(200).collect::<String>();
+    DailyMemoryFileInfo {
+        filename,
+        date,
+        size_bytes,
+        modified_at,
+        preview,
+    }
 }
 
 // --- Daily memory commands ---
@@ -83,29 +101,14 @@ pub async fn list_daily_memory_files() -> Result<Vec<DailyMemoryFileInfo>, Strin
             continue;
         }
 
-        let date = name.trim_end_matches(".md").to_string();
-
-        let size_bytes = meta.len();
         let modified_at = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-
-        let preview = std::fs::read_to_string(entry.path())
-            .unwrap_or_default()
-            .chars()
-            .take(200)
-            .collect::<String>();
-
-        files.push(DailyMemoryFileInfo {
-            filename: name,
-            date,
-            size_bytes,
-            modified_at,
-            preview,
-        });
+        let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
+        files.push(daily_memory_info(name, meta.len(), modified_at, &content));
     }
 
     // Sort by filename descending (newest date first, YYYY-MM-DD.md)
@@ -185,6 +188,60 @@ pub struct DailyMemorySearchResult {
     pub match_count: usize,
 }
 
+/// 单文件全文命中的结果（本机与远端共用同一口径）；未命中返回 None。
+pub(crate) fn daily_memory_search_result(
+    filename: String,
+    size_bytes: u64,
+    modified_at: u64,
+    content: &str,
+    query_lower: &str,
+) -> Option<DailyMemorySearchResult> {
+    let date = filename.trim_end_matches(".md").to_string();
+    let content_lower = content.to_lowercase();
+    let content_matches: Vec<usize> = content_lower
+        .match_indices(query_lower)
+        .map(|(i, _)| i)
+        .collect();
+    let date_matches = date.to_lowercase().contains(query_lower);
+    if content_matches.is_empty() && !date_matches {
+        return None;
+    }
+
+    let snippet = if let Some(&first_pos) = content_matches.first() {
+        let start = if first_pos > 50 {
+            floor_char_boundary(content, first_pos - 50)
+        } else {
+            0
+        };
+        let end = ceil_char_boundary(content, (first_pos + 70).min(content.len()));
+        let mut s = String::new();
+        if start > 0 {
+            s.push_str("...");
+        }
+        s.push_str(&content[start..end]);
+        if end < content.len() {
+            s.push_str("...");
+        }
+        s
+    } else {
+        let end = ceil_char_boundary(content, 120.min(content.len()));
+        let mut s = content[..end].to_string();
+        if end < content.len() {
+            s.push_str("...");
+        }
+        s
+    };
+
+    Some(DailyMemorySearchResult {
+        filename,
+        date,
+        size_bytes,
+        modified_at,
+        snippet,
+        match_count: content_matches.len(),
+    })
+}
+
 /// Full-text search across all daily memory files.
 ///
 /// Performs case-insensitive search on both the date field and file content.
@@ -216,66 +273,22 @@ pub async fn search_daily_memory_files(
             _ => continue,
         };
 
-        let date = name.trim_end_matches(".md").to_string();
         let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-        let content_lower = content.to_lowercase();
-
-        // Count matches in content
-        let content_matches: Vec<usize> = content_lower
-            .match_indices(&query_lower)
-            .map(|(i, _)| i)
-            .collect();
-
-        // Also check date field
-        let date_matches = date.to_lowercase().contains(&query_lower);
-
-        if content_matches.is_empty() && !date_matches {
-            continue;
-        }
-
-        // Build snippet around first content match (~120 chars of context)
-        let snippet = if let Some(&first_pos) = content_matches.first() {
-            let start = if first_pos > 50 {
-                floor_char_boundary(&content, first_pos - 50)
-            } else {
-                0
-            };
-            let end = ceil_char_boundary(&content, (first_pos + 70).min(content.len()));
-            let mut s = String::new();
-            if start > 0 {
-                s.push_str("...");
-            }
-            s.push_str(&content[start..end]);
-            if end < content.len() {
-                s.push_str("...");
-            }
-            s
-        } else {
-            // Date-only match — use beginning of file as preview
-            let end = ceil_char_boundary(&content, 120.min(content.len()));
-            let mut s = content[..end].to_string();
-            if end < content.len() {
-                s.push_str("...");
-            }
-            s
-        };
-
-        let size_bytes = meta.len();
         let modified_at = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs())
             .unwrap_or(0);
-
-        results.push(DailyMemorySearchResult {
-            filename: name,
-            date,
-            size_bytes,
+        if let Some(result) = daily_memory_search_result(
+            name,
+            meta.len(),
             modified_at,
-            snippet,
-            match_count: content_matches.len(),
-        });
+            &content,
+            &query_lower,
+        ) {
+            results.push(result);
+        }
     }
 
     // Sort by filename descending (newest date first)

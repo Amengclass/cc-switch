@@ -1027,7 +1027,7 @@ pub enum MemoryKind {
 }
 
 impl MemoryKind {
-    fn filename(self) -> &'static str {
+    pub(crate) fn filename(self) -> &'static str {
         match self {
             Self::Memory => "MEMORY.md",
             Self::User => "USER.md",
@@ -1111,10 +1111,14 @@ pub fn set_memory_enabled(kind: MemoryKind, enabled: bool) -> Result<HermesWrite
 /// fields fall back to `HermesMemoryLimits::default()` rather than erroring,
 /// so an empty or partially-populated config still yields a usable UI.
 pub fn read_memory_limits() -> Result<HermesMemoryLimits, AppError> {
-    let mut out = HermesMemoryLimits::default();
     let config = read_hermes_config()?;
+    Ok(memory_limits_from_config(&config))
+}
+
+fn memory_limits_from_config(config: &serde_yaml::Value) -> HermesMemoryLimits {
+    let mut out = HermesMemoryLimits::default();
     let Some(memory) = config.get("memory") else {
-        return Ok(out);
+        return out;
     };
 
     if let Some(v) = memory.get("memory_char_limit").and_then(|v| v.as_u64()) {
@@ -1130,7 +1134,42 @@ pub fn read_memory_limits() -> Result<HermesMemoryLimits, AppError> {
         out.user_enabled = v;
     }
 
-    Ok(out)
+    out
+}
+
+/// 从 config.yaml **文本**解析 memory 限额（纯函数，供远端复用）。
+pub(crate) fn memory_limits_from_yaml(raw: &str) -> HermesMemoryLimits {
+    match serde_yaml::from_str::<serde_yaml::Value>(raw) {
+        Ok(config) => memory_limits_from_config(&config),
+        Err(_) => HermesMemoryLimits::default(),
+    }
+}
+
+/// 在 config.yaml **文本**上设置 memory 开关，保留其余内容与注释（纯函数，供远端复用）。
+pub(crate) fn set_memory_enabled_in_yaml(
+    raw: &str,
+    kind: MemoryKind,
+    enabled: bool,
+) -> Result<String, String> {
+    let config: serde_yaml::Value = if raw.trim().is_empty() {
+        serde_yaml::Value::Mapping(Default::default())
+    } else {
+        serde_yaml::from_str(raw).map_err(|e| format!("解析 Hermes config.yaml 失败: {e}"))?
+    };
+    let mut memory = match config.get("memory") {
+        Some(serde_yaml::Value::Mapping(m)) => m.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    let key = match kind {
+        MemoryKind::Memory => "memory_enabled",
+        MemoryKind::User => "user_profile_enabled",
+    };
+    memory.insert(
+        serde_yaml::Value::String(key.to_string()),
+        serde_yaml::Value::Bool(enabled),
+    );
+    replace_yaml_section(raw, "memory", &serde_yaml::Value::Mapping(memory))
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================

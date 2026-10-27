@@ -9,6 +9,7 @@ import type {
   SessionMeta,
 } from "@/types";
 import type { BlockContent } from "./sessions";
+import type { InstalledSkill, SkillBackupEntry } from "./skills";
 import type {
   ProviderSortUpdate,
 } from "./providers";
@@ -1087,6 +1088,105 @@ import type {
   OpenClawToolsConfig,
   OpenClawAgentsDefaults,
 } from "@/types";
+
+/** 列出远端技能备份（远端 ~/.cc-switch/skill-backups） */
+export async function listRemoteSkillBackups(
+  hostId: string,
+  container?: string,
+): Promise<SkillBackupEntry[]> {
+  return invoke("list_remote_skill_backups", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 删除远端技能备份 */
+export async function deleteRemoteSkillBackup(
+  hostId: string,
+  backupId: string,
+  container?: string,
+): Promise<boolean> {
+  await invoke<void>("delete_remote_skill_backup", {
+    hostId,
+    backupId,
+    container: container ?? null,
+  });
+  return true;
+}
+
+/** 从远端备份恢复技能（仅启用当前 app，对齐本机语义） */
+export async function restoreRemoteSkillBackup(
+  hostId: string,
+  backupId: string,
+  currentApp: string,
+  container?: string,
+): Promise<InstalledSkill> {
+  return invoke<InstalledSkill>("restore_remote_skill_backup", {
+    hostId,
+    backupId,
+    currentApp,
+    container: container ?? null,
+  });
+}
+
+/** 读取远端 Hermes 记忆文件（MEMORY.md / USER.md） */
+export async function getRemoteHermesMemory(
+  hostId: string,
+  kind: "memory" | "user",
+  container?: string,
+): Promise<string> {
+  return invoke<string>("get_remote_hermes_memory", {
+    hostId,
+    kind,
+    container: container ?? null,
+  });
+}
+
+/** 原子写远端 Hermes 记忆文件 */
+export async function setRemoteHermesMemory(
+  hostId: string,
+  kind: "memory" | "user",
+  content: string,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("set_remote_hermes_memory", {
+    hostId,
+    kind,
+    content,
+    container: container ?? null,
+  });
+}
+
+/** 读取远端 Hermes 记忆限额/开关（config.yaml memory 段） */
+export async function getRemoteHermesMemoryLimits(
+  hostId: string,
+  container?: string,
+): Promise<{
+  memory: number;
+  user: number;
+  memoryEnabled: boolean;
+  userEnabled: boolean;
+}> {
+  return invoke("get_remote_hermes_memory_limits", {
+    hostId,
+    container: container ?? null,
+  });
+}
+
+/** 设置远端 Hermes 记忆开关（保留 config.yaml 其余内容与注释） */
+export async function setRemoteHermesMemoryEnabled(
+  hostId: string,
+  kind: "memory" | "user",
+  enabled: boolean,
+  container?: string,
+): Promise<void> {
+  return invoke<void>("set_remote_hermes_memory_enabled", {
+    hostId,
+    kind,
+    enabled,
+    container: container ?? null,
+  });
+}
 
 /** 获取远端 OpenClaw 的 env 配置 */
 export async function getRemoteOpenClawEnv(

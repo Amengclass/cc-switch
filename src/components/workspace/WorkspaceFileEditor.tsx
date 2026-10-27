@@ -4,9 +4,12 @@ import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
-import { workspaceApi } from "@/lib/api/workspace";
+import {
+  workspaceApiFor,
+  type WorkspaceRemoteTarget,
+} from "@/lib/api/workspace";
 
-interface WorkspaceFileEditorProps {
+interface WorkspaceFileEditorProps extends WorkspaceRemoteTarget {
   filename: string;
   isOpen: boolean;
   onClose: () => void;
@@ -16,8 +19,11 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   filename,
   isOpen,
   onClose,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
+  const api = workspaceApiFor({ remoteTargetId, remoteContainerId });
   const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -39,7 +45,7 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     if (!isOpen || !filename) return;
 
     setLoading(true);
-    workspaceApi
+    api
       .readFile(filename)
       .then((data) => {
         setContent(data ?? "");
@@ -54,7 +60,7 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      await workspaceApi.writeFile(filename, content);
+      await api.writeFile(filename, content);
       toast.success(t("workspace.saveSuccess"));
     } catch (err) {
       console.error("Failed to save workspace file:", err);

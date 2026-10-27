@@ -183,15 +183,21 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
     data: skillBackups = [],
     refetch: refetchSkillBackups,
     isFetching: isFetchingSkillBackups,
-  } = useSkillBackups();
-  const deleteBackupMutation = useDeleteSkillBackup();
+  } = useSkillBackups(remoteTargetId, remoteContainerId);
+  const deleteBackupMutation = useDeleteSkillBackup(
+    remoteTargetId,
+    remoteContainerId,
+  );
   const toggleAppMutation = useToggleSkillApp(remoteTargetId, remoteContainerId);
   const bulkToggleAppMutation = useBulkToggleSkillApp(
     remoteTargetId,
     remoteContainerId,
   );
   const uninstallMutation = useUninstallSkill(remoteTargetId, remoteContainerId);
-  const restoreBackupMutation = useRestoreSkillBackup();
+  const restoreBackupMutation = useRestoreSkillBackup(
+    remoteTargetId,
+    remoteContainerId,
+  );
   // 进入页面时静默扫描一次「本机已有但未管理」的 Skill
   const { data: unmanagedSkills, refetch: scanUnmanaged } =
     useScanUnmanagedSkills(remoteTargetId, remoteContainerId, {
@@ -996,14 +1002,12 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
               >
                 {t("skills.checkUpdates")}
               </DropdownMenuItem>
-              {!isRemote && (
-                <DropdownMenuItem
-                  disabled={controlsDisabled}
-                  onSelect={() => void handleOpenRestoreFromBackup()}
-                >
-                  {t("skillsPage.moreMenu.restore")}
-                </DropdownMenuItem>
-              )}
+              <DropdownMenuItem
+                disabled={controlsDisabled}
+                onSelect={() => void handleOpenRestoreFromBackup()}
+              >
+                {t("skillsPage.moreMenu.restore")}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={controlsDisabled}
                 onSelect={() => setRepoManagerOpen(true)}

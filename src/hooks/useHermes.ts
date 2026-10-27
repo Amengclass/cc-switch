@@ -8,6 +8,12 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { hermesApi } from "@/lib/api/hermes";
+import {
+  getRemoteHermesMemory,
+  getRemoteHermesMemoryLimits,
+  setRemoteHermesMemory,
+  setRemoteHermesMemoryEnabled,
+} from "@/lib/api/remote";
 import { providersApi } from "@/lib/api/providers";
 import { settingsApi } from "@/lib/api/settings";
 import type { HermesMemoryKind } from "@/types";
@@ -32,6 +38,20 @@ export const hermesKeys = {
   memoryLimits: ["hermes", "memoryLimits"] as const,
   configDir: ["hermes", "configDir"] as const,
 };
+
+/** 远端目标（本补丁层）：非空时记忆读写走远端。 */
+export interface HermesRemoteTarget {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}
+
+const scopedKey = (
+  base: readonly unknown[],
+  target?: HermesRemoteTarget,
+): readonly unknown[] =>
+  target?.remoteTargetId
+    ? [...base, "remote", target.remoteTargetId, target.remoteContainerId ?? "__host__"]
+    : base;
 
 /**
  * Invalidate all Hermes caches that may change when a provider is
@@ -65,18 +85,35 @@ export function useHermesModelConfig(enabled: boolean) {
   });
 }
 
-export function useHermesMemory(kind: HermesMemoryKind, enabled: boolean) {
+export function useHermesMemory(
+  kind: HermesMemoryKind,
+  enabled: boolean,
+  target?: HermesRemoteTarget,
+) {
   return useQuery({
-    queryKey: hermesKeys.memory(kind),
-    queryFn: () => hermesApi.getMemory(kind),
+    queryKey: scopedKey(hermesKeys.memory(kind), target),
+    queryFn: () =>
+      target?.remoteTargetId
+        ? getRemoteHermesMemory(
+            target.remoteTargetId,
+            kind,
+            target.remoteContainerId,
+          )
+        : hermesApi.getMemory(kind),
     enabled,
   });
 }
 
-export function useHermesMemoryLimits(enabled: boolean) {
+export function useHermesMemoryLimits(enabled: boolean, target?: HermesRemoteTarget) {
   return useQuery({
-    queryKey: hermesKeys.memoryLimits,
-    queryFn: () => hermesApi.getMemoryLimits(),
+    queryKey: scopedKey(hermesKeys.memoryLimits, target),
+    queryFn: () =>
+      target?.remoteTargetId
+        ? getRemoteHermesMemoryLimits(
+            target.remoteTargetId,
+            target.remoteContainerId,
+          )
+        : hermesApi.getMemoryLimits(),
     staleTime: 60_000,
     enabled,
   });
@@ -105,20 +142,31 @@ export function useHermesConfigDir(enabled: boolean) {
  * try/catch; success toasts are intentionally left to the caller (to pick
  * the right localized message per tab).
  */
-export function useSaveHermesMemory() {
+export function useSaveHermesMemory(target?: HermesRemoteTarget) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       kind,
       content,
     }: {
       kind: HermesMemoryKind;
       content: string;
-    }) => hermesApi.setMemory(kind, content),
+    }) => {
+      if (target?.remoteTargetId) {
+        await setRemoteHermesMemory(
+          target.remoteTargetId,
+          kind,
+          content,
+          target.remoteContainerId,
+        );
+      } else {
+        await hermesApi.setMemory(kind, content);
+      }
+    },
     onSuccess: async (_data, variables) => {
       await queryClient.invalidateQueries({
-        queryKey: hermesKeys.memory(variables.kind),
+        queryKey: scopedKey(hermesKeys.memory(variables.kind), target),
       });
     },
     onError: (error) => {
@@ -133,20 +181,31 @@ export function useSaveHermesMemory() {
  * Toggle one memory blob's on/off flag in Hermes' `config.yaml`. Invalidates
  * the limits query so the switch UI and disabled banner update immediately.
  */
-export function useToggleHermesMemoryEnabled() {
+export function useToggleHermesMemoryEnabled(target?: HermesRemoteTarget) {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
   return useMutation({
-    mutationFn: ({
+    mutationFn: async ({
       kind,
       enabled,
     }: {
       kind: HermesMemoryKind;
       enabled: boolean;
-    }) => hermesApi.setMemoryEnabled(kind, enabled),
+    }) => {
+      if (target?.remoteTargetId) {
+        await setRemoteHermesMemoryEnabled(
+          target.remoteTargetId,
+          kind,
+          enabled,
+          target.remoteContainerId,
+        );
+      } else {
+        await hermesApi.setMemoryEnabled(kind, enabled);
+      }
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({
-        queryKey: hermesKeys.memoryLimits,
+        queryKey: scopedKey(hermesKeys.memoryLimits, target),
       });
     },
     onError: (error) => {

@@ -20,11 +20,14 @@ import {
   bulkToggleRemoteSkillApp,
   checkRemoteSkillUpdates,
   deleteRemoteSkill,
+  deleteRemoteSkillBackup,
   importRemoteSkill,
   installRemoteSkillFromDiscoverable,
   installRemoteSkillsFromZip,
+  listRemoteSkillBackups,
   listRemoteSkills,
   resyncRemoteSkills,
+  restoreRemoteSkillBackup,
   scanRemoteUnmanagedSkills,
   toggleRemoteSkillApp,
   updateRemoteSkill,
@@ -156,28 +159,50 @@ export function useInstalledSkills(
   });
 }
 
-export function useSkillBackups() {
+const backupsKey = (remoteTargetId?: string, remoteContainerId?: string) =>
+  remoteTargetId
+    ? [
+        "skills",
+        "backups",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "backups"];
+
+export function useSkillBackups(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   return useQuery({
-    queryKey: ["skills", "backups"],
-    queryFn: () => skillsApi.getBackups(),
+    queryKey: backupsKey(remoteTargetId, remoteContainerId),
+    queryFn: () =>
+      remoteTargetId
+        ? listRemoteSkillBackups(remoteTargetId, remoteContainerId)
+        : skillsApi.getBackups(),
     enabled: false,
   });
 }
 
-export function useDeleteSkillBackup() {
+export function useDeleteSkillBackup(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
+  const key = backupsKey(remoteTargetId, remoteContainerId);
   return useMutation({
-    mutationFn: (backupId: string) => skillsApi.deleteBackup(backupId),
+    mutationFn: (backupId: string) =>
+      remoteTargetId
+        ? deleteRemoteSkillBackup(remoteTargetId, backupId, remoteContainerId)
+        : skillsApi.deleteBackup(backupId),
     onSuccess: (_result, backupId) => {
-      queryClient.setQueryData<SkillBackupEntry[]>(
-        ["skills", "backups"],
-        (oldData) => oldData?.filter((backup) => backup.backupId !== backupId),
+      queryClient.setQueryData<SkillBackupEntry[]>(key, (oldData) =>
+        oldData?.filter((backup) => backup.backupId !== backupId),
       );
     },
     // remove_dir_all can partially change the backup directory before
     // returning an error, so reconcile the authoritative list either way.
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: key }),
   });
 }
 
@@ -317,7 +342,10 @@ export function useUninstallSkill(
   });
 }
 
-export function useRestoreSkillBackup() {
+export function useRestoreSkillBackup(
+  remoteTargetId?: string,
+  remoteContainerId?: string,
+) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
@@ -326,11 +354,23 @@ export function useRestoreSkillBackup() {
     }: {
       backupId: string;
       currentApp: AppId;
-    }) => skillsApi.restoreBackup(backupId, currentApp),
+    }) =>
+      remoteTargetId
+        ? restoreRemoteSkillBackup(
+            remoteTargetId,
+            backupId,
+            currentApp,
+            remoteContainerId,
+          )
+        : skillsApi.restoreBackup(backupId, currentApp),
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["skills", "installed"] }),
-        queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+        queryClient.invalidateQueries({
+          queryKey: installedKey(remoteTargetId, remoteContainerId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: backupsKey(remoteTargetId, remoteContainerId),
+        }),
       ]),
   });
 }

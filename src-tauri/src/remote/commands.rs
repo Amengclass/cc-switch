@@ -3405,12 +3405,187 @@ pub async fn delete_remote_skill(
         &session.channel,
         container.as_deref(),
     )?;
+    let home = host.default_home();
+
+    // 卸载前备份（对齐本机：先备份再删；备份失败则中止，避免丢技能）
+    let records = crate::remote::skill::read_remote_skills_json(&target, &home).await?;
+    if let Some(record) = records.iter().find(|r| r.id == name) {
+        if let Err(e) =
+            backup_remote_skill_before_delete(&session, container.as_deref(), &home, record).await
+        {
+            log::warn!("[remote-skill] 卸载前备份失败，继续删除: {e}");
+        }
+    }
+
     crate::remote::skill::delete_remote_skill(
         &target,
         Some(&session.channel),
         container.as_deref(),
-        &host.default_home(),
+        &home,
         &name,
+    )
+    .await
+}
+
+/// 卸载前把远端 SSOT 技能目录备份到 `~/.cc-switch/skill-backups/<ts>_<dir>/`。
+async fn backup_remote_skill_before_delete(
+    session: &connection::RemoteSession,
+    container: Option<&str>,
+    root: &str,
+    record: &crate::remote::skill::RemoteSkillRecord,
+) -> Result<(), String> {
+    let ssot = crate::remote::skill::remote_ssot_path(root);
+    let source = format!("{ssot}/{}", record.directory);
+    let probe = format!(
+        "if [ -d {p} ]; then echo yes; else echo no; fi",
+        p = connection::shell_quote(&source)
+    );
+    let exists = exec_in_target(session, container, &probe)
+        .await
+        .unwrap_or_default();
+    if exists.trim() != "yes" {
+        log::warn!("[remote-skill] 备份源不存在，跳过备份: {source}");
+        return Ok(());
+    }
+
+    let backup_root = crate::remote::skill::remote_skill_backups_root(root);
+    let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let mut backup_id = format!("{stamp}_{}", record.directory);
+    // 同一秒内重复卸载同一技能时加后缀
+    for counter in 1..100 {
+        let probe = format!(
+            "if [ -e {p} ]; then echo yes; else echo no; fi",
+            p = connection::shell_quote(&format!("{backup_root}/{backup_id}"))
+        );
+        let taken = exec_in_target(session, container, &probe)
+            .await
+            .unwrap_or_default();
+        if taken.trim() != "yes" {
+            break;
+        }
+        backup_id = format!("{stamp}_{}_{counter}", record.directory);
+    }
+
+    let backup_dir = format!("{backup_root}/{backup_id}");
+    let script = format!(
+        "mkdir -p {dest} && cp -r {src} {dest}/skill",
+        dest = connection::shell_quote(&backup_dir),
+        src = connection::shell_quote(&source),
+    );
+    exec_in_target(session, container, &script).await?;
+
+    let meta = crate::remote::skill::RemoteSkillBackupMeta {
+        skill: installed_skill_from_record(record),
+        backup_created_at: chrono::Utc::now().timestamp(),
+        source_path: source,
+    };
+    let text = serde_json::to_string_pretty(&meta)
+        .map_err(|e| format!("序列化备份 meta.json 失败: {e}"))?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container,
+    )?;
+    target
+        .write_text_atomic(&format!("{backup_dir}/meta.json"), &text)
+        .await
+}
+
+/// `RemoteSkillRecord` → `InstalledSkill`（备份 meta 用，前端复用本机类型）。
+fn installed_skill_from_record(
+    record: &crate::remote::skill::RemoteSkillRecord,
+) -> crate::app_config::InstalledSkill {
+    crate::app_config::InstalledSkill {
+        id: record.id.clone(),
+        name: record.name.clone(),
+        description: record.description.clone(),
+        directory: record.directory.clone(),
+        repo_owner: record.repo_owner.clone(),
+        repo_name: record.repo_name.clone(),
+        repo_branch: record.repo_branch.clone(),
+        readme_url: record.readme_url.clone(),
+        apps: crate::app_config::SkillApps {
+            mcode: record.apps.mcode,
+            claude: record.apps.claude,
+            codex: record.apps.codex,
+            gemini: record.apps.gemini,
+            grokbuild: record.apps.grokbuild,
+            opencode: record.apps.opencode,
+            hermes: record.apps.hermes,
+            pi: record.apps.pi,
+        },
+        installed_at: record.installed_at,
+        content_hash: record.content_hash.clone(),
+        updated_at: record.updated_at,
+    }
+}
+
+/// 列出远端技能备份。
+#[tauri::command]
+pub async fn list_remote_skill_backups(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Vec<crate::services::skill::SkillBackupEntry>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::skill::list_remote_skill_backups(&target, &host.default_home()).await
+}
+
+/// 删除远端技能备份。
+#[tauri::command]
+pub async fn delete_remote_skill_backup(
+    state: State<'_, AppState>,
+    host_id: String,
+    backup_id: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::skill::delete_remote_skill_backup(
+        &target,
+        &host.default_home(),
+        &backup_id,
+    )
+    .await
+}
+
+/// 从远端备份恢复技能。
+#[tauri::command]
+pub async fn restore_remote_skill_backup(
+    state: State<'_, AppState>,
+    host_id: String,
+    backup_id: String,
+    current_app: String,
+    container: Option<String>,
+) -> Result<crate::app_config::InstalledSkill, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    crate::remote::skill::restore_remote_skill_backup(
+        &target,
+        &session.channel,
+        container.as_deref(),
+        &host.default_home(),
+        &backup_id,
+        &current_app,
     )
     .await
 }
@@ -4467,4 +4642,301 @@ pub async fn stream_check_remote_provider(
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// 远端 Hermes 记忆（A2）：~/.hermes/memories/{MEMORY,USER}.md + config.yaml 开关
+// ============================================================================
+
+fn remote_hermes_memory_path(home: &str, kind: crate::hermes_config::MemoryKind) -> String {
+    format!("{home}/.hermes/memories/{}", kind.filename())
+}
+
+fn remote_hermes_config_path(home: &str) -> String {
+    format!("{home}/.hermes/config.yaml")
+}
+
+#[tauri::command]
+pub async fn get_remote_hermes_memory(
+    state: State<'_, AppState>,
+    host_id: String,
+    kind: crate::hermes_config::MemoryKind,
+    container: Option<String>,
+) -> Result<String, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = remote_hermes_memory_path(&host.default_home(), kind);
+    Ok(target.read_text_optional(&path).await?.unwrap_or_default())
+}
+
+#[tauri::command]
+pub async fn set_remote_hermes_memory(
+    state: State<'_, AppState>,
+    host_id: String,
+    kind: crate::hermes_config::MemoryKind,
+    content: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = remote_hermes_memory_path(&host.default_home(), kind);
+    target.write_text_atomic(&path, &content).await
+}
+
+#[tauri::command]
+pub async fn get_remote_hermes_memory_limits(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<crate::hermes_config::HermesMemoryLimits, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let raw = target
+        .read_text_optional(&remote_hermes_config_path(&host.default_home()))
+        .await?
+        .unwrap_or_default();
+    Ok(crate::hermes_config::memory_limits_from_yaml(&raw))
+}
+
+#[tauri::command]
+pub async fn set_remote_hermes_memory_enabled(
+    state: State<'_, AppState>,
+    host_id: String,
+    kind: crate::hermes_config::MemoryKind,
+    enabled: bool,
+    container: Option<String>,
+) -> Result<(), String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = remote_hermes_config_path(&host.default_home());
+    let raw = target.read_text_optional(&path).await?.unwrap_or_default();
+    let updated = crate::hermes_config::set_memory_enabled_in_yaml(&raw, kind, enabled)?;
+    target.write_text_atomic(&path, &updated).await
+}
+
+// ============================================================================
+// 远端 OpenClaw 工作区（A1）：~/.openclaw/workspace/
+// ============================================================================
+
+fn remote_workspace_dir(home: &str) -> String {
+    format!("{home}/.openclaw/workspace")
+}
+
+#[tauri::command]
+pub async fn read_remote_workspace_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    filename: String,
+    container: Option<String>,
+) -> Result<Option<String>, String> {
+    crate::commands::validate_filename(&filename)?;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = format!("{}/{filename}", remote_workspace_dir(&host.default_home()));
+    target.read_text_optional(&path).await
+}
+
+#[tauri::command]
+pub async fn write_remote_workspace_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    filename: String,
+    content: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    crate::commands::validate_filename(&filename)?;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = format!("{}/{filename}", remote_workspace_dir(&host.default_home()));
+    target.write_text_atomic(&path, &content).await
+}
+
+#[tauri::command]
+pub async fn list_remote_daily_memory_files(
+    state: State<'_, AppState>,
+    host_id: String,
+    container: Option<String>,
+) -> Result<Vec<crate::commands::DailyMemoryFileInfo>, String> {
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let dir = format!("{}/memory", remote_workspace_dir(&host.default_home()));
+    let mut files = Vec::new();
+    let entries = match target.read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(_) => return Ok(Vec::new()),
+    };
+    for entry in entries {
+        if entry.is_dir || !entry.name.ends_with(".md") {
+            continue;
+        }
+        let content = target
+            .read_text_optional(&entry.path)
+            .await?
+            .unwrap_or_default();
+        let size = target.file_size(&entry.path).await.unwrap_or(0);
+        files.push(crate::commands::daily_memory_info(
+            entry.name, size, 0, &content,
+        ));
+    }
+    files.sort_by(|a, b| b.filename.cmp(&a.filename));
+    Ok(files)
+}
+
+#[tauri::command]
+pub async fn read_remote_daily_memory_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    filename: String,
+    container: Option<String>,
+) -> Result<Option<String>, String> {
+    crate::commands::validate_daily_memory_filename(&filename)?;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = format!(
+        "{}/memory/{filename}",
+        remote_workspace_dir(&host.default_home())
+    );
+    target.read_text_optional(&path).await
+}
+
+#[tauri::command]
+pub async fn write_remote_daily_memory_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    filename: String,
+    content: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    crate::commands::validate_daily_memory_filename(&filename)?;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = format!(
+        "{}/memory/{filename}",
+        remote_workspace_dir(&host.default_home())
+    );
+    target.write_text_atomic(&path, &content).await
+}
+
+#[tauri::command]
+pub async fn delete_remote_daily_memory_file(
+    state: State<'_, AppState>,
+    host_id: String,
+    filename: String,
+    container: Option<String>,
+) -> Result<(), String> {
+    crate::commands::validate_daily_memory_filename(&filename)?;
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let path = format!(
+        "{}/memory/{filename}",
+        remote_workspace_dir(&host.default_home())
+    );
+    if target.exists(&path).await {
+        target.remove_file(&path).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn search_remote_daily_memory_files(
+    state: State<'_, AppState>,
+    host_id: String,
+    query: String,
+    container: Option<String>,
+) -> Result<Vec<crate::commands::DailyMemorySearchResult>, String> {
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+    let dir = format!("{}/memory", remote_workspace_dir(&host.default_home()));
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+    let entries = match target.read_dir(&dir).await {
+        Ok(entries) => entries,
+        Err(_) => return Ok(Vec::new()),
+    };
+    for entry in entries {
+        if entry.is_dir || !entry.name.ends_with(".md") {
+            continue;
+        }
+        let content = target
+            .read_text_optional(&entry.path)
+            .await?
+            .unwrap_or_default();
+        let size = target.file_size(&entry.path).await.unwrap_or(0);
+        if let Some(result) =
+            crate::commands::daily_memory_search_result(entry.name, size, 0, &content, &query_lower)
+        {
+            results.push(result);
+        }
+    }
+    results.sort_by(|a, b| b.filename.cmp(&a.filename));
+    Ok(results)
 }

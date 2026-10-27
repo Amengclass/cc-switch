@@ -13,6 +13,7 @@ import {
   useOpenHermesWebUI,
   useSaveHermesMemory,
   useToggleHermesMemoryEnabled,
+  type HermesRemoteTarget,
 } from "@/hooks/useHermes";
 import { shortenHomePath } from "@/components/sessions/utils";
 import type { HermesMemoryKind } from "@/types";
@@ -63,10 +64,16 @@ function memoryFilePath(configDir: string | undefined, file: string) {
  * 页头的「保存」（记忆页唯一的 solid 按钮）：保存当前页签那份记忆。
  * 「Hermes 下次启动或新建会话时生效」是后果，写在保存成功的 toast 里。
  */
-export const HermesMemorySaveButton: React.FC = () => {
+export const HermesMemorySaveButton: React.FC<HermesRemoteTarget> = ({
+  remoteTargetId,
+  remoteContainerId,
+}) => {
   const { t } = useTranslation();
   const drafts = useHermesMemoryDrafts();
-  const saveMutation = useSaveHermesMemory();
+  const saveMutation = useSaveHermesMemory({
+    remoteTargetId,
+    remoteContainerId,
+  });
   const kind = drafts.active;
   const dirty = isHermesMemoryDirty(drafts, kind);
   const saving = saveMutation.isPending;
@@ -106,6 +113,7 @@ interface MemoryTabPaneProps {
   limit: number;
   enabled: boolean;
   configDir?: string;
+  target: HermesRemoteTarget;
 }
 
 const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
@@ -113,13 +121,14 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
   limit,
   enabled,
   configDir,
+  target,
 }) => {
   const { t } = useTranslation();
   const meta = KIND_META[kind];
   const name = t(meta.nameKey);
-  const { data, isLoading, isError } = useHermesMemory(kind, true);
+  const { data, isLoading, isError } = useHermesMemory(kind, true, target);
   const drafts = useHermesMemoryDrafts();
-  const toggleMutation = useToggleHermesMemoryEnabled();
+  const toggleMutation = useToggleHermesMemoryEnabled(target);
 
   // 只在第一次读到文件时填草稿；保存后的重新读取不覆盖正在编辑的内容
   useEffect(() => {
@@ -256,24 +265,32 @@ const MemoryTabPane: React.FC<MemoryTabPaneProps> = ({
   );
 };
 
-interface HermesMemoryPanelProps {
+interface HermesMemoryPanelProps extends HermesRemoteTarget {
   /** 打开 Hermes Web UI；App 传入带「未启动 → 确认后启动」的版本 */
   onOpenWebUI?: (path?: string) => void | Promise<void>;
 }
 
 const HermesMemoryPanel: React.FC<HermesMemoryPanelProps> = ({
   onOpenWebUI,
+  remoteTargetId,
+  remoteContainerId,
 }) => {
   const { t } = useTranslation();
   const drafts = useHermesMemoryDrafts();
   const activeTab = drafts.active;
   const fallbackOpenWebUI = useOpenHermesWebUI();
   const openWebUI = onOpenWebUI ?? fallbackOpenWebUI;
-  const { data: limits } = useHermesMemoryLimits(true);
-  const { data: configDir } = useHermesConfigDir(true);
+  const target = { remoteTargetId, remoteContainerId };
+  const isRemote = Boolean(remoteTargetId);
+  const { data: limits } = useHermesMemoryLimits(true, target);
+  const { data: configDir } = useHermesConfigDir(!isRemote);
 
   // 离开记忆页就丢掉草稿，回来时重新读文件
   useEffect(() => () => hermesMemoryDrafts.reset(), []);
+  // 切换目标（本机 ↔ 远端 / 不同远端）：草稿来自另一个目标，必须清掉
+  useEffect(() => {
+    hermesMemoryDrafts.reset();
+  }, [remoteTargetId, remoteContainerId]);
 
   const limitOf = (kind: HermesMemoryKind) =>
     (kind === "memory" ? limits?.memory : limits?.user) ??
@@ -313,15 +330,18 @@ const HermesMemoryPanel: React.FC<HermesMemoryPanelProps> = ({
           ),
         }))}
         trailing={
-          <Button
-            variant="quiet"
-            size="compact"
-            className="text-fg-2"
-            onClick={() => void openWebUI("/config")}
-          >
-            {t("hermes.memory.openConfig")}
-            <ExternalLink className="h-3.5 w-3.5" />
-          </Button>
+          // Web UI 跑在目标机器的 127.0.0.1，本机浏览器够不到远端，远端下不提供入口
+          isRemote ? undefined : (
+            <Button
+              variant="quiet"
+              size="compact"
+              className="text-fg-2"
+              onClick={() => void openWebUI("/config")}
+            >
+              {t("hermes.memory.openConfig")}
+              <ExternalLink className="h-3.5 w-3.5" />
+            </Button>
+          )
         }
       />
 
@@ -341,7 +361,8 @@ const HermesMemoryPanel: React.FC<HermesMemoryPanelProps> = ({
             kind={kind}
             limit={limitOf(kind)}
             enabled={enabledOf(kind)}
-            configDir={configDir}
+            configDir={isRemote ? "~/.hermes" : configDir}
+            target={target}
           />
         </div>
       ))}

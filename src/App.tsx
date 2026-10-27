@@ -1315,7 +1315,12 @@ function App() {
               {t("provider.addProvider")}
             </Button>
           )}
-          {currentView === "hermesMemory" && <HermesMemorySaveButton />}
+          {currentView === "hermesMemory" && (
+            <HermesMemorySaveButton
+              remoteTargetId={remote.remoteTargetId || undefined}
+              remoteContainerId={remote.remoteContainerId || undefined}
+            />
+          )}
           {appMenu}
         </>
       }
@@ -1524,7 +1529,12 @@ function App() {
     const body = (() => {
       switch (currentView) {
         case "workspace":
-          return <WorkspaceFilesPanel />;
+          return (
+            <WorkspaceFilesPanel
+              remoteTargetId={remote.remoteTargetId || undefined}
+              remoteContainerId={remote.remoteContainerId || undefined}
+            />
+          );
         case "openclawConfig":
           return (
             <>
@@ -1575,7 +1585,11 @@ function App() {
               id="main-content"
               className="min-h-0 flex-1 overflow-y-auto scroll-stable"
             >
-              <HermesMemoryPanel onOpenWebUI={openHermesWebUI} />
+              <HermesMemoryPanel
+                onOpenWebUI={openHermesWebUI}
+                remoteTargetId={remote.remoteTargetId || undefined}
+                remoteContainerId={remote.remoteContainerId || undefined}
+              />
             </div>
           );
         default:

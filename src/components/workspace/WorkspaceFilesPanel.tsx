@@ -18,7 +18,10 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { HoverTip } from "@/components/ui/hover-tip";
-import { workspaceApi } from "@/lib/api/workspace";
+import {
+  workspaceApiFor,
+  type WorkspaceRemoteTarget,
+} from "@/lib/api/workspace";
 import WorkspaceFileEditor from "./WorkspaceFileEditor";
 import DailyMemoryPanel from "./DailyMemoryPanel";
 
@@ -52,8 +55,13 @@ const WORKSPACE_FILES: WorkspaceFile[] = [
   { filename: "BOOT.md", icon: Power, descKey: "workspace.files.boot" },
 ];
 
-const WorkspaceFilesPanel: React.FC = () => {
+const WorkspaceFilesPanel: React.FC<WorkspaceRemoteTarget> = ({
+  remoteTargetId,
+  remoteContainerId,
+}) => {
   const { t } = useTranslation();
+  const api = workspaceApiFor({ remoteTargetId, remoteContainerId });
+  const isRemote = Boolean(remoteTargetId);
   const [editingFile, setEditingFile] = useState<string | null>(null);
   const [fileExists, setFileExists] = useState<Record<string, boolean>>({});
   const [showDailyMemory, setShowDailyMemory] = useState(false);
@@ -63,7 +71,7 @@ const WorkspaceFilesPanel: React.FC = () => {
     await Promise.all(
       WORKSPACE_FILES.map(async (f) => {
         try {
-          const content = await workspaceApi.readFile(f.filename);
+          const content = await api.readFile(f.filename);
           results[f.filename] = content !== null;
         } catch {
           results[f.filename] = false;
@@ -75,7 +83,9 @@ const WorkspaceFilesPanel: React.FC = () => {
 
   useEffect(() => {
     void checkFileExistence();
-  }, []);
+    // 目标切换后重新探测该目标的文件
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteTargetId, remoteContainerId]);
 
   const handleEditorClose = () => {
     setEditingFile(null);
@@ -85,15 +95,22 @@ const WorkspaceFilesPanel: React.FC = () => {
 
   return (
     <div className="px-6 pt-4 pb-8">
-      <HoverTip content={t("workspace.openDirectory")}>
-        <p
-          className="text-sm text-fg-2 mb-6 cursor-pointer hover:text-fg-1 transition-colors inline-flex items-center gap-1"
-          onClick={() => workspaceApi.openDirectory("workspace")}
-        >
+      {isRemote ? (
+        // 远端没有本机文件管理器：只显示路径，不给「打开目录」
+        <p className="text-sm text-fg-2 mb-6 inline-flex items-center gap-1">
           ~/.openclaw/workspace/
-          <FolderOpen className="w-3.5 h-3.5" />
         </p>
-      </HoverTip>
+      ) : (
+        <HoverTip content={t("workspace.openDirectory")}>
+          <p
+            className="text-sm text-fg-2 mb-6 cursor-pointer hover:text-fg-1 transition-colors inline-flex items-center gap-1"
+            onClick={() => api.openDirectory("workspace")}
+          >
+            ~/.openclaw/workspace/
+            <FolderOpen className="w-3.5 h-3.5" />
+          </p>
+        </HoverTip>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {WORKSPACE_FILES.map((file) => {
@@ -152,11 +169,15 @@ const WorkspaceFilesPanel: React.FC = () => {
         filename={editingFile ?? ""}
         isOpen={!!editingFile}
         onClose={handleEditorClose}
+        remoteTargetId={remoteTargetId}
+        remoteContainerId={remoteContainerId}
       />
 
       <DailyMemoryPanel
         isOpen={showDailyMemory}
         onClose={() => setShowDailyMemory(false)}
+        remoteTargetId={remoteTargetId}
+        remoteContainerId={remoteContainerId}
       />
     </div>
   );
