@@ -68,6 +68,7 @@ import {
   bootstrapRemoteKey,
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
+  detectLocalSshKeys,
   listRemoteHosts,
   saveRemoteHost,
   scanRemoteEnvConflicts,
@@ -197,6 +198,25 @@ export const RemoteHostsPanel = React.forwardRef<
 
   useImperativeHandle(ref, () => ({ openAdd }), [openAdd]);
 
+  /**
+   * 「私钥」认证零输入：本机私钥就那么几个固定位置，选私钥时自动探测并填入，
+   * 探测不到才需要手填。
+   */
+  const autoFillKeyPath = async (alias: string, currentPath: string) => {
+    if (currentPath.trim()) return;
+    try {
+      const keys = await detectLocalSshKeys(alias);
+      const first = keys[0];
+      if (first) {
+        setForm((prev) =>
+          prev.privateKeyPath.trim() ? prev : { ...prev, privateKeyPath: first },
+        );
+      }
+    } catch {
+      // 探测失败不影响手填
+    }
+  };
+
   const openEdit = (host: RemoteHost) => {
     setEditing(host);
     setForm({
@@ -214,6 +234,10 @@ export const RemoteHostsPanel = React.forwardRef<
       routeProxyApps: { ...host.routeProxyApps },
     });
     setFormOpen(true);
+    // 已有私钥主机但没存路径：打开时自动探测一次
+    if (host.authMethod === "key" && !host.privateKeyPath) {
+      void autoFillKeyPath(host.host, "");
+    }
   };
 
   const handleSave = async () => {
@@ -1081,9 +1105,12 @@ export const RemoteHostsPanel = React.forwardRef<
                       defaultValue: "认证方式",
                     })}
                     value={form.authMethod}
-                    onValueChange={(value) =>
-                      setForm({ ...form, authMethod: value })
-                    }
+                    onValueChange={(value) => {
+                      setForm({ ...form, authMethod: value });
+                      if (value === "key") {
+                        void autoFillKeyPath(form.host, form.privateKeyPath);
+                      }
+                    }}
                     items={[
                       {
                         value: "password",
@@ -1121,10 +1148,15 @@ export const RemoteHostsPanel = React.forwardRef<
                       })}
                     />
                     <span className="text-caption text-fg-2">
-                      {t("remote.privateKeyPathHint", {
-                        defaultValue:
-                          "私钥需位于本机（支持 ~/ 展开）；有口令时填在下方密码框，会加密保存",
-                      })}
+                      {form.privateKeyPath
+                        ? t("remote.privateKeyPathDetected", {
+                            defaultValue:
+                              "已自动填入本机私钥；可改成其他路径。有口令时填在下方，会加密保存",
+                          })
+                        : t("remote.privateKeyPathHint", {
+                            defaultValue:
+                              "未检测到本机私钥，请手动填写路径；有口令时填在下方密码框",
+                          })}
                     </span>
                   </div>
                 )}

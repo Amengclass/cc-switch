@@ -359,6 +359,34 @@ pub async fn list_remote_hosts(state: State<'_, AppState>) -> Result<Vec<RemoteH
     state.db.list_remote_hosts().map_err(|e| e.to_string())
 }
 
+/// 探测本机可用的 SSH 私钥（供「私钥」认证自动填充，用户无需手填路径）。
+///
+/// 顺序：ssh config 的 IdentityFile（按别名） → `~/.ssh/id_ed25519` → `id_rsa` → `id_ecdsa`。
+#[tauri::command]
+pub fn detect_local_ssh_keys(alias: Option<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut push = |path: Option<String>| {
+        if let Some(path) = path {
+            let p = std::path::PathBuf::from(&path);
+            if p.is_file() && !out.iter().any(|existing| existing == &path) {
+                out.push(path);
+            }
+        }
+    };
+
+    if let Some(alias) = alias.as_deref().filter(|a| !a.trim().is_empty()) {
+        push(connection::ssh_config_identity_file(alias));
+    }
+    if let Some(home) = dirs::home_dir() {
+        for name in ["id_ed25519", "id_rsa", "id_ecdsa"] {
+            push(Some(
+                home.join(".ssh").join(name).to_string_lossy().to_string(),
+            ));
+        }
+    }
+    out
+}
+
 /// 一键「密码 → 密钥」：用密码登录一次，把本机公钥装到远端，再改用私钥登录。
 ///
 /// 之后连接不再需要密码。失败时保持原记录不变（远端公钥可能已追加，但不影响密码登录）。

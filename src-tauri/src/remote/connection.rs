@@ -517,6 +517,11 @@ fn resolve_ssh_config(alias: &str) -> Option<SshConfigEntry> {
     parsed
 }
 
+/// `~/.ssh/config` 里某个别名的 `IdentityFile`（供「私钥」表单自动填充）。
+pub(crate) fn ssh_config_identity_file(alias: &str) -> Option<String> {
+    resolve_ssh_config(alias.trim()).and_then(|cfg| cfg.identity_file)
+}
+
 /// 是否是 IP 字面量（IP 不做 ssh config 展开）。
 fn is_ip_literal(value: &str) -> bool {
     use std::net::IpAddr;

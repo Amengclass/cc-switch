@@ -412,6 +412,11 @@ export async function cleanRemoteEnvConflicts(
   );
 }
 
+/** 探测本机可用私钥（ssh config IdentityFile → ~/.ssh/id_ed25519 → id_rsa → id_ecdsa） */
+export async function detectLocalSshKeys(alias?: string): Promise<string[]> {
+  return invoke<string[]>("detect_local_ssh_keys", { alias: alias ?? null });
+}
+
 /**
  * 一键「密码 → 密钥」：用密码登录一次，把本机公钥装到远端并改用私钥登录。
  * 之后连接不再需要密码。

@@ -1801,6 +1801,7 @@ pub fn run() {
             remote::commands::list_remote_hosts,
             remote::commands::save_remote_host,
             remote::commands::bootstrap_remote_key,
+            remote::commands::detect_local_ssh_keys,
             remote::commands::delete_remote_host,
             remote::commands::probe_hosts_online,
             remote::commands::test_remote_connection,
