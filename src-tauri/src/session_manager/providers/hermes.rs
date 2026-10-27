@@ -11,6 +11,7 @@ use crate::session_manager::{SessionMessage, SessionMeta};
 
 use super::blocks::{assign_turn_ids, openai_tool_calls, thinking_block, tool_result_block};
 use super::utils::for_each_jsonl_value;
+use super::utils::for_each_jsonl_value_bytes;
 use super::utils::{
     extract_text, parse_timestamp_to_ms, read_head_tail_lines, truncate_summary, TITLE_MAX_CHARS,
 };
@@ -625,7 +626,15 @@ fn jsonl_message(value: &Value) -> Option<(&str, String)> {
 fn parse_jsonl_session(path: &Path) -> Option<SessionMeta> {
     // Read head (metadata + first user message) and tail (last timestamp + last message)
     let (head, tail) = read_head_tail_lines(path, 30, 10).ok()?;
+    parse_jsonl_session_lines(path, head, tail)
+}
 
+/// 从 head/tail 行构建 JSONL 会话元数据（纯函数，供远端复用）。
+pub(crate) fn parse_jsonl_session_lines(
+    path: &Path,
+    head: Vec<String>,
+    tail: Vec<String>,
+) -> Option<SessionMeta> {
     let mut first_user_msg: Option<String> = None;
     let mut first_ts: Option<i64> = None;
     let mut last_ts: Option<i64> = None;
@@ -744,9 +753,16 @@ fn parse_jsonl_session(path: &Path) -> Option<SessionMeta> {
 ///
 /// 字段名按 SQLite 同构推断（`tool_calls` / `tool_call_id`，待核实）。
 pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
+    let content =
+        std::fs::read(path).map_err(|e| format!("Failed to open session file: {e}"))?;
+    Ok(parse_messages_from_content(&content))
+}
+
+/// 从 JSONL **内容**解析消息（纯函数，供远端复用）。
+pub(crate) fn parse_messages_from_content(content: &[u8]) -> Vec<SessionMessage> {
     let mut messages = Vec::new();
 
-    for_each_jsonl_value(path, |span, value| {
+    let _ = for_each_jsonl_value_bytes(content, |span, value| {
         // Support both flat messages and nested {type:"message", message:{...}} format
         let (msg, base, ts_val) = if value.get("type").and_then(Value::as_str) == Some("message") {
             let Some(msg) = value.get("message") else {
@@ -805,10 +821,10 @@ pub fn load_messages(path: &Path) -> Result<Vec<SessionMessage>, String> {
             messages.push(message);
         }
         Ok(())
-    })?;
+    });
 
     assign_turn_ids(&mut messages);
-    Ok(messages)
+    messages
 }
 
 /// Delete a Hermes JSONL session file.

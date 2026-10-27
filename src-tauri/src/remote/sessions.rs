@@ -152,6 +152,21 @@ pub async fn scan_gemini_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> 
     out
 }
 
+/// hermes：`<root>/*.jsonl|*.json`（旧版 JSONL 会话，与 SQLite 主存储并存，按 id 去重）。
+pub async fn scan_hermes_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
+    use crate::session_manager::providers::hermes;
+    let files = collect_files_fs(fs, root, |p| p.ends_with(".jsonl") || p.ends_with(".json")).await;
+    let mut out = Vec::new();
+    for f in files {
+        if let Ok((head, tail)) = fs.read_head_tail_lines(&f, 30, 10).await {
+            if let Some(m) = hermes::parse_jsonl_session_lines(Path::new(&f), head, tail) {
+                out.push(m);
+            }
+        }
+    }
+    out
+}
+
 /// pi：`<root>/**/*.jsonl`（读文本构建会话树）。
 pub async fn scan_pi_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
     use crate::session_manager::providers::pi;
@@ -404,8 +419,8 @@ pub async fn delete_session_fs<F: FileOps>(
             }
             fs.remove_file(source_path).await?;
         }
-        // codex / openclaw / pi：单文件即会话
-        "codex" | "openclaw" | "pi" => {
+        // codex / openclaw / pi / hermes(JSONL)：单文件即会话
+        "codex" | "openclaw" | "pi" | "hermes" => {
             fs.remove_file(source_path).await?;
         }
         other => {

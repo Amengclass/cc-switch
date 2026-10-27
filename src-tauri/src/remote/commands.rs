@@ -2125,6 +2125,9 @@ pub async fn list_remote_sessions_all(
         .await
         .unwrap_or_default();
 
+    // hermes 可能出现 SQLite 与 JSONL 两套会话并存（本机 scan_sessions 也是合并 + SQLite 优先）
+    let mut hermes_sqlite_ids: std::collections::HashSet<String> = Default::default();
+
     // codex 线程标题：本机会用 session_index.jsonl + state_5.sqlite 覆盖标题，
     // 远端同样读取，否则列表标题与本地不一致。
     let mut codex_titles: std::collections::HashMap<String, String> =
@@ -2246,10 +2249,15 @@ pub async fn list_remote_sessions_all(
                     .unwrap_or_default();
                 for row in rows {
                     let meta = if *app == "hermes" {
-                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
-                            &row,
-                            &format!("sqlite:{db}"),
-                        )
+                        let m =
+                            crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
+                                &row,
+                                &format!("sqlite:{db}"),
+                            );
+                        if let Some(meta) = &m {
+                            hermes_sqlite_ids.insert(meta.session_id.clone());
+                        }
+                        m
                     } else {
                         crate::session_manager::providers::mcode::row_to_session_meta(&row)
                     };
@@ -2328,6 +2336,16 @@ pub async fn list_remote_sessions_all(
       }
     }
 
+    // hermes 旧版 JSONL 会话：与 SQLite 结果合并，同 id 以 SQLite 为准（对齐本机）。
+    for meta in
+        crate::remote::sessions::scan_hermes_fs(&target, &format!("{home}/.hermes/sessions"))
+            .await
+    {
+        if !hermes_sqlite_ids.contains(&meta.session_id) {
+            all_sessions.push(meta);
+        }
+    }
+
     // 时间倒序，与本机 scan_sessions 一致。
     all_sessions.sort_by(|a, b| {
         let a_ts = a.last_active_at.or(a.created_at).unwrap_or(0);
@@ -2357,8 +2375,9 @@ pub async fn get_remote_session_messages(
         container.as_deref(),
     )?;
 
-    // hermes / opencode / mcode：SQLite 主存储，经远端 sqlite-helper 查询
-    if app == "hermes" || app == "opencode" || app == "mcode" {
+    // hermes（sqlite: 源）/ opencode / mcode：SQLite 主存储，经远端 sqlite-helper 查询
+    let is_sqlite_source = source_path.starts_with("sqlite:") || app == "mcode";
+    if is_sqlite_source && (app == "hermes" || app == "opencode" || app == "mcode") {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
         if app == "mcode" {
@@ -2547,6 +2566,16 @@ pub async fn get_remote_session_messages(
                 .unwrap_or_default();
             crate::session_manager::providers::pi::parse_messages_from_content(&content)
         }
+        // hermes 旧版 JSONL 会话（非 sqlite: 源）
+        "hermes" => {
+            let content = target
+                .read_text_optional(&source_path)
+                .await?
+                .unwrap_or_default();
+            Ok(crate::session_manager::providers::hermes::parse_messages_from_content(
+                content.as_bytes(),
+            ))
+        }
         other => Err(format!("远端会话管理暂不支持应用 {other}（尚未移植）")),
     }
 }
@@ -2576,8 +2605,8 @@ pub async fn delete_remote_session(
         );
     }
 
-    // hermes：SQLite 主存储（会话 + 消息两张表）
-    if app == "hermes" {
+    // hermes：SQLite 主存储（会话 + 消息两张表）；JSONL 会话走文件删除
+    if app == "hermes" && source_path.starts_with("sqlite:") {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
         let db = format!("{home}/.hermes/state.db");
