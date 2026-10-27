@@ -4824,6 +4824,8 @@
     "showPassword": "Show password",
     "savePassword": "Encrypt and save password",
     "savePasswordHint": "The password is encrypted with Windows DPAPI, bound to the current account, and used for one-click connection / switching",
+    "passwordStoredHint": "The password is stored locally with Windows DPAPI (only your Windows account can decrypt it) and used for one-click connection / switching; it is deleted once key login is configured.",
+    "passphraseStoredHint": "The passphrase is stored locally with Windows DPAPI (only your Windows account can decrypt it) and used for automatic connections.",
     "authMethodLabel": "Authentication",
     "authPassword": "Password",
     "authKey": "Private key",

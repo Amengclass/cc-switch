@@ -4824,6 +4824,8 @@
     "showPassword": "パスワードを表示",
     "savePassword": "パスワードを暗号化して保存",
     "savePasswordHint": "パスワードは Windows DPAPI で暗号化され、現在のアカウントに紐づきます。ワンクリック接続/切り替えに使用します",
+    "passwordStoredHint": "パスワードは Windows DPAPI でローカルに暗号化保存され（現在の Windows アカウントのみ復号可能）、ワンクリック接続/切り替えに使用します。鍵の設定に成功すると削除されます。",
+    "passphraseStoredHint": "パスフレーズは Windows DPAPI でローカルに暗号化保存され（現在の Windows アカウントのみ復号可能）、自動接続に使用します。",
     "authMethodLabel": "認証方式",
     "authPassword": "パスワード",
     "authKey": "秘密鍵",

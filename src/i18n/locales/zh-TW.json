@@ -4825,6 +4825,8 @@
     "showPassword": "顯示密碼",
     "savePassword": "加密儲存密碼",
     "savePasswordHint": "密碼經 Windows DPAPI 加密，綁定目前帳戶，用於一鍵連線 / 切換",
+    "passwordStoredHint": "密碼會以 Windows DPAPI 加密保存在本機（僅目前 Windows 帳戶可解密），用於一鍵連線 / 切換；設定金鑰成功後會刪除。",
+    "passphraseStoredHint": "口令會用 Windows DPAPI 加密保存在本機（僅目前 Windows 帳戶可解密），用於自動連線。",
     "authMethodLabel": "認證方式",
     "authPassword": "密碼",
     "authKey": "金鑰",

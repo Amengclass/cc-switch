@@ -123,7 +123,8 @@ function formToDraft(f: HostFormState) {
     username: f.username.trim(),
     authMethod: f.authMethod,
     privateKeyPath: f.authMethod === "key" ? f.privateKeyPath.trim() : undefined,
-    savePassword: f.savePassword,
+    // 凭据一律加密保存（没有「不保存」选项：连接时没有地方临时输入密码）
+    savePassword: true,
     routeThroughLocalProxy: f.routeThroughLocalProxy,
     routeProxyApps: f.routeProxyApps,
     password: f.password,
@@ -1218,48 +1219,19 @@ export const RemoteHostsPanel = React.forwardRef<
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1">
-                      <span className={LABEL_CLASS}>
-                        {form.authMethod === "key"
-                          ? t("remote.savePassphrase", {
-                              defaultValue: "加密保存口令",
-                            })
-                          : t("remote.savePassword", {
-                              defaultValue: "加密保存密码",
-                            })}
-                      </span>
-                      <HelpTip
-                        title={
-                          form.authMethod === "key"
-                            ? t("remote.savePassphrase", {
-                                defaultValue: "加密保存口令",
-                              })
-                            : t("remote.savePassword", {
-                                defaultValue: "加密保存密码",
-                              })
-                        }
-                      >
-                        {t("remote.savePasswordHint", {
-                          defaultValue:
-                            "密码经 Windows DPAPI 加密，绑定当前账户，用于一键连接 / 切换",
-                        })}
-                      </HelpTip>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={form.savePassword}
-                    onCheckedChange={(v) =>
-                      setForm({ ...form, savePassword: v })
-                    }
-                    // 新增时无密码不可存；编辑时始终可切（关掉 = 删除已保存密码）
-                    disabled={!editing && !form.password}
-                    aria-label={t("remote.savePassword", {
-                      defaultValue: "加密保存密码",
-                    })}
-                  />
-                </div>
+                {/* 凭据一律加密保存（无「保存密码」开关：关掉后连接时无处可输，
+                    只会让远端操作直接失败）。配置密钥成功后密码会被自动删除。 */}
+                <p className="m-0 text-caption text-fg-2">
+                  {form.authMethod === "key"
+                    ? t("remote.passphraseStoredHint", {
+                        defaultValue:
+                          "口令会用 Windows DPAPI 加密保存在本机（仅当前 Windows 账户可解密），用于自动连接。",
+                      })
+                    : t("remote.passwordStoredHint", {
+                        defaultValue:
+                          "密码会以 Windows DPAPI 加密保存在本机（仅当前 Windows 账户可解密），用于一键连接 / 切换；配置密钥成功后会删除。",
+                      })}
+                </p>
                 {form.authMethod === "password" && (
                   <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0 flex-1">

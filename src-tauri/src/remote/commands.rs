@@ -518,8 +518,9 @@ pub async fn save_remote_host(
     // 下次连接重新探测（复用旧连接时 connection::ensure_probed_home 会补探测）。
     crate::remote::forget_probed_home(&host.id);
 
-    // 只要提供了密码，就无条件写入系统钥匙串，保证连接/切换可用。
-    // save_password 仅作为「记住密码」的偏好标记；若用户刻意留空密码则不覆盖旧密码。
+    // 只要提供了密码，就无条件写入系统钥匙串（DPAPI 加密），保证连接/切换可用。
+    // 没有「不保存密码」选项：连接时没有地方临时输入密码，不保存只会让远端操作失败。
+    // 删除密码只发生在「改用密钥认证」成功后（bootstrap_remote_key）。
     if let Some(pw) = password.as_deref().filter(|p| !p.is_empty()) {
         log::info!("[remote] 保存密码到钥匙串 id={}", host.id);
         #[cfg(target_os = "windows")]
@@ -528,10 +529,6 @@ pub async fn save_remote_host(
             return Err(e);
         }
         log::info!("[remote] 钥匙串保存成功 id={}", host.id);
-    } else if !host.save_password {
-        log::info!("[remote] 删除钥匙串密码 id={}", host.id);
-        #[cfg(target_os = "windows")]
-        let _ = credentials::delete_password(&host.id);
     }
     Ok(host)
 }
