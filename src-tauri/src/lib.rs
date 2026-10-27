@@ -1800,6 +1800,7 @@ pub fn run() {
             // 报「Command xxx not found」（被 catch 成「无法连接远端」）。
             remote::commands::list_remote_hosts,
             remote::commands::save_remote_host,
+            remote::commands::bootstrap_remote_key,
             remote::commands::delete_remote_host,
             remote::commands::probe_hosts_online,
             remote::commands::test_remote_connection,

@@ -65,6 +65,7 @@ import {
 } from "@/components/mcp/formBits";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
+  bootstrapRemoteKey,
   cleanRemoteEnvConflicts,
   deleteRemoteHost,
   listRemoteHosts,
@@ -74,6 +75,7 @@ import {
   testRemoteConnectionInfo,
 } from "@/lib/api/remote";
 import type { RemoteEnvConflict, RemoteHost } from "@/types/remote";
+import { extractErrorMessage } from "@/utils/errorUtils";
 
 interface HostFormState {
   name: string;
@@ -85,6 +87,8 @@ interface HostFormState {
   privateKeyPath: string;
   password: string;
   savePassword: boolean;
+  /** 首次密码登录后自动装公钥、改用私钥登录（以后免密码） */
+  bootstrapKey: boolean;
   routeThroughLocalProxy: boolean;
   /** per-app 远端接管（claude/codex/gemini/grokbuild） */
   routeProxyApps: Record<string, boolean>;
@@ -99,6 +103,7 @@ const EMPTY_FORM: HostFormState = {
   privateKeyPath: "",
   password: "",
   savePassword: true,
+  bootstrapKey: true,
   routeThroughLocalProxy: false,
   routeProxyApps: {
     claude: false,
@@ -203,6 +208,8 @@ export const RemoteHostsPanel = React.forwardRef<
       privateKeyPath: host.privateKeyPath ?? "",
       password: "",
       savePassword: host.savePassword,
+      // 编辑已有密码主机时默认不重复装密钥（避免每次保存都跑一遍）
+      bootstrapKey: false,
       routeThroughLocalProxy: host.routeThroughLocalProxy,
       routeProxyApps: { ...host.routeProxyApps },
     });
@@ -263,12 +270,37 @@ export const RemoteHostsPanel = React.forwardRef<
     };
     setSaving(true);
     try {
-      await saveRemoteHost(host, form.password || undefined);
+      const saved = await saveRemoteHost(host, form.password || undefined);
       toast.success(
         editing
           ? t("remote.updated", { defaultValue: "远程主机已更新" })
           : t("remote.added", { defaultValue: "远程主机已添加" }),
       );
+
+      // 首次密码登录 → 自动装公钥并改用私钥认证（以后免密码）
+      if (
+        form.authMethod === "password" &&
+        form.bootstrapKey &&
+        (form.password.trim().length > 0 || editing)
+      ) {
+        try {
+          await bootstrapRemoteKey(saved.id, form.password);
+          toast.success(
+            t("remote.keyConfigured", {
+              defaultValue: "已自动配置密钥登录，以后无需输入密码",
+            }),
+          );
+        } catch (error) {
+          console.error("Failed to bootstrap remote key:", error);
+          // 不阻断：密码已保存，仍可正常连接
+          toast.warning(
+            t("remote.keyConfigureFailed", {
+              defaultValue: "自动配置密钥失败，已保留密码登录",
+            }),
+            { description: extractErrorMessage(error) || undefined },
+          );
+        }
+      }
       setFormOpen(false);
       // 连接信息可能已改，旧测试结果作废
       setTestResults((prev) => {
@@ -1196,6 +1228,38 @@ export const RemoteHostsPanel = React.forwardRef<
                     })}
                   />
                 </div>
+                {form.authMethod === "password" && (
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1">
+                        <span className={LABEL_CLASS}>
+                          {t("remote.bootstrapKey", {
+                            defaultValue: "首次登录后自动配置密钥（推荐）",
+                          })}
+                        </span>
+                        <HelpTip
+                          title={t("remote.bootstrapKey", {
+                            defaultValue: "首次登录后自动配置密钥（推荐）",
+                          })}
+                        >
+                          {t("remote.bootstrapKeyHint", {
+                            defaultValue:
+                              "用刚填的密码登录一次：在本机生成密钥、把公钥装到远端，之后连接不再需要密码（对齐 VS Code 的首次体验）",
+                          })}
+                        </HelpTip>
+                      </div>
+                    </div>
+                    <Switch
+                      checked={form.bootstrapKey}
+                      onCheckedChange={(v) =>
+                        setForm({ ...form, bootstrapKey: v })
+                      }
+                      aria-label={t("remote.bootstrapKey", {
+                        defaultValue: "首次登录后自动配置密钥（推荐）",
+                      })}
+                    />
+                  </div>
+                )}
               </section>
 
               <p className="text-caption text-fg-2">

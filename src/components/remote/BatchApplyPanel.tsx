@@ -336,6 +336,8 @@ export function BatchApplyPanel({
   return (
     <FullScreenPanel
       isOpen={open}
+      // 大面积全屏页淡入会让底层内容透出来（像「页面抖一下」），这里直接切换
+      motionPreset="none"
       title={t("batchApply.title")}
       onClose={() => onOpenChange(false)}
       contentClassName="px-6 py-6 w-full flex flex-col gap-4"

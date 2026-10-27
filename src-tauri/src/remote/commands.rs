@@ -359,6 +359,111 @@ pub async fn list_remote_hosts(state: State<'_, AppState>) -> Result<Vec<RemoteH
     state.db.list_remote_hosts().map_err(|e| e.to_string())
 }
 
+/// 一键「密码 → 密钥」：用密码登录一次，把本机公钥装到远端，再改用私钥登录。
+///
+/// 之后连接不再需要密码。失败时保持原记录不变（远端公钥可能已追加，但不影响密码登录）。
+#[tauri::command]
+pub async fn bootstrap_remote_key(
+    state: State<'_, AppState>,
+    host_id: String,
+    password: String,
+) -> Result<RemoteHost, String> {
+    let mut host = load_host(&state, &host_id)?;
+
+    // 没传密码时回退用已保存的密码
+    let password = if password.trim().is_empty() {
+        #[cfg(target_os = "windows")]
+        {
+            credentials::get_password(&host.id)?.unwrap_or_default()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            String::new()
+        }
+    } else {
+        password
+    };
+    if password.is_empty() {
+        return Err("需要先输入一次登录密码才能自动配置密钥".to_string());
+    }
+
+    // 1) 用密码建连（fresh，避免复用池里的旧连接）
+    let mut probe = host.clone();
+    probe.auth_method = AuthMethod::Password;
+    probe.private_key_path = None;
+    let session = connection::connect_fresh(&probe, Some(&password)).await?;
+
+    // 2) 确保本机应用密钥存在（放在 CC Switch 自己的目录，不碰 ~/.ssh）
+    let key_dir = crate::config::get_app_config_dir().join("ssh");
+    std::fs::create_dir_all(&key_dir)
+        .map_err(|e| format!("创建密钥目录失败 {}: {e}", key_dir.display()))?;
+    let key_path = key_dir.join("id_ed25519");
+    if !key_path.exists() {
+        let output = std::process::Command::new("ssh-keygen")
+            .args(["-t", "ed25519", "-N", "", "-C", "cc-switch", "-q", "-f"])
+            .arg(&key_path)
+            .output()
+            .map_err(|e| {
+                format!("调用 ssh-keygen 失败（请确认已安装 OpenSSH 客户端）: {e}")
+            })?;
+        if !output.status.success() {
+            return Err(format!(
+                "生成密钥失败: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+        }
+    }
+    let pub_path = key_dir.join("id_ed25519.pub");
+    let pub_key = std::fs::read_to_string(&pub_path)
+        .map_err(|e| format!("读取公钥失败 {}: {e}", pub_path.display()))?
+        .trim()
+        .to_string();
+    if pub_key.is_empty() {
+        return Err("公钥为空，无法配置".to_string());
+    }
+
+    // 3) 追加到远端 authorized_keys：去重 + 权限 700/600
+    let home = host.default_home();
+    let ssh_dir = format!("{home}/.ssh");
+    let authorized_keys = format!("{ssh_dir}/authorized_keys");
+    let script = format!(
+        "mkdir -p {dir} && chmod 700 {dir} && touch {ak} && chmod 600 {ak} && \
+         (grep -qxF {pubq} {ak} || printf '%s\\n' {pubq} >> {ak}) && echo CC_KEY_OK",
+        dir = connection::shell_quote(&ssh_dir),
+        ak = connection::shell_quote(&authorized_keys),
+        pubq = connection::shell_quote(&pub_key),
+    );
+    let out = exec_in_target(&session, None, &script).await?;
+    if !out.contains("CC_KEY_OK") {
+        return Err(format!("写入远端 authorized_keys 失败: {}", out.trim()));
+    }
+
+    // 4) 用新私钥验证一次，成功才切换认证方式
+    let key_path_text = key_path.to_string_lossy().to_string();
+    let mut key_probe = host.clone();
+    key_probe.auth_method = AuthMethod::Key;
+    key_probe.private_key_path = Some(key_path_text.clone());
+    connection::connect_fresh(&key_probe, None)
+        .await
+        .map_err(|e| format!("公钥已写入，但私钥登录验证失败: {e}"))?;
+
+    // 5) 更新记录：改用私钥，删掉保存的密码
+    host.auth_method = AuthMethod::Key;
+    host.private_key_path = Some(key_path_text);
+    host.save_password = false;
+    host.updated_at = chrono::Utc::now().timestamp_millis();
+    state
+        .db
+        .upsert_remote_host(&host)
+        .map_err(|e| e.to_string())?;
+    #[cfg(target_os = "windows")]
+    let _ = credentials::delete_password(&host.id);
+    crate::remote::forget_probed_home(&host.id);
+
+    log::info!("[remote] 已为 {} 自动配置密钥登录", host.name);
+    Ok(host)
+}
+
 /// 保存（新增或更新）远程主机；可选携带密码并写入系统钥匙串。
 #[tauri::command]
 pub async fn save_remote_host(

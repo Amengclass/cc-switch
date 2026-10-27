@@ -412,6 +412,17 @@ export async function cleanRemoteEnvConflicts(
   );
 }
 
+/**
+ * 一键「密码 → 密钥」：用密码登录一次，把本机公钥装到远端并改用私钥登录。
+ * 之后连接不再需要密码。
+ */
+export async function bootstrapRemoteKey(
+  hostId: string,
+  password: string,
+): Promise<RemoteHost> {
+  return invoke<RemoteHost>("bootstrap_remote_key", { hostId, password });
+}
+
 /** 读取远端 settings.json 并匹配出当前生效的本地供应商 id（per-app） */
 export async function getRemoteCurrentProvider(
   hostId: string,

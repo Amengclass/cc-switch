@@ -22,8 +22,12 @@ interface FullScreenPanelProps {
   onClose: () => void;
   children: React.ReactNode;
   footer?: React.ReactNode;
-  /** Entry/exit motion. Nested navigation panels can opt into a horizontal transition. */
-  motionPreset?: "fade" | "slide-from-right";
+  /**
+   * Entry/exit motion. Nested navigation panels can opt into a horizontal transition.
+   * `none`：直接切换、不做淡入淡出——大面积全屏页淡入时底层内容会透出来，
+   * 看起来像「页面闪一下 / 抖一下」，这类页面（如批量应用）用 none。
+   */
+  motionPreset?: "fade" | "slide-from-right" | "none";
   /**
    * 覆盖内容区滚动容器的内边距/间距类。默认 `px-6 py-6 space-y-6`。
    * 通过 `cn`(twMerge) 合并，传入如 `pt-3` 只覆盖顶部内边距，其余保持默认。
@@ -82,8 +86,9 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
   );
   const { t } = useTranslation();
   const prefersReducedMotion = useReducedMotion();
+  const noMotion = motionPreset === "none" || Boolean(prefersReducedMotion);
   const shouldSlideFromRight =
-    motionPreset === "slide-from-right" && !prefersReducedMotion;
+    motionPreset === "slide-from-right" && !noMotion;
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -135,18 +140,32 @@ export const FullScreenPanel: React.FC<FullScreenPanelProps> = ({
       {isOpen && (
         <motion.div
           initial={
-            prefersReducedMotion
+            noMotion
               ? false
               : shouldSlideFromRight
                 ? { x: "100%" }
                 : { opacity: 0 }
           }
-          animate={shouldSlideFromRight ? { x: 0 } : { opacity: 1 }}
-          exit={shouldSlideFromRight ? { x: "100%" } : { opacity: 0 }}
+          animate={
+            noMotion
+              ? undefined
+              : shouldSlideFromRight
+                ? { x: 0 }
+                : { opacity: 1 }
+          }
+          exit={
+            noMotion
+              ? undefined
+              : shouldSlideFromRight
+                ? { x: "100%" }
+                : { opacity: 0 }
+          }
           transition={
-            shouldSlideFromRight
-              ? { duration: 0.26, ease: [0.22, 1, 0.36, 1] }
-              : { duration: prefersReducedMotion ? 0 : 0.2 }
+            noMotion
+              ? { duration: 0 }
+              : shouldSlideFromRight
+                ? { duration: 0.26, ease: [0.22, 1, 0.36, 1] }
+                : { duration: 0.2 }
           }
           className={cn(
             "inset-0 z-[60] flex flex-col bg-app",
