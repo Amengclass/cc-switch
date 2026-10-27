@@ -2,16 +2,24 @@ import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { useOpenClawEnv, useSaveOpenClawEnv } from "@/hooks/useOpenClaw";
+import {
+  useOpenClawEnv,
+  useSaveOpenClawEnv,
+  type OpenClawRemoteTarget,
+} from "@/hooks/useOpenClaw";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
 import JsonEditor from "@/components/JsonEditor";
 import { parseOpenClawEnvEditorValue } from "./utils";
 
-const EnvPanel: React.FC = () => {
+const EnvPanel: React.FC<OpenClawRemoteTarget> = ({
+  remoteTargetId,
+  remoteContainerId,
+}) => {
   const { t } = useTranslation();
-  const { data: envData, isLoading } = useOpenClawEnv();
-  const saveEnvMutation = useSaveOpenClawEnv();
+  const target = { remoteTargetId, remoteContainerId };
+  const { data: envData, isLoading } = useOpenClawEnv(target);
+  const saveEnvMutation = useSaveOpenClawEnv(target);
   const [editorValue, setEditorValue] = useState("{}");
   const [isDarkMode, setIsDarkMode] = useState(false);
 

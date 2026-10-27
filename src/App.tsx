@@ -1551,11 +1551,20 @@ function App() {
                 className="min-h-0 flex-1 overflow-y-auto scroll-stable"
               >
                 {openclawConfigTab === "env" ? (
-                  <EnvPanel />
+                  <EnvPanel
+                    remoteTargetId={remote.remoteTargetId || undefined}
+                    remoteContainerId={remote.remoteContainerId || undefined}
+                  />
                 ) : openclawConfigTab === "tools" ? (
-                  <ToolsPanel />
+                  <ToolsPanel
+                    remoteTargetId={remote.remoteTargetId || undefined}
+                    remoteContainerId={remote.remoteContainerId || undefined}
+                  />
                 ) : (
-                  <AgentsDefaultsPanel />
+                  <AgentsDefaultsPanel
+                    remoteTargetId={remote.remoteTargetId || undefined}
+                    remoteContainerId={remote.remoteContainerId || undefined}
+                  />
                 )}
               </div>
             </>

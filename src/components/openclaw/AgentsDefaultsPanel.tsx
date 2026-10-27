@@ -5,6 +5,7 @@ import { toast } from "@/lib/toast";
 import {
   useOpenClawAgentsDefaults,
   useSaveOpenClawAgentsDefaults,
+  type OpenClawRemoteTarget,
 } from "@/hooks/useOpenClaw";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
@@ -25,10 +26,14 @@ import { getOpenClawTimeoutInputValue } from "./utils";
 
 const UNSET_SENTINEL = "__unset__";
 
-const AgentsDefaultsPanel: React.FC = () => {
+const AgentsDefaultsPanel: React.FC<OpenClawRemoteTarget> = ({
+  remoteTargetId,
+  remoteContainerId,
+}) => {
   const { t } = useTranslation();
-  const { data: agentsData, isLoading } = useOpenClawAgentsDefaults();
-  const saveAgentsMutation = useSaveOpenClawAgentsDefaults();
+  const target = { remoteTargetId, remoteContainerId };
+  const { data: agentsData, isLoading } = useOpenClawAgentsDefaults(target);
+  const saveAgentsMutation = useSaveOpenClawAgentsDefaults(target);
   const { options: modelOptions, isLoading: modelsLoading } =
     useOpenClawModelOptions();
 

@@ -40,6 +40,13 @@ pub async fn stop_proxy_server(state: tauri::State<'_, AppState>) -> Result<(), 
             "仍有应用处于代理接管状态，请先在设置中关闭对应应用接管后再停止本地路由。".to_string(),
         );
     }
+    // 远端主机/容器还在走本机路由时也不能停：远端 live 指向本机代理，
+    // 停了会指向死隧道（判据在 remote::hooks，保持单一来源）。
+    if crate::remote::hooks::has_route_intent(&state.db) {
+        return Err(
+            "仍有远端主机/容器处于代理接管状态，请先关闭远端接管后再停止本地路由。".to_string(),
+        );
+    }
 
     state.proxy_service.stop().await
 }

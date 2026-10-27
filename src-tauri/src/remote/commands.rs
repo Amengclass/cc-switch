@@ -1517,14 +1517,13 @@ async fn switch_remote_provider_target(
         log::warn!("[remote] 持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
-    // 「切换后重投影远端 MCP」本意：codex/gemini/grok 的 MCP 与 live 同文件，
-    // 整文件覆盖 live 后要把远端 SSOT 里已启用的 MCP 重新投影回去。
-    //
-    // 方案 A 临时态：该重投影依赖 remote::mcp（其面板命令已桩掉、模块暂停编译）。
-    // claude 不受影响 —— 它的 MCP 在独立文件（~/.claude.json），切换 live 不碰它；
-    // 其余应用的远端切换当前也未放开（见 providers.rs 的未移植分支）。
-    // TODO(方案②移植): 恢复 remote::mcp 后接回本段。
-    log::debug!("[remote] 跳过切换后 MCP 重投影（方案 A 临时态，app={app}）");
+    // 切换后重投影远端 MCP：codex/gemini/grok 等的 MCP 与 live 同文件，
+    // 整文件覆盖 live 后要把远端 SSOT 里已启用的 MCP 投影回去，否则切换后 MCP 失效。
+    // claude 的 MCP 在独立文件（~/.claude.json），该函数对它自然 no-op。
+    if let Err(e) = crate::remote::mcp::reproject_remote_mcp_for_app(&target, &home, app).await {
+        // 失败不阻断切换（下次切换 / 任一 MCP 启停会重投影自愈）
+        log::warn!("[remote] 切换后 MCP 重投影失败 host_id={host_id} app={app}: {e}");
+    }
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
     revert_route_switch_on_tunnel_failure(state, &report, host_id, container, app).await;
@@ -1732,12 +1731,16 @@ pub(crate) async fn reapply_remote_provider_target(
         log::warn!("[remote] 重新应用后持久化当前供应商失败 host_id={host_id}: {e}");
     }
 
-    // 「切换 / 重新应用后重投影远端 MCP」：codex/gemini/grok 的 MCP 与 live 同文件，
-    // 整文件覆盖后要把远端 SSOT 里已启用的 MCP 投影回去。
-    // 方案 A 临时态：依赖 remote::mcp（面板已桩掉、模块暂停编译），此处跳过。
-    // claude 的 MCP 在独立文件（~/.claude.json），本就不受影响。
-    // TODO(方案②移植): 恢复 remote::mcp 后接回本段。
-    log::debug!("[remote] 跳过重新应用后的 MCP 重投影（方案 A 临时态，app={app}）");
+    // 重新应用后重投影远端 MCP（与切换同一语义：live 被整文件覆盖后补回已启用项）。
+    if let Ok(target) =
+        crate::remote::docker::RemoteTarget::new(&session.sftp, &session.channel, container)
+    {
+        if let Err(e) =
+            crate::remote::mcp::reproject_remote_mcp_for_app(&target, &home, app).await
+        {
+            log::warn!("[remote] 重新应用后 MCP 重投影失败 host_id={host_id} app={app}: {e}");
+        }
+    }
 
     // 隧道未建立（warnings 非空）：接管实际未生效，回退开关状态，避免 UI 显示已开
     revert_route_switch_on_tunnel_failure(state, &report, host_id, container, app).await;

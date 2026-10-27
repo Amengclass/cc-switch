@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, Save, TriangleAlert } from "lucide-react";
 import { toast } from "@/lib/toast";
-import { useOpenClawTools, useSaveOpenClawTools } from "@/hooks/useOpenClaw";
+import {
+  useOpenClawTools,
+  useSaveOpenClawTools,
+  type OpenClawRemoteTarget,
+} from "@/hooks/useOpenClaw";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { Button } from "@/components/ui/button";
 import { HoverTip } from "@/components/ui/hover-tip";
@@ -30,10 +34,14 @@ interface ListItem {
   value: string;
 }
 
-const ToolsPanel: React.FC = () => {
+const ToolsPanel: React.FC<OpenClawRemoteTarget> = ({
+  remoteTargetId,
+  remoteContainerId,
+}) => {
   const { t } = useTranslation();
-  const { data: toolsData, isLoading } = useOpenClawTools();
-  const saveToolsMutation = useSaveOpenClawTools();
+  const target = { remoteTargetId, remoteContainerId };
+  const { data: toolsData, isLoading } = useOpenClawTools(target);
+  const saveToolsMutation = useSaveOpenClawTools(target);
   const [config, setConfig] = useState<OpenClawToolsConfig>({});
   const [allowList, setAllowList] = useState<ListItem[]>([]);
   const [denyList, setDenyList] = useState<ListItem[]>([]);
