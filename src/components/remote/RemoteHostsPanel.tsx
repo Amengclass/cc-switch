@@ -80,6 +80,9 @@ interface HostFormState {
   host: string;
   port: string;
   username: string;
+  authMethod: "password" | "key";
+  /** 私钥文件路径（密钥认证） */
+  privateKeyPath: string;
   password: string;
   savePassword: boolean;
   routeThroughLocalProxy: boolean;
@@ -92,6 +95,8 @@ const EMPTY_FORM: HostFormState = {
   host: "",
   port: "22",
   username: "",
+  authMethod: "password",
+  privateKeyPath: "",
   password: "",
   savePassword: true,
   routeThroughLocalProxy: false,
@@ -110,7 +115,8 @@ function formToDraft(f: HostFormState) {
     host: f.host.trim(),
     port: Math.max(1, Number(f.port) || 22),
     username: f.username.trim(),
-    authMethod: "password" as const,
+    authMethod: f.authMethod,
+    privateKeyPath: f.authMethod === "key" ? f.privateKeyPath.trim() : undefined,
     savePassword: f.savePassword,
     routeThroughLocalProxy: f.routeThroughLocalProxy,
     routeProxyApps: f.routeProxyApps,
@@ -193,6 +199,8 @@ export const RemoteHostsPanel = React.forwardRef<
       host: host.host,
       port: String(host.port),
       username: host.username,
+      authMethod: host.authMethod,
+      privateKeyPath: host.privateKeyPath ?? "",
       password: "",
       savePassword: host.savePassword,
       routeThroughLocalProxy: host.routeThroughLocalProxy,
@@ -214,7 +222,16 @@ export const RemoteHostsPanel = React.forwardRef<
       );
       return;
     }
-    if (!editing && !form.password.trim()) {
+    if (form.authMethod === "key" && !form.privateKeyPath.trim()) {
+      toast.error(
+        t("remote.privateKeyRequired", {
+          defaultValue: "私钥认证需要填写私钥文件路径",
+        }),
+      );
+      return;
+    }
+    // 密码认证：新增必须填密码；密钥认证：口令（密码框）可留空
+    if (form.authMethod === "password" && !editing && !form.password.trim()) {
       toast.error(
         t("remote.passwordRequired", {
           defaultValue: "新增主机需要填写密码",
@@ -231,6 +248,7 @@ export const RemoteHostsPanel = React.forwardRef<
       port: draft.port,
       username: draft.username,
       authMethod: draft.authMethod,
+      privateKeyPath: draft.privateKeyPath,
       savePassword: draft.savePassword,
       // 旧布尔 routeThroughLocalProxy 已废弃（per-app 字段全覆盖）：保存固定 false，
       // 顺带清除旧库升级时的残留 1（否则 host_wants_tunnel 曾误判建隧道）。
@@ -385,10 +403,14 @@ export const RemoteHostsPanel = React.forwardRef<
 
   // 测试「未保存」的新连接信息（新增主机时直接测，无需先保存）
   const handleTestForm = async () => {
-    if (!form.host.trim() || !form.username.trim() || !form.password) {
+    const needsPassword =
+      form.authMethod === "password" && !form.password.trim();
+    const needsKey =
+      form.authMethod === "key" && !form.privateKeyPath.trim();
+    if (!form.host.trim() || !form.username.trim() || needsPassword || needsKey) {
       toast.error(
         t("remote.formRequired", {
-          defaultValue: "请先填写主机地址、用户名和密码",
+          defaultValue: "请先填写主机地址、用户名和认证信息",
         }),
       );
       return;
@@ -401,6 +423,8 @@ export const RemoteHostsPanel = React.forwardRef<
         form.username.trim(),
         form.password,
         app,
+        form.authMethod,
+        form.privateKeyPath.trim() || undefined,
       );
       toast.success(
         t("remote.reachable", {
@@ -1014,9 +1038,72 @@ export const RemoteHostsPanel = React.forwardRef<
                   </span>
                 </div>
                 <div className="flex flex-col gap-1.5">
+                  <span className={LABEL_CLASS}>
+                    {t("remote.authMethodLabel", {
+                      defaultValue: "认证方式",
+                    })}
+                  </span>
+                  <SegmentedControl<"password" | "key">
+                    size="sm"
+                    aria-label={t("remote.authMethodLabel", {
+                      defaultValue: "认证方式",
+                    })}
+                    value={form.authMethod}
+                    onValueChange={(value) =>
+                      setForm({ ...form, authMethod: value })
+                    }
+                    items={[
+                      {
+                        value: "password",
+                        label: t("remote.authPassword", {
+                          defaultValue: "密码",
+                        }),
+                      },
+                      {
+                        value: "key",
+                        label: t("remote.authKey", {
+                          defaultValue: "私钥",
+                        }),
+                      },
+                    ]}
+                  />
+                </div>
+                {form.authMethod === "key" && (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="host-key" className={LABEL_CLASS}>
+                      {t("remote.privateKeyPathLabel", {
+                        defaultValue: "私钥文件路径",
+                      })}
+                      <RequiredMark
+                        srText={t("remote.required", { defaultValue: "必填" })}
+                      />
+                    </label>
+                    <Input
+                      id="host-key"
+                      value={form.privateKeyPath}
+                      onChange={(e) =>
+                        setForm({ ...form, privateKeyPath: e.target.value })
+                      }
+                      placeholder={t("remote.privateKeyPathPlaceholder", {
+                        defaultValue: "例如 ~/.ssh/id_ed25519",
+                      })}
+                    />
+                    <span className="text-caption text-fg-2">
+                      {t("remote.privateKeyPathHint", {
+                        defaultValue:
+                          "私钥需位于本机（支持 ~/ 展开）；有口令时填在下方密码框，会加密保存",
+                      })}
+                    </span>
+                  </div>
+                )}
+                <div className="flex flex-col gap-1.5">
                   <label htmlFor="host-pass" className={LABEL_CLASS}>
-                    {t("remote.passwordLabel", { defaultValue: "密码" })}
-                    {!editing && (
+                    {form.authMethod === "key"
+                      ? t("remote.passphraseLabel", {
+                          defaultValue: "私钥口令（可选）",
+                        })
+                      : t("remote.passwordLabel", { defaultValue: "密码" })}
+                    {!editing && form.authMethod === "password" && (
                       <RequiredMark
                         srText={t("remote.required", { defaultValue: "必填" })}
                       />
@@ -1031,13 +1118,17 @@ export const RemoteHostsPanel = React.forwardRef<
                         setForm({ ...form, password: e.target.value })
                       }
                       placeholder={
-                        editing
-                          ? t("remote.passwordKeepHint", {
-                              defaultValue: "留空则保留已保存的密码",
+                        form.authMethod === "key"
+                          ? t("remote.passphrasePlaceholder", {
+                              defaultValue: "私钥无口令可留空",
                             })
-                          : t("remote.passwordPlaceholder", {
-                              defaultValue: "请输入 SSH 登录密码",
-                            })
+                          : editing
+                            ? t("remote.passwordKeepHint", {
+                                defaultValue: "留空则保留已保存的密码",
+                              })
+                            : t("remote.passwordPlaceholder", {
+                                defaultValue: "请输入 SSH 登录密码",
+                              })
                       }
                       className="pr-9"
                     />
@@ -1067,14 +1158,24 @@ export const RemoteHostsPanel = React.forwardRef<
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
                       <span className={LABEL_CLASS}>
-                        {t("remote.savePassword", {
-                          defaultValue: "加密保存密码",
-                        })}
+                        {form.authMethod === "key"
+                          ? t("remote.savePassphrase", {
+                              defaultValue: "加密保存口令",
+                            })
+                          : t("remote.savePassword", {
+                              defaultValue: "加密保存密码",
+                            })}
                       </span>
                       <HelpTip
-                        title={t("remote.savePassword", {
-                          defaultValue: "加密保存密码",
-                        })}
+                        title={
+                          form.authMethod === "key"
+                            ? t("remote.savePassphrase", {
+                                defaultValue: "加密保存口令",
+                              })
+                            : t("remote.savePassword", {
+                                defaultValue: "加密保存密码",
+                              })
+                        }
                       >
                         {t("remote.savePasswordHint", {
                           defaultValue:

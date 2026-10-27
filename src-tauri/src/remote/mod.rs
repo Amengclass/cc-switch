@@ -77,6 +77,9 @@ pub struct RemoteHost {
     pub port: u16,
     pub username: String,
     pub auth_method: AuthMethod,
+    /// 密钥认证的私钥文件路径（`auth_method = key` 时使用）。
+    #[serde(default)]
+    pub private_key_path: Option<String>,
     /// 是否把密码保存进系统钥匙串(用于下次一键连接)。
     pub save_password: bool,
     /// 走本机路由：切换时把远端 base_url 指向本机代理（经 SSH 反向隧道）。

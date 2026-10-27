@@ -605,6 +605,8 @@ pub async fn test_remote_connection_info(
     username: String,
     password: String,
     app: String,
+    auth_method: Option<String>,
+    private_key_path: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let host_info = RemoteHost {
         id: "temp".to_string(),
@@ -612,7 +614,12 @@ pub async fn test_remote_connection_info(
         host,
         port,
         username,
-        auth_method: AuthMethod::Password,
+        auth_method: if auth_method.as_deref() == Some("key") {
+            AuthMethod::Key
+        } else {
+            AuthMethod::Password
+        },
+        private_key_path,
         save_password: false,
         route_through_local_proxy: false,
         route_proxy_apps: std::collections::HashMap::new(),
@@ -4545,6 +4552,10 @@ fn resolve_password(host: &RemoteHost) -> Result<String, String> {
         Some(p) => {
             log::info!("[remote] 钥匙串命中 id={}", host.id);
             Ok(p)
+        }
+        None if host.auth_method == AuthMethod::Key => {
+            // 密钥认证：无口令（未加密私钥）时合法，返回空串；有口令时存的就是口令
+            Ok(String::new())
         }
         None => {
             log::error!("[remote] 钥匙串未命中 id={}", host.id);

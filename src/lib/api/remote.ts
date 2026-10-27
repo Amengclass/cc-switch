@@ -104,6 +104,8 @@ export async function testRemoteConnectionInfo(
   username: string,
   password: string,
   app: string,
+  authMethod?: "password" | "key",
+  privateKeyPath?: string,
 ): Promise<RemoteConnectionInfo> {
   return invoke<RemoteConnectionInfo>("test_remote_connection_info", {
     host,
@@ -111,6 +113,8 @@ export async function testRemoteConnectionInfo(
     username,
     password,
     app,
+    authMethod: authMethod ?? "password",
+    privateKeyPath: privateKeyPath ?? null,
   });
 }
 

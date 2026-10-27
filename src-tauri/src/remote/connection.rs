@@ -439,27 +439,151 @@ pub async fn connect(
     pooled_connect(host, password).await
 }
 
+/// `~/.ssh/config` 解析结果（只取连接需要的四项）。
+#[derive(Clone)]
+struct SshConfigEntry {
+    hostname: Option<String>,
+    port: Option<u16>,
+    user: Option<String>,
+    identity_file: Option<String>,
+}
+
+/// 用系统 `ssh -G <alias>` 解析 SSH 配置（不建连，纯展开）。
+///
+/// 比自己解析 `~/.ssh/config` 更可靠：Include、Match、通配符、ProxyJump 等
+/// 都由 OpenSSH 自己处理。系统没有 ssh 或解析失败时返回 None（退回原值）。
+fn resolve_ssh_config(alias: &str) -> Option<SshConfigEntry> {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+
+    static CACHE: LazyLock<Mutex<HashMap<String, Option<SshConfigEntry>>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+    if let Ok(cache) = CACHE.lock() {
+        if let Some(hit) = cache.get(alias) {
+            return hit.clone();
+        }
+    }
+
+    let parsed = (|| {
+        let output = std::process::Command::new("ssh")
+            .args(["-G", alias])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut entry = SshConfigEntry {
+            hostname: None,
+            port: None,
+            user: None,
+            identity_file: None,
+        };
+        for line in text.lines() {
+            let mut parts = line.splitn(2, char::is_whitespace);
+            let key = parts.next().unwrap_or("").to_ascii_lowercase();
+            let value = parts.next().unwrap_or("").trim();
+            if value.is_empty() || value.eq_ignore_ascii_case("none") {
+                continue;
+            }
+            match key.as_str() {
+                "hostname" if entry.hostname.is_none() => {
+                    entry.hostname = Some(value.to_string())
+                }
+                "port" if entry.port.is_none() => entry.port = value.parse().ok(),
+                "user" if entry.user.is_none() => entry.user = Some(value.to_string()),
+                "identityfile" if entry.identity_file.is_none() => {
+                    entry.identity_file = Some(value.to_string())
+                }
+                _ => {}
+            }
+        }
+        // 什么都没解析出来（例如 alias 本身就是主机名）时不缓存空结果也没意义
+        Some(entry)
+    })();
+
+    if let Ok(mut cache) = CACHE.lock() {
+        cache.insert(alias.to_string(), parsed.clone());
+    }
+    parsed
+}
+
+/// 是否是 IP 字面量（IP 不做 ssh config 展开）。
+fn is_ip_literal(value: &str) -> bool {
+    use std::net::IpAddr;
+    value.trim().parse::<IpAddr>().is_ok()
+}
+
+/// 把 `RemoteHost` 与 `~/.ssh/config` 合成实际连接参数：
+/// `HostName` 总是优先；端口/用户名/私钥只在用户没显式改过时由配置补全
+/// （端口 22 视为未设置，用户名空视为未设置）。
+fn effective_connection_params(host: &RemoteHost) -> (String, u16, String, Option<String>) {
+    let cfg = if is_ip_literal(&host.host) {
+        None
+    } else {
+        resolve_ssh_config(host.host.trim())
+    };
+
+    let target_host = cfg
+        .as_ref()
+        .and_then(|c| c.hostname.clone())
+        .unwrap_or_else(|| host.host.clone());
+    let target_port = if host.port == 22 {
+        cfg.as_ref().and_then(|c| c.port).unwrap_or(host.port)
+    } else {
+        host.port
+    };
+    let username = if host.username.trim().is_empty() {
+        cfg.as_ref()
+            .and_then(|c| c.user.clone())
+            .unwrap_or_default()
+    } else {
+        host.username.clone()
+    };
+    let key_path = host
+        .private_key_path
+        .clone()
+        .filter(|p| !p.trim().is_empty())
+        .or_else(|| cfg.as_ref().and_then(|c| c.identity_file.clone()));
+
+    (target_host, target_port, username, key_path)
+}
+
+/// 私钥路径展开 `~/`（Windows 下 `~` 也按当前用户 home 处理）。
+fn expand_tilde(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(path)
+}
+
 /// 建连核心（不经过池）：TCP → SSH 握手 → SFTP，带 10 秒总超时与 keepalive。
 async fn connect_fresh(
     host: &RemoteHost,
     password: Option<&str>,
 ) -> Result<Arc<RemoteSession>, String> {
-    let host_display = format!("{}:{}", host.host, host.port);
+    // ~/.ssh/config 兼容：别名 → HostName/Port/User/IdentityFile（见 effective_connection_params）
+    let (connect_host, connect_port, connect_user, config_key_path) =
+        effective_connection_params(host);
+    let host_display = format!("{connect_host}:{connect_port}");
     let connect_fut = async {
         let config = Arc::new(client::Config {
             keepalive_interval: Some(KEEPALIVE_INTERVAL),
             ..client::Config::default()
         });
 
-        let mut channel = client::connect(config, (host.host.as_str(), host.port), RemoteHandler)
-            .await
-            .map_err(|e| format!("SSH 连接失败 {host_display}: {e}"))?;
+        let mut channel =
+            client::connect(config, (connect_host.as_str(), connect_port), RemoteHandler)
+                .await
+                .map_err(|e| format!("SSH 连接失败 {host_display}: {e}"))?;
 
         match host.auth_method {
             AuthMethod::Password => {
                 let pw = password.unwrap_or_default();
                 let auth = channel
-                    .authenticate_password(host.username.as_str(), pw)
+                    .authenticate_password(connect_user.as_str(), pw)
                     .await
                     .map_err(|e| format!("认证失败: {e}"))?;
                 if !auth.success() {
@@ -467,7 +591,43 @@ async fn connect_fresh(
                 }
             }
             AuthMethod::Key => {
-                return Err("密钥认证尚未实现(M1 仅支持密码认证)".to_string());
+                let raw_path = config_key_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
+                    .ok_or_else(|| {
+                        "密钥认证：未配置私钥文件路径（也可在 ~/.ssh/config 里设置 IdentityFile）"
+                            .to_string()
+                    })?;
+                let key_path = expand_tilde(raw_path);
+                // 口令复用凭据存储（未加密私钥时为空）
+                let passphrase = password.filter(|p| !p.is_empty());
+                let key = russh::keys::load_secret_key(&key_path, passphrase)
+                    .map_err(|e| format!("加载私钥失败 {}: {e}", key_path.display()))?;
+                // RSA 用服务器支持的最强签名算法（默认 None 会退到已淘汰的 ssh-rsa）
+                let rsa_hash = if key.algorithm().is_rsa() {
+                    channel
+                        .best_supported_rsa_hash()
+                        .await
+                        .ok()
+                        .flatten()
+                        .flatten()
+                } else {
+                    None
+                };
+                let auth = channel
+                    .authenticate_publickey(
+                        connect_user.as_str(),
+                        russh::keys::PrivateKeyWithHashAlg::new(
+                            std::sync::Arc::new(key),
+                            rsa_hash,
+                        ),
+                    )
+                    .await
+                    .map_err(|e| format!("认证失败: {e}"))?;
+                if !auth.success() {
+                    return Err("认证失败:服务器拒绝了该私钥".to_string());
+                }
             }
         }
 

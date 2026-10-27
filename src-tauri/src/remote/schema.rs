@@ -130,6 +130,8 @@ pub fn ensure(conn: &Connection) -> Result<(), AppError> {
         "ALTER TABLE remote_hosts ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0",
         [],
     );
+    // 密钥认证：私钥文件路径（空 = 未配置）。不落库敏感内容，只存路径。
+    add_column_if_missing(conn, "remote_hosts", "private_key_path", "TEXT")?;
 
     Ok(())
 }
