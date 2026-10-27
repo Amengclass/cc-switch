@@ -168,6 +168,90 @@ pub(crate) fn opencode_row_to_session_meta(row: &Value, db_display: &str) -> Opt
     })
 }
 
+/// 远端会话列表 SQL（v1 schema）。
+pub(crate) const LIST_SQL_V1: &str =
+    "SELECT id, COALESCE(title, '') AS title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
+
+/// 远端会话列表 SQL（v2 schema，含最后活跃时间）。
+pub(crate) const LIST_SQL_V2: &str = "SELECT s.id AS id, COALESCE(s.title, '') AS title, s.directory AS directory, s.time_created AS time_created, MAX(s.time_updated, COALESCE(MAX(m.time_updated), s.time_updated)) AS time_updated FROM session_v2 s LEFT JOIN session_message m ON m.session_id = s.id GROUP BY s.id ORDER BY time_updated DESC";
+
+/// 混合库里的 v1 旧会话（不在 session_v2 中的）。
+pub(crate) const LIST_SQL_V1_EXTRA: &str = "SELECT id, COALESCE(title, '') AS title, directory, time_created, time_updated FROM session WHERE id NOT IN (SELECT id FROM session_v2) ORDER BY time_updated DESC";
+
+/// v2 消息 SQL（`session_message` 单表）。
+pub(crate) const MESSAGES_SQL_V2: &str = "SELECT id, type, time_created, data FROM session_message WHERE session_id = ?1 ORDER BY seq ASC, rowid ASC";
+
+/// 远端 SQLite V2 行 → 消息列表（对齐本机 `load_messages_sqlite_v2`）。
+pub(crate) fn assemble_opencode_v2_messages(rows: &[Value]) -> Vec<SessionMessage> {
+    let mut messages = Vec::new();
+    for row in rows {
+        let Some(row_id) = row.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(msg_type) = row.get("type").and_then(Value::as_str) else {
+            continue;
+        };
+        if !matches!(msg_type, "user" | "assistant" | "system") {
+            continue;
+        }
+        let ts = row.get("time_created").and_then(Value::as_i64);
+        let data = row.get("data").and_then(Value::as_str).unwrap_or("");
+        let Ok(msg_value) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+
+        // user 优先取 `text`；其余取 `content[]`（结构同 v1 parts），最后退回 `text`
+        let text_part = |text: &str| {
+            (
+                PartLocator::Sqlite {
+                    table: "session_message",
+                    id: row_id.to_string(),
+                    base: String::new(),
+                },
+                serde_json::json!({ "type": "text", "text": text }),
+            )
+        };
+        let parts: Vec<(PartLocator, Value)> = match (
+            msg_type,
+            msg_value.get("text").and_then(Value::as_str),
+            msg_value.get("content"),
+        ) {
+            ("user" | "system", Some(text), _) => vec![text_part(text)],
+            (_, _, Some(Value::Array(items))) if msg_type != "system" => items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    (
+                        PartLocator::Sqlite {
+                            table: "session_message",
+                            id: row_id.to_string(),
+                            base: format!("/content/{i}"),
+                        },
+                        item.clone(),
+                    )
+                })
+                .collect(),
+            (_, _, Some(Value::String(text))) if msg_type == "user" => vec![text_part(text)],
+            (_, Some(text), _) => vec![text_part(text)],
+            _ => Vec::new(),
+        };
+
+        let message = message_from_parts(
+            msg_type,
+            Some(row_id.to_string()),
+            ts,
+            &msg_value,
+            &parts,
+        );
+        if !message.is_empty() {
+            messages.push(message);
+        }
+    }
+
+    assign_turn_ids(&mut messages);
+    messages
+}
+
 /// 远端 SQLite 行 → 消息列表（v1：`message` + `part` 两个结果集）。
 /// part 的全文引用指向远端 db 的 `part` 表（`ContentRef::Sqlite`），本机 content 解析用不到，
 /// 阅读页只展示预览文本。

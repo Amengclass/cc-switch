@@ -567,7 +567,11 @@ pub(crate) fn sqlite_row_to_message(row: &Value) -> Option<SessionMessage> {
     if text.trim().is_empty() {
         return None;
     }
-    let ts = row.get("created_at").and_then(parse_timestamp_to_ms);
+    // `timestamp` 是 REAL 秒（见本机 MessageRow.timestamp）；`created_at` 兼容旧库
+    let ts = row
+        .get("timestamp")
+        .or_else(|| row.get("created_at"))
+        .and_then(parse_timestamp_to_ms);
     Some(SessionMessage::from_blocks(
         role,
         ts,

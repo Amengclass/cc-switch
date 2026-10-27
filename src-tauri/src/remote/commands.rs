@@ -2148,7 +2148,6 @@ pub async fn list_remote_sessions_all(
     let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
     let mcode_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
     let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
-    let opencode_sql = "SELECT id, title, directory, time_created, time_updated FROM session ORDER BY time_updated DESC";
 
     // 先一次性探测哪些 SQLite 库真的存在：一个都没有就完全跳过 helper
     // （首次上传 helper 约 2.6MB，容器上很贵，不能为不存在的库付这个成本）。
@@ -2167,16 +2166,16 @@ pub async fn list_remote_sessions_all(
 
     if !existing_dbs.trim().is_empty() {
       if let Ok(helper) = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await {
-        let sqlite_apps: Vec<(&str, &str, &str)> = vec![
+        // hermes / mcode：单查询
+        let simple_apps: Vec<(&str, &str, &str)> = vec![
             ("hermes", &hermes_db, hermes_sql),
-            ("opencode", &opencode_db, opencode_sql),
             (
                 "mcode",
                 &mcode_db,
                 crate::session_manager::providers::mcode::SCAN_SQL,
             ),
         ];
-        for (app, db, sql) in &sqlite_apps {
+        for (app, db, sql) in &simple_apps {
             if !existing_dbs.lines().any(|line| line.trim() == *db) {
                 continue;
             }
@@ -2197,15 +2196,13 @@ pub async fn list_remote_sessions_all(
                     .cloned()
                     .unwrap_or_default();
                 for row in rows {
-                    let meta = match *app {
-                        "hermes" => crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
+                    let meta = if *app == "hermes" {
+                        crate::session_manager::providers::hermes::sqlite_row_to_session_meta(
                             &row,
                             &format!("sqlite:{db}"),
-                        ),
-                        "opencode" => crate::session_manager::providers::opencode::opencode_row_to_session_meta(
-                            &row, db,
-                        ),
-                        _ => crate::session_manager::providers::mcode::row_to_session_meta(&row),
+                        )
+                    } else {
+                        crate::session_manager::providers::mcode::row_to_session_meta(&row)
                     };
                     if let Some(m) = meta {
                         all_sessions.push(m);
@@ -2213,6 +2210,71 @@ pub async fn list_remote_sessions_all(
                 }
             }
             // db 不存在/查询失败 → 跳过该 app，不影响文件源结果
+        }
+
+        // opencode：v1（session）与 v2（session_v2 + session_message）两套 schema，
+        // 远端必须探测后选 SQL，否则 2.x 机器上一条会话都列不出来。
+        if existing_dbs.lines().any(|line| line.trim() == opencode_db) {
+            use crate::session_manager::providers::opencode as oc;
+            let tables = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &opencode_db,
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('session','session_v2','session_message')",
+                &[],
+            )
+            .await
+            .ok()
+            .map(|v| {
+                v.get("rows")
+                    .and_then(Value::as_array)
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|r| r.get("name").and_then(Value::as_str))
+                            .map(str::to_string)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+            let has_v1 = tables.iter().any(|t| t == "session");
+            let has_v2 = tables.iter().any(|t| t == "session_v2") && tables.iter().any(|t| t == "session_message");
+
+            let mut queries: Vec<&str> = Vec::new();
+            if has_v2 {
+                queries.push(oc::LIST_SQL_V2);
+                if has_v1 {
+                    queries.push(oc::LIST_SQL_V1_EXTRA);
+                }
+            } else if has_v1 {
+                queries.push(oc::LIST_SQL_V1);
+            }
+            for sql in queries {
+                if let Ok(v) = run_sqlite_helper(
+                    &session,
+                    container.as_deref(),
+                    &helper,
+                    "query",
+                    &opencode_db,
+                    sql,
+                    &[],
+                )
+                .await
+                {
+                    let rows = v
+                        .get("rows")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default();
+                    for row in rows {
+                        if let Some(m) = oc::opencode_row_to_session_meta(&row, &opencode_db) {
+                            all_sessions.push(m);
+                        }
+                    }
+                }
+            }
         }
       }
     }
@@ -2274,7 +2336,9 @@ pub async fn get_remote_session_messages(
         }
         if app == "hermes" {
             let db = format!("{home}/.hermes/state.db");
-            let sql = "SELECT role, content, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC";
+            // 与本机 `load_messages_from_conn` 对齐：列名是 `timestamp`（REAL 秒），
+            // 顺序按 `id ASC`（插入顺序；时间戳可能回退，不能按时间排）。
+            let sql = "SELECT id, role, content, timestamp FROM messages WHERE session_id = ?1 ORDER BY id ASC";
             let v = run_sqlite_helper(
                 &session,
                 container.as_deref(),
@@ -2295,8 +2359,47 @@ pub async fn get_remote_session_messages(
                 .filter_map(crate::session_manager::providers::hermes::sqlite_row_to_message)
                 .collect());
         }
-        // opencode：message + part 两表，query-all 一次取两个结果集
+        // opencode：v2（session_v2/session_message）优先，按会话所在表选择
         let db = format!("{home}/.local/share/opencode/opencode.db");
+        let in_v2 = run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "query",
+            &db,
+            "SELECT id FROM session_v2 WHERE id = ?1",
+            &[session_id.as_str()],
+        )
+        .await
+        .ok()
+        .and_then(|v| {
+            v.get("rows")
+                .and_then(Value::as_array)
+                .map(|rows| !rows.is_empty())
+        })
+        .unwrap_or(false);
+        if in_v2 {
+            let v = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &db,
+                crate::session_manager::providers::opencode::MESSAGES_SQL_V2,
+                &[session_id.as_str()],
+            )
+            .await?;
+            let rows = v
+                .get("rows")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            return Ok(
+                crate::session_manager::providers::opencode::assemble_opencode_v2_messages(&rows),
+            );
+        }
+
+        // v1：message + part 两表，query-all 一次取两个结果集
         let sql = "SELECT id, time_created, data FROM message WHERE session_id = ?1 ORDER BY time_created ASC; SELECT message_id, data FROM part WHERE session_id = ?1 ORDER BY time_created ASC";
         let v = run_sqlite_helper(
             &session,
@@ -2424,39 +2527,27 @@ pub async fn delete_remote_session(
         );
     }
 
-    // hermes / opencode：SQLite 主存储，经远端 sqlite-helper 删除（先校验存在）
-    if app == "hermes" || app == "opencode" {
+    // hermes：SQLite 主存储（会话 + 消息两张表）
+    if app == "hermes" {
         let home = host.default_home();
         let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
-        let (db, check_sql, delete_sql) = if app == "hermes" {
-            (
-                format!("{home}/.hermes/state.db"),
-                "SELECT id FROM sessions WHERE id = ?1",
-                "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
-            )
-        } else {
-            (
-                format!("{home}/.local/share/opencode/opencode.db"),
-                "SELECT id FROM session WHERE id = ?1",
-                "DELETE FROM part WHERE session_id = ?1; DELETE FROM message WHERE session_id = ?1; DELETE FROM session WHERE id = ?1;",
-            )
-        };
+        let db = format!("{home}/.hermes/state.db");
         let v = run_sqlite_helper(
             &session,
             container.as_deref(),
             &helper,
             "query",
             &db,
-            check_sql,
+            "SELECT id FROM sessions WHERE id = ?1",
             &[session_id.as_str()],
         )
         .await?;
-        let exists = v
+        if !v
             .get("rows")
             .and_then(Value::as_array)
             .map(|r| !r.is_empty())
-            .unwrap_or(false);
-        if !exists {
+            .unwrap_or(false)
+        {
             return Err(format!("远端会话不存在: {session_id}"));
         }
         run_sqlite_helper(
@@ -2465,7 +2556,106 @@ pub async fn delete_remote_session(
             &helper,
             "write",
             &db,
-            delete_sql,
+            "DELETE FROM messages WHERE session_id = ?1; DELETE FROM sessions WHERE id = ?1;",
+            &[session_id.as_str()],
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    // opencode：v1（session/message/part）与 v2（session_v2/session_message）两套 schema，
+    // 远端按实际表结构删除；2.x 机器上原来的 v1 SQL 会直接报「会话不存在」。
+    if app == "opencode" {
+        let home = host.default_home();
+        let helper = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await?;
+        let db = format!("{home}/.local/share/opencode/opencode.db");
+        let tables: Vec<String> = run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "query",
+            &db,
+            "SELECT name FROM sqlite_master WHERE type='table'",
+            &[],
+        )
+        .await
+        .ok()
+        .and_then(|v| {
+            v.get("rows").and_then(Value::as_array).map(|rows| {
+                rows.iter()
+                    .filter_map(|r| r.get("name").and_then(Value::as_str))
+                    .map(str::to_string)
+                    .collect()
+            })
+        })
+        .unwrap_or_default();
+        let has = |t: &str| tables.iter().any(|x| x == t);
+        let has_v1 = has("session");
+        let has_v2 = has("session_v2") && has("session_message");
+        if !has_v1 && !has_v2 {
+            return Err(format!("远端会话不存在: {session_id}"));
+        }
+
+        let mut checks = Vec::new();
+        if has_v2 {
+            checks.push("SELECT id FROM session_v2 WHERE id = ?1");
+        }
+        if has_v1 {
+            checks.push("SELECT id FROM session WHERE id = ?1");
+        }
+        let v = run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "query",
+            &db,
+            &checks.join(" UNION ALL "),
+            &[session_id.as_str()],
+        )
+        .await?;
+        if !v
+            .get("rows")
+            .and_then(Value::as_array)
+            .map(|r| !r.is_empty())
+            .unwrap_or(false)
+        {
+            return Err(format!("远端会话不存在: {session_id}"));
+        }
+
+        let mut stmts: Vec<String> = Vec::new();
+        if has_v2 {
+            stmts.push("DELETE FROM session_message WHERE session_id = ?1;".into());
+            for child in [
+                "session_pending",
+                "session_inbox",
+                "instruction_entry",
+                "instruction_state",
+            ] {
+                if has(child) {
+                    stmts.push(format!("DELETE FROM {child} WHERE session_id = ?1;"));
+                }
+            }
+            if has("event_sequence") {
+                stmts.push("DELETE FROM event_sequence WHERE aggregate_id = ?1;".into());
+            }
+            stmts.push("DELETE FROM session_v2 WHERE id = ?1;".into());
+        }
+        if has_v1 {
+            if has("part") {
+                stmts.push("DELETE FROM part WHERE session_id = ?1;".into());
+            }
+            if has("message") {
+                stmts.push("DELETE FROM message WHERE session_id = ?1;".into());
+            }
+            stmts.push("DELETE FROM session WHERE id = ?1;".into());
+        }
+        run_sqlite_helper(
+            &session,
+            container.as_deref(),
+            &helper,
+            "write",
+            &db,
+            &stmts.join(" "),
             &[session_id.as_str()],
         )
         .await?;
