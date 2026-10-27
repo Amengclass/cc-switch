@@ -46,8 +46,13 @@ pub async fn scan_claude_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> 
     out
 }
 
-/// codex：`<root>/**/*.jsonl`。
-pub async fn scan_codex_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
+/// codex：`<root>/**/*.jsonl`。`titles` 来自 `session_index.jsonl` / `state_5.sqlite`，
+/// 与本机 `scan_sessions_in_roots_with_titles` 一致（有自定义线程名时覆盖首条用户消息）。
+pub async fn scan_codex_fs<F: FileOps>(
+    fs: &F,
+    root: &str,
+    titles: &std::collections::HashMap<String, String>,
+) -> Vec<SessionMeta> {
     use crate::session_manager::providers::codex;
     let files = collect_files_fs(fs, root, |p| p.ends_with(".jsonl")).await;
     let mut out = Vec::new();
@@ -57,7 +62,7 @@ pub async fn scan_codex_fs<F: FileOps>(fs: &F, root: &str) -> Vec<SessionMeta> {
                 Path::new(&f),
                 head,
                 tail,
-                &std::collections::HashMap::new(),
+                titles,
             ) {
                 out.push(m);
             }

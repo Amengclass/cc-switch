@@ -2103,6 +2103,74 @@ pub async fn list_remote_sessions_all(
     )?;
     let home = host.default_home();
 
+    // 3 个 SQLite 源（hermes / opencode / mcode）+ codex 线程标题库
+    let hermes_db = format!("{home}/.hermes/state.db");
+    let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
+    let mcode_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
+    let codex_state_db = format!("{home}/.codex/state_5.sqlite");
+    let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
+
+    // 先一次性探测哪些 SQLite 库真的存在：一个都没有就完全跳过 helper
+    // （首次上传 helper 约 2.6MB，容器上很贵，不能为不存在的库付这个成本）。
+    let db_paths = [&hermes_db, &opencode_db, &mcode_db, &codex_state_db];
+    let probe = format!(
+        "for f in {}; do [ -f \"$f\" ] && echo \"$f\"; done",
+        db_paths
+            .iter()
+            .map(|p| connection::shell_quote(p))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    let existing_dbs = exec_in_target(&session, container.as_deref(), &probe)
+        .await
+        .unwrap_or_default();
+
+    // codex 线程标题：本机会用 session_index.jsonl + state_5.sqlite 覆盖标题，
+    // 远端同样读取，否则列表标题与本地不一致。
+    let mut codex_titles: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    if let Ok(Some(text)) = target
+        .read_text_optional(&format!("{home}/.codex/session_index.jsonl"))
+        .await
+    {
+        codex_titles.extend(
+            crate::session_manager::providers::codex::parse_session_index_titles(&text),
+        );
+    }
+    if existing_dbs
+        .lines()
+        .any(|line| line.trim() == codex_state_db)
+    {
+        if let Ok(helper) =
+            ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await
+        {
+            if let Ok(v) = run_sqlite_helper(
+                &session,
+                container.as_deref(),
+                &helper,
+                "query",
+                &codex_state_db,
+                crate::session_manager::providers::codex::THREAD_TITLES_SQL,
+                &[],
+            )
+            .await
+            {
+                if let Some(rows) = v.get("rows").and_then(Value::as_array) {
+                    for row in rows {
+                        if let (Some(id), Some(title)) = (
+                            row.get("id").and_then(Value::as_str),
+                            row.get("title").and_then(Value::as_str),
+                        ) {
+                            if !id.trim().is_empty() && !title.trim().is_empty() {
+                                codex_titles.insert(id.to_string(), title.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 6 个文件源 app：FileOps 泛型扫描，复用本机各 provider 的纯解析。
     // 根目录与本机 `session_roots()` 对齐——尤其 codex 不能扫整个 `~/.codex`
     // （那里还有 .tmp/plugins、skills 等几百个无关文件，容器下每个目录都是一趟 exec）。
@@ -2133,7 +2201,9 @@ pub async fn list_remote_sessions_all(
             let sessions = match *app {
                 "claude" => crate::remote::sessions::scan_claude_fs(&target, root).await,
                 "grokbuild" => crate::remote::sessions::scan_grokbuild_fs(&target, root).await,
-                "codex" => crate::remote::sessions::scan_codex_fs(&target, root).await,
+                "codex" => {
+                    crate::remote::sessions::scan_codex_fs(&target, root, &codex_titles).await
+                }
                 "gemini" => crate::remote::sessions::scan_gemini_fs(&target, root).await,
                 "openclaw" => crate::remote::sessions::scan_openclaw_fs(&target, root).await,
                 "pi" => crate::remote::sessions::scan_pi_fs(&target, root).await,
@@ -2142,27 +2212,6 @@ pub async fn list_remote_sessions_all(
             all_sessions.extend(sessions);
         }
     }
-
-    // 3 个 SQLite 源（hermes / opencode / mcode）：经远端 sqlite-helper 查询（复用本机 SQL）。
-    let hermes_db = format!("{home}/.hermes/state.db");
-    let opencode_db = format!("{home}/.local/share/opencode/opencode.db");
-    let mcode_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
-    let hermes_sql = "SELECT * FROM sessions ORDER BY rowid DESC LIMIT 500";
-
-    // 先一次性探测哪些 SQLite 库真的存在：一个都没有就完全跳过 helper
-    // （首次上传 helper 约 2.6MB，容器上很贵，不能为不存在的库付这个成本）。
-    let db_paths = [&hermes_db, &opencode_db, &mcode_db];
-    let probe = format!(
-        "for f in {}; do [ -f \"$f\" ] && echo \"$f\"; done",
-        db_paths
-            .iter()
-            .map(|p| connection::shell_quote(p))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-    let existing_dbs = exec_in_target(&session, container.as_deref(), &probe)
-        .await
-        .unwrap_or_default();
 
     if !existing_dbs.trim().is_empty() {
       if let Ok(helper) = ensure_remote_sqlite_helper(&session, container.as_deref(), &home).await {

@@ -138,6 +138,16 @@ fn load_thread_titles_from_session_index(index_path: &Path) -> HashMap<String, S
             Ok(line) => line,
             Err(_) => continue,
         };
+        titles.extend(parse_session_index_titles(&line));
+    }
+
+    titles
+}
+
+/// 从 `session_index.jsonl` 文本（可含多行）解析 id → thread_name（供远端复用）。
+pub(crate) fn parse_session_index_titles(content: &str) -> HashMap<String, String> {
+    let mut titles = HashMap::new();
+    for line in content.lines() {
         let Ok(entry) = serde_json::from_str::<SessionIndexEntry>(line.trim()) else {
             continue;
         };
@@ -147,9 +157,13 @@ fn load_thread_titles_from_session_index(index_path: &Path) -> HashMap<String, S
             titles.insert(id.to_string(), title.to_string());
         }
     }
-
     titles
 }
+
+/// 状态库里的线程标题 SQL（与本机 `load_thread_titles_from_db` 一致）。
+pub(crate) const THREAD_TITLES_SQL: &str = "SELECT id, title FROM threads \
+     WHERE title <> '' \
+     AND (first_user_message IS NULL OR TRIM(title) <> TRIM(first_user_message))";
 
 fn load_thread_titles_from_db(db_path: &Path) -> HashMap<String, String> {
     if !db_path.exists() {
