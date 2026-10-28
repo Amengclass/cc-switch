@@ -486,6 +486,9 @@ export const RemoteHostsPanel = React.forwardRef<
       toast.success(
         t("remote.reachable", {
           defaultValue: "连通正常",
+          // locale 文案是「连通正常 {{name}}」：不传 name 会原样显示 {{name}}。
+          // 新增场景还没有正式名称，按保存规则回退为主机地址。
+          name: form.name.trim() || form.host.trim(),
         }),
       );
     } catch (error) {
