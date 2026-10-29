@@ -727,7 +727,7 @@ export function BatchApplyPanel({
                                 toggleContainer(host.id, c)
                               }
                             />
-                            <DockerIcon className="h-3.5 w-3.5" />
+                            <DockerIcon className="h-3.5 w-3.5 text-fg-3" />
                             <span className="truncate">{c}</span>
                           </label>
                         ))}

@@ -374,7 +374,7 @@ export function TargetBreadcrumb({
                   type="button"
                   className={cn(segmentCls, "bg-surface shadow-v7-sm")}
                 >
-                  <DockerIcon className="h-3.5 w-3.5" />
+                  <DockerIcon className="h-3.5 w-3.5 text-fg-3" />
                   {containersLoading && !containers.length ? (
                     <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
                   ) : (
