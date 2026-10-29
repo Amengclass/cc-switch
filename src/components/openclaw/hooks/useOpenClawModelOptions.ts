@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useProvidersQuery } from "@/lib/query/queries";
+import { useRemoteProvidersQuery } from "@/lib/query/remoteMutations";
 import type { OpenClawProviderConfig } from "@/types";
 
 export interface ModelOption {
@@ -7,11 +8,25 @@ export interface ModelOption {
   label: string; // "Provider Name / Model Name"
 }
 
-export function useOpenClawModelOptions(): {
+interface OpenClawModelTarget {
+  remoteTargetId?: string;
+  remoteContainerId?: string;
+}
+
+export function useOpenClawModelOptions(target?: OpenClawModelTarget): {
   options: ModelOption[];
   isLoading: boolean;
 } {
-  const { data: providersData, isLoading } = useProvidersQuery("openclaw");
+  // 远端目标：模型列表来自目标自己的 SSOT（本机 DB 在远端下是别一台机器的配置）。
+  const remoteHostId = target?.remoteTargetId;
+  const localQuery = useProvidersQuery("openclaw");
+  const remoteQuery = useRemoteProvidersQuery(
+    remoteHostId,
+    target?.remoteContainerId,
+    "openclaw",
+  );
+  const providersData = remoteHostId ? remoteQuery.data : localQuery.data;
+  const isLoading = remoteHostId ? remoteQuery.isLoading : localQuery.isLoading;
 
   const options = useMemo<ModelOption[]>(() => {
     const allProviders = providersData?.providers;

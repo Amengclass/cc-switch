@@ -202,6 +202,7 @@ export function useProviderActions(
           provider,
           originalId,
           container: remoteContainerId,
+          editorSave,
         });
         return;
       }

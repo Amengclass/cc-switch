@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
-  Container,
   Loader2,
   Send,
   Server,
@@ -15,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { ManagementListSearch } from "@/components/common/ManagementListSearch";
 import { ProviderIcon } from "@/components/ProviderIcon";
+import { DockerIcon } from "@/components/icons/DockerIcon";
 import { cn } from "@/lib/utils";
 import type { RemoteHost } from "@/types/remote";
 import type { Provider } from "@/types";
@@ -23,6 +23,7 @@ import {
   listDockerContainers,
   type BroadcastSwitchResult,
 } from "@/lib/api/remote";
+import { useRemoteProvidersQuery } from "@/lib/query/remoteMutations";
 import { listen } from "@tauri-apps/api/event";
 // 官方 v4.0.4 的 popover 只导出 Popover / PopoverTrigger / PopoverContent /
 // PopoverAnchor 四个（没有 PopoverArrow），箭头是纯装饰，去掉。
@@ -131,12 +132,37 @@ export function BatchApplyPanel({
   const [providerId, setProviderId] = useState<string>("");
   const [results, setResults] = useState<ResultRow[]>([]);
   const [running, setRunning] = useState(false);
+  // Provider 池来源：本机（默认）/ 某台宿主机 / 某台宿主机的容器。
+  const [sourceKey, setSourceKey] = useState<string>("local");
 
-  const providerList = useMemo(() => Object.values(providers), [providers]);
+  const source = useMemo(() => {
+    if (sourceKey === "local") return null;
+    const [hostId, container] = splitKey(sourceKey);
+    return { hostId, container: container || undefined };
+  }, [sourceKey]);
+  const remoteSourceQuery = useRemoteProvidersQuery(
+    source?.hostId,
+    source?.container,
+    app,
+  );
+
+  // 有效供应商池：本机 DB 或所选来源的 SSOT
+  const effectiveProviders = source
+    ? (remoteSourceQuery.data?.providers ?? {})
+    : providers;
+  const effectiveDefaultProviderId = source
+    ? (remoteSourceQuery.data?.currentProviderId ?? undefined)
+    : defaultProviderId;
+
+  const providerList = useMemo(
+    () => Object.values(effectiveProviders),
+    [effectiveProviders],
+  );
 
   useEffect(() => {
     if (open) {
       setProviderId(defaultProviderId ?? providerList[0]?.id ?? "");
+      setSourceKey("local");
       setSelected(new Set());
       setExpanded(new Set());
       setContainersMap({});
@@ -147,13 +173,13 @@ export function BatchApplyPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // 面板内切 app 后 providers 变了：原选中的供应商不在新列表里 → 回退到该 app 的
-  // 默认 / 首个（否则新的 Select 会显示占位、批量应用按钮置灰）。
+  // 面板内切 app / 切 Provider 池来源后 providers 变了：原选中的供应商不在新列表里 →
+  // 回退到该来源的默认 / 首个（否则新的 Select 会显示占位、批量应用按钮置灰）。
   useEffect(() => {
     if (!open) return;
     if (providerId && providerList.some((p) => p.id === providerId)) return;
-    setProviderId(defaultProviderId ?? providerList[0]?.id ?? "");
-  }, [open, providerId, providerList, defaultProviderId]);
+    setProviderId(effectiveDefaultProviderId ?? providerList[0]?.id ?? "");
+  }, [open, providerId, providerList, effectiveDefaultProviderId]);
 
   // 打开面板即批量拉取所有主机的容器列表：每台行尾常驻显示「N 容器」，无需逐个展开。
   // 拉取失败记录到 hostErrors（区分 SSH 挂 / docker 挂），供展开区与主行提示。
@@ -316,6 +342,8 @@ export function BatchApplyPanel({
         })),
         providerId,
         app,
+        source?.hostId,
+        source?.container,
       );
       // 权威结果兜底：以 invoke 返回为准（即使事件漏了也能对齐最终态）
       setResults(results.map(fromResult));
@@ -401,6 +429,29 @@ export function BatchApplyPanel({
                 <span className="whitespace-nowrap">{appDisplayName}</span>
               </span>
             )}
+            <span className="whitespace-nowrap text-body text-fg-2">
+              {t("batchApply.source")}
+            </span>
+            <Select value={sourceKey} onValueChange={setSourceKey}>
+              <SelectTrigger className="h-9 max-w-[200px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="local">
+                  {t("batchApply.sourceLocal")}
+                </SelectItem>
+                {hosts.flatMap((h) => [
+                  <SelectItem key={h.id} value={h.id}>
+                    {h.name}
+                  </SelectItem>,
+                  ...(containersMap[h.id] ?? []).map((c) => (
+                    <SelectItem key={contKey(h.id, c)} value={contKey(h.id, c)}>
+                      {h.name} / {c}
+                    </SelectItem>
+                  )),
+                ])}
+              </SelectContent>
+            </Select>
             <span className="whitespace-nowrap text-body text-fg-2">
               {t("batchApply.forApp")}
             </span>
@@ -502,7 +553,7 @@ export function BatchApplyPanel({
                           className="flex items-center gap-2 rounded-control border border-border px-2 py-1.5 text-body"
                         >
                           {isContainer ? (
-                            <Container className="h-4 w-4 shrink-0 text-fg-3" />
+                            <DockerIcon className="h-4 w-4 text-fg-3" />
                           ) : (
                             <Server className="h-4 w-4 shrink-0 text-action-text" />
                           )}
@@ -676,7 +727,7 @@ export function BatchApplyPanel({
                                 toggleContainer(host.id, c)
                               }
                             />
-                            <Container className="h-3.5 w-3.5 shrink-0" />
+                            <DockerIcon className="h-3.5 w-3.5" />
                             <span className="truncate">{c}</span>
                           </label>
                         ))}

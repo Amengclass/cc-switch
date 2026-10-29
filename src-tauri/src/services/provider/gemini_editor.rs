@@ -88,7 +88,7 @@ pub fn view(
 
 /// 行里保存着、但不随切换生效的设置（值和显示的不同才列出）：非关键的环境变量，以及
 /// settings.json 的顶层键（去掉关键字段后比）。
-fn inactive_fields(row: &Value, env: &Map<String, Value>, config: &Value) -> Vec<InactiveField> {
+pub(crate) fn inactive_fields(row: &Value, env: &Map<String, Value>, config: &Value) -> Vec<InactiveField> {
     let mut fields = Vec::new();
     for (key, value) in env_of(row) {
         if floor::gemini_floor_env(&key) || !value.is_string() {

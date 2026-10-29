@@ -7,6 +7,7 @@ use std::str::FromStr;
 use tauri::{Emitter, State};
 
 use crate::fsops::FileOps as _;
+use crate::live::patch::LivePatch as _;
 #[cfg(target_os = "windows")]
 use crate::remote::credentials;
 use crate::remote::effect::EffectReport;
@@ -1271,6 +1272,7 @@ pub async fn update_remote_provider(
     provider: crate::provider::Provider,
     original_id: Option<String>,
     container: Option<String>,
+    editor_save: Option<crate::services::provider::EditorSave>,
 ) -> Result<RemoteProvidersView, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
@@ -1287,9 +1289,75 @@ pub async fn update_remote_provider(
     // 非空库不读 live（方案 A：容器场景省一次 docker exec）
     let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
     let original_id = original_id.unwrap_or_else(|| provider.id.clone());
-    let _existing = ssot.providers.iter().find(|p| p.id == original_id).cloned();
+    let existing = ssot.providers.iter().find(|p| p.id == original_id).cloned();
     let mut provider = provider;
     let additive = crate::remote::providers::is_additive_app(&app);
+
+    // 编辑器保存（claude/codex/gemini/grokbuild）：与本地同一套 `plan_save` 拆分行内容和
+    // 「相对 live 的全局改动」。行里只留关键字段/独有字段，其余键（permissions、hooks、
+    // approval_policy、.env 的全局变量等用户设置）的增删改要写回远端 live——本地编辑器
+    // 就是这么做的，远端不能少这一半。
+    enum RemoteEditorPlan {
+        Claude(crate::services::provider::claude_editor::EditorPlan),
+        Codex(crate::services::provider::codex_editor::CodexEditorPlan),
+        Gemini(crate::services::provider::gemini_editor::GeminiEditorPlan),
+        Grok(crate::services::provider::grok_editor::GrokEditorPlan),
+    }
+    let stored_settings = existing.as_ref().map(|p| &p.settings_config);
+    let editor_plan = match (app.as_str(), editor_save.as_ref()) {
+        ("claude", Some(editor)) => {
+            let plan = crate::services::provider::claude_editor::plan_save(
+                stored_settings,
+                &provider.settings_config,
+                &editor.base,
+            )
+            .map_err(|e| e.to_string())?;
+            provider.settings_config = plan.row_settings.clone();
+            Some(RemoteEditorPlan::Claude(plan))
+        }
+        ("codex", Some(editor)) => {
+            let origin = crate::services::provider::codex_editor::Origin::row(
+                stored_settings.unwrap_or(&provider.settings_config),
+            )
+            .map_err(|e| e.to_string())?;
+            let plan = crate::services::provider::codex_editor::plan_save(
+                stored_settings,
+                &provider.settings_config,
+                &editor.base,
+                &origin,
+                crate::services::provider::codex_direct::is_official(&provider),
+                provider.uses_proxy_injected_oauth(),
+                editor.on_conflict,
+            )
+            .map_err(|e| e.to_string())?;
+            provider.settings_config = plan.row_settings.clone();
+            Some(RemoteEditorPlan::Codex(plan))
+        }
+        ("gemini", Some(editor)) => {
+            let plan = crate::services::provider::gemini_editor::plan_save(
+                stored_settings,
+                &provider.settings_config,
+                &editor.base,
+                editor.on_conflict,
+            )
+            .map_err(|e| e.to_string())?;
+            provider.settings_config = plan.row_settings.clone();
+            Some(RemoteEditorPlan::Gemini(plan))
+        }
+        ("grokbuild", Some(editor)) => {
+            let plan = crate::services::provider::grok_editor::plan_save(
+                stored_settings,
+                &provider.settings_config,
+                &editor.base,
+                crate::services::provider::grok_direct::is_official(&provider),
+                editor.on_conflict,
+            )
+            .map_err(|e| e.to_string())?;
+            provider.settings_config = plan.row_settings.clone();
+            Some(RemoteEditorPlan::Grok(plan))
+        }
+        _ => None,
+    };
 
     // 对齐本机 update：非 additive 不允许修改供应商 id（provider/mod.rs:2620）
     if !additive && original_id != provider.id {
@@ -1314,7 +1382,25 @@ pub async fn update_remote_provider(
         }
     }
 
-    let is_current = ssot.current_provider_id.as_deref() == Some(original_id.as_str());
+    // 当前供应商判定必须与面板（build_remote_providers_view）同源，否则会出现
+    // 「面板上高亮的供应商编辑后保存，远端 live 却没变」：老配置（从 live 导入、
+    // 从未经本应用切换）的 SSOT current 是空的，当前项只存在于持久化记录里。
+    // 这里只读同步数据（持久化记录 → SSOT current），不 await 远端解析——查看
+    // 面板时 build_remote_providers_view 已把解析结果（含 live base_url 兜底）
+    // 落库，persisted 即为最新结论。
+    let persisted_current = current_provider_id_from_persisted(
+        &state,
+        &host_id,
+        container.as_deref(),
+        &app,
+        &ssot,
+    )?;
+    let is_current = persisted_current.as_deref() == Some(original_id.as_str());
+    log::info!(
+        "[remote] update {app} original_id={original_id} resolved_current={:?} ssot_current={:?} is_current={is_current}",
+        persisted_current.as_deref(),
+        ssot.current_provider_id.as_deref()
+    );
     let need_live_rewrite = if additive {
         // 对齐本机 check_live_config_exists（provider/mod.rs:2434）：以 live 文件为唯一
         // 事实来源——读远端 live 确认该供应商是否在 live 中，而非只信 SSOT 标记。
@@ -1389,6 +1475,118 @@ pub async fn update_remote_provider(
         );
     }
 
+    // 编辑器保存的全局改动：关键字段已按供应商语义写过，这里只把「不归供应商管」的
+    // 键（permissions、hooks、approval_policy、.env 的全局变量……）的增删改应用到
+    // 远端 live，和本地编辑器保存逐键一致。
+    if let (Some(plan), Some(editor)) = (editor_plan.as_ref(), editor_save.as_ref()) {
+        use crate::services::provider::gemini_editor;
+        match plan {
+            RemoteEditorPlan::Claude(plan) => {
+                if !plan.changes().is_empty() {
+                    let settings_path = crate::remote::settings::remote_settings_path(&home);
+                    let path = std::path::Path::new(&settings_path);
+                    let pre = session
+                        .read_remote_text(&settings_path, container.as_deref())
+                        .await?;
+                    let bytes = crate::services::provider::claude_editor::apply_editor_plan(
+                        path,
+                        pre.as_deref().map(str::as_bytes),
+                        plan,
+                        editor.on_conflict,
+                        None,
+                    )
+                    .map_err(|e| format!("远端 settings.json 改写失败: {e}"))?;
+                    let text =
+                        String::from_utf8(bytes).map_err(|_| "改写结果不是 UTF-8".to_string())?;
+                    session
+                        .write_settings_with_backup(
+                            &settings_path,
+                            &text,
+                            container.as_deref(),
+                            None,
+                        )
+                        .await?;
+                }
+            }
+            RemoteEditorPlan::Codex(plan) => {
+                if !plan.edits.is_empty() {
+                    let path_str = format!("{home}/.codex/config.toml");
+                    let path = std::path::Path::new(&path_str);
+                    let pre = session.read_remote_text(&path_str, container.as_deref()).await?;
+                    let mut doc =
+                        crate::live::patch::toml::parse(path, pre.as_deref().map(str::as_bytes))
+                            .map_err(|e| format!("远端 config.toml 解析失败: {e}"))?;
+                    plan.edits
+                        .apply_to(path, &mut doc)
+                        .map_err(|e| format!("远端 config.toml 改写失败: {e}"))?;
+                    session
+                        .write_settings_with_backup(
+                            &path_str,
+                            &doc.to_string(),
+                            container.as_deref(),
+                            None,
+                        )
+                        .await?;
+                }
+            }
+            RemoteEditorPlan::Gemini(plan) => {
+                if plan.edits.touches_env() {
+                    let path_str = format!("{home}/.gemini/.env");
+                    let path = std::path::Path::new(&path_str);
+                    let pre = session.read_remote_text(&path_str, container.as_deref()).await?;
+                    let bytes = gemini_editor::EnvWrite {
+                        edits: Some(&plan.edits),
+                        key_fields: None,
+                    }
+                    .apply(path, pre.as_deref().map(str::as_bytes))
+                    .map_err(|e| format!("远端 .env 改写失败: {e}"))?;
+                    let text =
+                        String::from_utf8(bytes).map_err(|_| "改写结果不是 UTF-8".to_string())?;
+                    session
+                        .write_settings_with_backup(&path_str, &text, container.as_deref(), None)
+                        .await?;
+                }
+                if plan.edits.touches_settings() {
+                    let path_str = format!("{home}/.gemini/settings.json");
+                    let path = std::path::Path::new(&path_str);
+                    let pre = session.read_remote_text(&path_str, container.as_deref()).await?;
+                    let bytes = gemini_editor::SettingsWrite {
+                        edits: Some(&plan.edits),
+                        key_fields: None,
+                    }
+                    .apply(path, pre.as_deref().map(str::as_bytes))
+                    .map_err(|e| format!("远端 settings.json 改写失败: {e}"))?;
+                    let text =
+                        String::from_utf8(bytes).map_err(|_| "改写结果不是 UTF-8".to_string())?;
+                    session
+                        .write_settings_with_backup(&path_str, &text, container.as_deref(), None)
+                        .await?;
+                }
+            }
+            RemoteEditorPlan::Grok(plan) => {
+                if !plan.edits.is_empty() {
+                    let path_str = format!("{home}/.grok/config.toml");
+                    let path = std::path::Path::new(&path_str);
+                    let pre = session.read_remote_text(&path_str, container.as_deref()).await?;
+                    let mut doc =
+                        crate::live::patch::toml::parse(path, pre.as_deref().map(str::as_bytes))
+                            .map_err(|e| format!("远端 config.toml 解析失败: {e}"))?;
+                    plan.edits
+                        .apply_to(path, &mut doc)
+                        .map_err(|e| format!("远端 config.toml 改写失败: {e}"))?;
+                    session
+                        .write_settings_with_backup(
+                            &path_str,
+                            &doc.to_string(),
+                            container.as_deref(),
+                            None,
+                        )
+                        .await?;
+                }
+            }
+        }
+    }
+
     // 带回最新视图（复用内存 SSOT；live_ids 操作后读一次——additive 写 live 后
     // 按钮态需要最新集合）
     let live_ids = if crate::remote::providers::is_additive_app(&app) {
@@ -1435,7 +1633,16 @@ pub async fn delete_remote_provider(
     let mut ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
     let additive = crate::remote::providers::is_additive_app(&app);
 
-    if !additive && ssot.current_provider_id.as_deref() == Some(provider_id.as_str()) {
+    // 与面板同源判定当前供应商（持久化记录 → SSOT current），避免删掉
+    // 面板上高亮、但 SSOT current 为空（从 live 导入）的当前供应商。
+    let current_id = current_provider_id_from_persisted(
+        &state,
+        &host_id,
+        container.as_deref(),
+        &app,
+        &ssot,
+    )?;
+    if !additive && current_id.as_deref() == Some(provider_id.as_str()) {
         return Err(format!(
             "当前生效的供应商 '{provider_id}' 不能删除，请先切换其他供应商"
         ));
@@ -1528,8 +1735,43 @@ pub async fn switch_remote_provider(
         &app,
         container.as_deref(),
         false, // 单机切换：不自动从本机库兜底，保持原「远端需已配置」严格语义
+        None,  // 单机切换不涉及「Provider 池来源」
     )
     .await
+}
+
+/// 从「Provider 池来源」取供应商完整定义。
+/// - `source_host_id = None`：本机 DB；
+/// - `Some(h)`：那台宿主机（`source_container` 为其容器，None 为宿主机本体）自己的 SSOT。
+async fn provider_from_pool(
+    state: &AppState,
+    source_host_id: Option<&str>,
+    source_container: Option<&str>,
+    app: &str,
+    provider_id: &str,
+) -> Option<crate::provider::Provider> {
+    let Some(source_host_id) = source_host_id else {
+        return state
+            .db
+            .as_ref()
+            .get_provider_by_id(provider_id, app)
+            .ok()
+            .flatten();
+    };
+    let host = load_host(state, source_host_id).ok()?;
+    let password = resolve_password(&host).ok()?;
+    let session = connection::connect(&host, Some(&password)).await.ok()?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        source_container,
+    )
+    .ok()?;
+    let ssot = load_remote_ssot_for_mutation(&target, &home, app)
+        .await
+        .ok()?;
+    ssot.providers.into_iter().find(|p| p.id == provider_id)
 }
 
 /// 单个落点（宿主机 或 宿主机下的容器）的一次远程切换。被单机命令
@@ -1544,6 +1786,8 @@ async fn switch_remote_provider_target(
     // 单机切换传 false（远端未配置该 Provider 即严格报错）；
     // 批量广播传 true（远端没有时从「Provider 池来源」取定义写入远端再切换）。
     allow_local_fallback: bool,
+    // 「Provider 池来源」：None = 本机 DB；Some((host_id, container)) = 那台机器自己的 SSOT。
+    pool_source: Option<(&str, Option<&str>)>,
 ) -> Result<EffectReport, String> {
     let host = load_host(state, host_id)?;
     let password = resolve_password(&host)?;
@@ -1557,21 +1801,19 @@ async fn switch_remote_provider_target(
     // 首次访问（SSOT 空）时从远端 live 导入（对齐本机启动导入语义）
     let mut ssot = load_remote_ssot_for_mutation(&target, &home, app).await?;
     // 单机切换（switch_remote_provider）：要求远端 SSOT 已有该 Provider，不存在即报错；
-    // 批量广播（broadcast_switch_provider）：远端没有时，把「本机 DB 里的 Provider 完整定义」
-    // 作为标准配置写入远端 SSOT（真正「一处配置、多处生效」），再切换。
-    //
-    // ===== 如何改「Provider 池来源」=====
-    // 当前来源 = 本机 DB（get_provider_by_id）。若未来想改成从其它源取（如某台远端 SSOT、
-    // 某个配置文件），只需改下面这一处「取 Provider 完整定义」的调用即可，写入/切换逻辑不变。
+    // 批量广播（broadcast_switch_provider）：远端没有时，从「Provider 池来源」取完整定义
+    // 写入远端 SSOT（真正「一处配置、多处生效」），再切换。池来源由前端选择：本机 DB（默认）
+    // 或某台宿主机/容器自己的 SSOT（`provider_from_pool`）。
     let mut provider = ssot.providers.iter().find(|p| p.id == provider_id).cloned();
     if provider.is_none() && allow_local_fallback {
         // 批量广播：远端没有该 Provider 时，从「Provider 池来源」取定义写入远端再切换。
         // 单机切换（allow_local_fallback=false）不走这里 → 保持原「严格报错」行为不变。
         //
-        // ===== 如何改「Provider 池来源」=====
-        // 当前来源 = 本机 DB（state.db.get_provider_by_id）。若未来想改从其它源取
-        // （如某台远端 SSOT、某配置文件），只需改下面这一处调用即可，写入/切换逻辑不变。
-        if let Ok(Some(p)) = state.db.as_ref().get_provider_by_id(provider_id, app) {
+        // 「Provider 池来源」：默认本机 DB；批量面板选了某台机器/容器时，从它的 SSOT 取。
+        if let Some(p) =
+            provider_from_pool(state, pool_source.map(|(h, _)| h), pool_source.and_then(|(_, c)| c), app, provider_id)
+                .await
+        {
             // upsert 进远端 SSOT：无则追加，有则覆盖（以「池来源」的定义为标准）
             if let Some(existing) = ssot.providers.iter_mut().find(|p| p.id == provider_id) {
                 *existing = p.clone();
@@ -1695,6 +1937,10 @@ pub async fn broadcast_switch_provider(
     targets: Vec<RemoteSwitchTarget>,
     provider_id: String,
     app_type: String,
+    // 「Provider 池来源」宿主机 id；None = 本机 DB
+    source_host_id: Option<String>,
+    // 池来源为该宿主机下的容器时（None = 宿主机本体）
+    source_container: Option<String>,
 ) -> Result<Vec<RemoteSwitchResult>, String> {
     let mut out = Vec::with_capacity(targets.len());
     for t in &targets {
@@ -1715,7 +1961,10 @@ pub async fn broadcast_switch_provider(
             &provider_id,
             &app_type,
             t.container.as_deref(),
-            true, // 广播：远端没有该 Provider 时从本机库写入并切换（真正「一处配置、多处生效」）
+            true, // 广播：远端没有该 Provider 时从「池来源」写入并切换（真正「一处配置、多处生效」）
+            source_host_id
+                .as_deref()
+                .map(|h| (h, source_container.as_deref())),
         )
         .await;
         let item = match result {
@@ -1999,6 +2248,155 @@ pub async fn update_remote_provider_meta(
     Ok(true)
 }
 
+/// 远端供应商编辑器底部 JSON 的显示内容：切到这个供应商之后**远端** live 会是什么样。
+///
+/// 与本地 `get_provider_editor_view` 同源，但只依赖远端数据：
+/// - claude / gemini：完全复用本地的纯投影器（读远端 live / `.env` / `settings.json`）；
+/// - codex / grokbuild：本地投影依赖本机 DB（官方账号、模型目录、设备签名）。远端在编辑
+///   「当前供应商」时直接显示远端 live 本身（此时 live 就是切换后的样子）；编辑非当前
+///   供应商时回退到行本身（与未接编辑器时一致）。
+#[tauri::command]
+pub async fn get_remote_provider_editor_view(
+    state: State<'_, AppState>,
+    host_id: String,
+    app: String,
+    container: Option<String>,
+    settings_config: Value,
+    category: Option<String>,
+) -> Result<crate::services::provider::EditorView, String> {
+    use crate::services::provider::EditorView;
+    use crate::services::provider::{codex_editor, editor_toml, gemini_editor, grok_editor};
+
+    let host = load_host(&state, &host_id)?;
+    let password = resolve_password(&host)?;
+    let session = connection::connect(&host, Some(&password)).await?;
+    let home = host.default_home();
+    let target = crate::remote::docker::RemoteTarget::new(
+        &session.sftp,
+        &session.channel,
+        container.as_deref(),
+    )?;
+
+    let ssot = load_remote_ssot_for_mutation(&target, &home, &app).await?;
+    let current_id = current_provider_id_from_persisted(
+        &state,
+        &host_id,
+        container.as_deref(),
+        &app,
+        &ssot,
+    )?;
+    let current_row = current_id
+        .as_deref()
+        .and_then(|id| ssot.providers.iter().find(|p| p.id == id));
+
+    match app.as_str() {
+        "claude" => {
+            use crate::live::project::claude::{project_onto, ClaudeProjection};
+            let prev = current_row.map(|p| ClaudeProjection::of(&p.settings_config));
+            let settings_path = crate::remote::settings::remote_settings_path(&home);
+            let path = std::path::Path::new(&settings_path);
+            let pre = session
+                .read_remote_text(&settings_path, container.as_deref())
+                .await?;
+            let (live, _) = crate::live::patch::json::parse(path, pre.as_deref().map(str::as_bytes))
+                .map_err(|e| format!("读取远端 settings.json 失败: {e}"))?;
+            let settings = project_onto(
+                path,
+                &live,
+                prev.as_ref(),
+                &ClaudeProjection::of(&settings_config),
+            )
+            .map_err(|e| format!("远端设置投影失败: {e}"))?;
+            let inactive = crate::services::provider::claude_editor::inactive_fields(
+                &settings_config,
+                &settings,
+            );
+            Ok(EditorView { settings, inactive })
+        }
+        "gemini" => {
+            use crate::live::project::gemini::GeminiProjection;
+            let projection = GeminiProjection::of(
+                &settings_config,
+                category.as_deref() == Some("official"),
+            );
+
+            let env_path = format!("{home}/.gemini/.env");
+            let env_pre = session
+                .read_remote_text(&env_path, container.as_deref())
+                .await?;
+            let env_bytes = projection
+                .env_patch()
+                .apply(
+                    std::path::Path::new(&env_path),
+                    env_pre.as_deref().map(str::as_bytes),
+                )
+                .map_err(|e| format!("读取远端 .env 失败: {e}"))?;
+            let env: serde_json::Map<String, Value> =
+                crate::live::patch::dotenv::entries(&String::from_utf8_lossy(&env_bytes))
+                    .into_iter()
+                    .map(|(key, value)| (key, Value::String(value)))
+                    .collect();
+
+            let settings_path = format!("{home}/.gemini/settings.json");
+            let path = std::path::Path::new(&settings_path);
+            let settings_pre = session
+                .read_remote_text(&settings_path, container.as_deref())
+                .await?;
+            let (mut config, _) =
+                crate::live::patch::json::parse(path, settings_pre.as_deref().map(str::as_bytes))
+                    .map_err(|e| format!("读取远端 settings.json 失败: {e}"))?;
+            projection
+                .settings_patch()
+                .apply_to(path, &mut config)
+                .map_err(|e| format!("远端 settings.json 投影失败: {e}"))?;
+
+            let mut shown = settings_config.as_object().cloned().unwrap_or_default();
+            shown.insert("env".to_string(), Value::Object(env.clone()));
+            shown.insert("config".to_string(), config.clone());
+            let inactive = gemini_editor::inactive_fields(&settings_config, &env, &config);
+            Ok(EditorView {
+                settings: Value::Object(shown),
+                inactive,
+            })
+        }
+        "codex" | "grokbuild" => {
+            // 非当前供应商：本地投影依赖本机 DB，远端回退到行本身。
+            let Some(_) = current_row else {
+                return Ok(EditorView {
+                    settings: settings_config,
+                    inactive: Vec::new(),
+                });
+            };
+            let path_str = if app == "codex" {
+                format!("{home}/.codex/config.toml")
+            } else {
+                format!("{home}/.grok/config.toml")
+            };
+            let path = std::path::Path::new(&path_str);
+            let pre = session.read_remote_text(&path_str, container.as_deref()).await?;
+            let doc = crate::live::patch::toml::parse(path, pre.as_deref().map(str::as_bytes))
+                .map_err(|e| format!("读取远端 {path_str} 失败: {e}"))?;
+            let mut settings = settings_config.as_object().cloned().unwrap_or_default();
+            settings.insert("config".to_string(), Value::String(doc.to_string()));
+            if app == "codex" {
+                settings
+                    .entry("auth".to_string())
+                    .or_insert_with(|| Value::Object(serde_json::Map::new()));
+            }
+            let inactive = if app == "codex" {
+                codex_editor::inactive_fields(editor_toml::config_text(&settings_config), &doc)
+            } else {
+                grok_editor::inactive_fields_for(&settings_config, &doc)
+            };
+            Ok(EditorView {
+                settings: Value::Object(settings),
+                inactive,
+            })
+        }
+        other => Err(format!("远端编辑器预览不支持应用 {other}")),
+    }
+}
+
 #[tauri::command]
 pub async fn get_remote_current_provider(
     state: State<'_, AppState>,
@@ -2028,6 +2426,41 @@ pub async fn get_remote_current_provider(
         &ssot,
     )
     .await
+}
+
+/// 同步版当前供应商判定（不读远端 live）：持久化记录 → SSOT current。
+///
+/// 与 `resolve_remote_current_provider_id` 的前两级完全一致。写操作（编辑/删除）
+/// 用它而不是 full resolver：查看面板时 `build_remote_providers_view` 已把
+/// 含 live 兜底的结论落库，同步判定即可命中；同时避免在巨型 async fn 里再
+/// await 远端解析（rustc 在 Windows 上把两层状态机内联会爆栈）。
+fn current_provider_id_from_persisted(
+    state: &AppState,
+    host_id: &str,
+    container: Option<&str>,
+    app: &str,
+    ssot: &crate::remote::providers::RemoteProvidersSsot,
+) -> Result<Option<String>, String> {
+    if let Some(persisted) = crate::remote::current::get_current_provider(
+        state.db.as_ref(),
+        host_id,
+        container,
+        app,
+    )? {
+        if ssot.providers.iter().any(|p| p.id == persisted) {
+            return Ok(Some(persisted));
+        }
+    }
+
+    if !crate::remote::providers::is_additive_app(app) {
+        if let Some(current) = ssot.current_provider_id.as_deref() {
+            if ssot.providers.iter().any(|p| p.id == current) {
+                return Ok(Some(current.to_string()));
+            }
+        }
+    }
+
+    Ok(None)
 }
 
 /// 远端当前供应商判定（`get_remote_providers` / `get_remote_current_provider` 共用）。

@@ -1814,6 +1814,7 @@ pub fn run() {
             remote::commands::reapply_remote_provider,
             remote::commands::get_remote_current_provider,
             remote::commands::get_remote_providers,
+            remote::commands::get_remote_provider_editor_view,
             remote::commands::add_remote_provider,
             remote::commands::update_remote_provider,
             remote::commands::delete_remote_provider,

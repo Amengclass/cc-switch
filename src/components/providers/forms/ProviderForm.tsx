@@ -89,6 +89,7 @@ import {
 } from "./ClaudeStackModelsField";
 import { setClaudeOneMMarker } from "./hooks/useModelState";
 import { useAppMode } from "@/lib/query/proxy";
+import { useRemoteProvidersQuery } from "@/lib/query/remoteMutations";
 import { ClaudeDesktopProviderForm } from "./ClaudeDesktopProviderForm";
 import { GrokBuildProviderForm } from "./GrokBuildProviderForm";
 import { CodexFormFields } from "./CodexFormFields";
@@ -316,6 +317,9 @@ export interface ProviderFormProps {
   modeView?: AppMode;
   /** 用不用聚合的简化表单：页头据此在应用名后标「聚合模式」。卸载时报 false */
   onStackLayoutChange?: (stackLayout: boolean) => void;
+  /** 远端目标：live 徽章与供应商键冲突判定读目标自己的 SSOT live_ids，不读本机 live */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export function ProviderForm(props: ProviderFormProps) {
@@ -351,6 +355,8 @@ function ProviderFormFull({
   onEditorBaseChange,
   modeView,
   onStackLayoutChange,
+  remoteTargetId,
+  remoteContainerId,
 }: ProviderFormProps) {
   if (appId === "claude-desktop") {
     throw new Error("ProviderFormFull should not receive claude-desktop");
@@ -1019,6 +1025,15 @@ function ProviderFormFull({
     existingOpencodeKeys,
   } = useOmoModelSource({ isOmoCategory: isAnyOmoCategory, providerId });
 
+  // 远端目标：live 徽章与键冲突判定读目标自己的 SSOT live_ids；本机 live 查询在远端下停用
+  // （它们读的是本机文件，会把别台机器的状态显示出来）。
+  const remoteProvidersQuery = useRemoteProvidersQuery(
+    remoteTargetId,
+    remoteContainerId,
+    appId,
+  );
+  const remoteLiveIds = remoteProvidersQuery.data?.liveIds ?? [];
+
   const {
     data: opencodeLiveProviderIds = [],
     isLoading: isOpencodeLiveProviderIdsLoading,
@@ -1026,7 +1041,7 @@ function ProviderFormFull({
   } = useQuery({
     queryKey: ["opencodeLiveProviderIds"],
     queryFn: () => providersApi.getOpenCodeLiveProviderIds(),
-    enabled: appId === "opencode" && !isAnyOmoCategory,
+    enabled: appId === "opencode" && !isAnyOmoCategory && !remoteTargetId,
   });
 
   const opencodeForm = useOpencodeFormState({
@@ -1090,7 +1105,7 @@ function ProviderFormFull({
   const {
     data: openclawLiveProviderIds = [],
     isLoading: isOpenclawLiveProviderIdsLoading,
-  } = useOpenClawLiveProviderIds(appId === "openclaw");
+  } = useOpenClawLiveProviderIds(appId === "openclaw" && !remoteTargetId);
 
   const hermesForm = useHermesFormState({
     initialData,
@@ -1102,13 +1117,24 @@ function ProviderFormFull({
   const {
     data: hermesLiveProviderIds = [],
     isLoading: isHermesLiveProviderIdsLoading,
-  } = useHermesLiveProviderIds(appId === "hermes");
+  } = useHermesLiveProviderIds(appId === "hermes" && !remoteTargetId);
+
+  // 远端目标下 live 集合来自目标自己的 SSOT，本机查询结果不参与。
+  const effectiveOpencodeLiveIds = remoteTargetId
+    ? remoteLiveIds
+    : opencodeLiveProviderIds;
+  const effectiveOpenclawLiveIds = remoteTargetId
+    ? remoteLiveIds
+    : openclawLiveProviderIds;
+  const effectiveHermesLiveIds = remoteTargetId
+    ? remoteLiveIds
+    : hermesLiveProviderIds;
 
   const additiveExistingProviderKeys = useMemo(() => {
     if (appId === "opencode" && !isAnyOmoCategory) {
       return Array.from(
         new Set(
-          [...existingOpencodeKeys, ...opencodeLiveProviderIds].filter(
+          [...existingOpencodeKeys, ...effectiveOpencodeLiveIds].filter(
             (key) => key !== providerId,
           ),
         ),
@@ -1120,7 +1146,7 @@ function ProviderFormFull({
         new Set(
           [
             ...openclawForm.existingOpenclawKeys,
-            ...openclawLiveProviderIds,
+            ...effectiveOpenclawLiveIds,
           ].filter((key) => key !== providerId),
         ),
       );
@@ -1129,7 +1155,7 @@ function ProviderFormFull({
     if (appId === "hermes") {
       return Array.from(
         new Set(
-          [...hermesForm.existingHermesKeys, ...hermesLiveProviderIds].filter(
+          [...hermesForm.existingHermesKeys, ...effectiveHermesLiveIds].filter(
             (key) => key !== providerId,
           ),
         ),
@@ -1139,18 +1165,21 @@ function ProviderFormFull({
     return [];
   }, [
     appId,
+    effectiveHermesLiveIds,
+    effectiveOpenclawLiveIds,
+    effectiveOpencodeLiveIds,
     existingOpencodeKeys,
     hermesForm.existingHermesKeys,
-    hermesLiveProviderIds,
     isAnyOmoCategory,
     openclawForm.existingOpenclawKeys,
-    openclawLiveProviderIds,
-    opencodeLiveProviderIds,
     providerId,
   ]);
 
   const isProviderKeyLockStateLoading = useMemo(() => {
     if (!isEditMode) return false;
+    if (remoteTargetId) {
+      return remoteProvidersQuery.isLoading;
+    }
     if (appId === "opencode" && !isAnyOmoCategory) {
       return isOpencodeLiveProviderIdsLoading;
     }
@@ -1168,27 +1197,29 @@ function ProviderFormFull({
     isHermesLiveProviderIdsLoading,
     isOpenclawLiveProviderIdsLoading,
     isOpencodeLiveProviderIdsLoading,
+    remoteProvidersQuery.isLoading,
+    remoteTargetId,
   ]);
 
   const isProviderKeyLocked = useMemo(() => {
     if (!isEditMode || !providerId) return false;
     if (appId === "opencode" && !isAnyOmoCategory) {
-      return opencodeLiveProviderIds.includes(providerId);
+      return effectiveOpencodeLiveIds.includes(providerId);
     }
     if (appId === "openclaw") {
-      return openclawLiveProviderIds.includes(providerId);
+      return effectiveOpenclawLiveIds.includes(providerId);
     }
     if (appId === "hermes") {
-      return hermesLiveProviderIds.includes(providerId);
+      return effectiveHermesLiveIds.includes(providerId);
     }
     return false;
   }, [
     appId,
-    hermesLiveProviderIds,
+    effectiveHermesLiveIds,
+    effectiveOpenclawLiveIds,
+    effectiveOpencodeLiveIds,
     isAnyOmoCategory,
     isEditMode,
-    openclawLiveProviderIds,
-    opencodeLiveProviderIds,
     providerId,
   ]);
 

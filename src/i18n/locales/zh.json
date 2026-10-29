@@ -4874,6 +4874,8 @@
   "batchApply": {
     "title": "批量应用",
     "noProvider": "（无可用 Provider）",
+    "source": "Provider 来源",
+    "sourceLocal": "本机",
     "host": "宿主机",
     "container": "容器",
     "searchPlaceholder": "搜索主机名称 / 地址 / 容器名…",

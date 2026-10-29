@@ -230,7 +230,7 @@ fn project_for_save(input: &RowInput<'_>) -> Result<CodexProjection, AppError> {
 }
 
 /// 行里保存着、但不随切换生效的全局设置。
-fn inactive_fields(row_text: &str, display: &DocumentMut) -> Vec<InactiveField> {
+pub(crate) fn inactive_fields(row_text: &str, display: &DocumentMut) -> Vec<InactiveField> {
     let Ok(row) = row_text.parse::<DocumentMut>() else {
         return Vec::new();
     };

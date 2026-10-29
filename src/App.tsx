@@ -1834,6 +1834,8 @@ function App() {
         appId={activeApp}
         onSubmit={addProvider}
         modeView={formModeView}
+        remoteTargetId={remote.remoteTargetId || undefined}
+        remoteContainerId={remote.remoteContainerId || undefined}
       />
 
       <EditProviderDialog
@@ -1850,6 +1852,8 @@ function App() {
         isCurrent={effectiveEditingProvider?.id === currentProviderId}
         modeView={formModeView}
         isRemote={isRemoteTarget}
+        remoteHostId={remote.remoteTargetId || undefined}
+        remoteContainerId={remote.remoteContainerId || undefined}
       />
 
       {effectiveUsageProvider && (

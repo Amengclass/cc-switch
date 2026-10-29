@@ -202,6 +202,7 @@ mod tests {
             port: 22,
             username: username.to_string(),
             auth_method: AuthMethod::Password,
+            private_key_path: None,
             save_password: false,
             route_through_local_proxy: false,
             route_proxy_apps: HashMap::new(),

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronRight, Container, Laptop, Loader2, Search, Server, Target, X } from "lucide-react";
+import { ChevronRight, Laptop, Loader2, Search, Server, Target, X } from "lucide-react";
+import { DockerIcon } from "@/components/icons/DockerIcon";
 import { Input } from "@/components/ui/input";
 import { HoverTip } from "@/components/ui/hover-tip";
 import {
@@ -373,7 +374,7 @@ export function TargetBreadcrumb({
                   type="button"
                   className={cn(segmentCls, "bg-surface shadow-v7-sm")}
                 >
-                  <Container className="h-3.5 w-3.5 shrink-0" />
+                  <DockerIcon className="h-3.5 w-3.5" />
                   {containersLoading && !containers.length ? (
                     <Loader2 className="h-3 w-3 shrink-0 animate-spin text-fg-3" />
                   ) : (

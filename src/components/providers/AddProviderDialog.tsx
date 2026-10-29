@@ -53,6 +53,9 @@ interface AddProviderDialogProps {
   ) => Promise<void> | void;
   /** 从供应商页哪一格打开的，见 ProviderForm 的同名参数 */
   modeView?: AppMode;
+  /** 远端目标：表单的 live 徽章/键冲突判定读目标自己的 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 export function AddProviderDialog({
@@ -61,6 +64,8 @@ export function AddProviderDialog({
   appId,
   onSubmit,
   modeView,
+  remoteTargetId,
+  remoteContainerId,
 }: AddProviderDialogProps) {
   const { t } = useTranslation();
   // OpenCode and OpenClaw don't support universal providers
@@ -513,6 +518,8 @@ export function AddProviderDialog({
       onSubmittingChange={setIsFormSubmitting}
       onSubmitReadyChange={handleSubmitReadyChange}
       showButtons={false}
+      remoteTargetId={remoteTargetId}
+      remoteContainerId={remoteContainerId}
       claudeLiveBase={
         appId === "claude" ? (claudeLiveBase ?? undefined) : undefined
       }

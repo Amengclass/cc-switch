@@ -35,7 +35,7 @@ const AgentsDefaultsPanel: React.FC<OpenClawRemoteTarget> = ({
   const { data: agentsData, isLoading } = useOpenClawAgentsDefaults(target);
   const saveAgentsMutation = useSaveOpenClawAgentsDefaults(target);
   const { options: modelOptions, isLoading: modelsLoading } =
-    useOpenClawModelOptions();
+    useOpenClawModelOptions(target);
 
   const [defaults, setDefaults] = useState<OpenClawAgentsDefaults | null>(null);
   const [primaryModel, setPrimaryModel] = useState("");

@@ -3,19 +3,19 @@
 //! Handles provider CRUD operations, switching, and configuration management.
 
 pub(crate) mod claude_direct;
-mod claude_editor;
+pub(crate) mod claude_editor;
 pub(crate) mod codex_client_catalog;
 pub(crate) mod codex_direct;
-mod codex_editor;
+pub(crate) mod codex_editor;
 mod codex_login;
 pub(crate) mod codex_official_models;
-mod editor_toml;
+pub(crate) mod editor_toml;
 mod endpoints;
 pub(crate) mod gemini_auth;
 pub(crate) mod gemini_direct;
-mod gemini_editor;
+pub(crate) mod gemini_editor;
 pub(crate) mod grok_direct;
-mod grok_editor;
+pub(crate) mod grok_editor;
 mod live;
 #[cfg(test)]
 mod opencode_tests;

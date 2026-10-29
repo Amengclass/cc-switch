@@ -144,7 +144,7 @@ fn live_exclusive_owner(state: &AppState) -> Result<Option<ClaudeProjection>, Ap
     )
 }
 
-fn inactive_fields(row: &Value, display: &Value) -> Vec<InactiveField> {
+pub(crate) fn inactive_fields(row: &Value, display: &Value) -> Vec<InactiveField> {
     let mut fields = Vec::new();
     if let Some(root) = row.as_object() {
         for (key, value) in root {
@@ -210,6 +210,12 @@ impl JsonChange {
 pub(crate) struct EditorPlan {
     pub row_settings: Value,
     changes: Vec<JsonChange>,
+}
+
+impl EditorPlan {
+    pub(crate) fn changes(&self) -> &[JsonChange] {
+        &self.changes
+    }
 }
 
 /// 把编辑器里的完整配置拆开：关键字段、独有字段换进 `stored_row`（新增时为 `None`），
@@ -336,6 +342,27 @@ impl LivePatch for EditorPatch<'_> {
         }
         patch_json::serialize(path, &doc, &style)
     }
+}
+
+/// 远端写入用：把一次编辑器保存应用到一个 JSON 文档上，返回新文件的字节（不落盘）。
+///
+/// 与 [`EditorPatch`] 的 `apply` 逐行等价，只是把读写留给调用方（远端走 SFTP/exec）。
+pub(crate) fn apply_editor_plan(
+    path: &Path,
+    pre: Option<&[u8]>,
+    plan: &EditorPlan,
+    on_conflict: ConflictPolicy,
+    key_fields: Option<&JsonPatch>,
+) -> Result<Vec<u8>, LiveWriteError> {
+    let (mut doc, style) = patch_json::parse(path, pre)?;
+    let accepted = on_conflict.resolve(path, plan.changes(), |change| {
+        change.conflicts_with(patch_json::value_at(&doc, &change.path))
+    })?;
+    JsonChange::patch(&accepted).apply_to(path, &mut doc)?;
+    if let Some(key_fields) = key_fields {
+        key_fields.apply_to(path, &mut doc)?;
+    }
+    patch_json::serialize(path, &doc, &style)
 }
 
 /// 要不要在同一次写入里把关键字段也换进 live。

@@ -16,7 +16,7 @@ import {
 import type { RemoteProvidersView } from "@/lib/api/remote";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import type { Provider } from "@/types";
-import type { ProviderSortUpdate } from "@/lib/api/providers";
+import type { ProviderEditorSave, ProviderSortUpdate } from "@/lib/api/providers";
 
 export interface SwitchRemoteProviderVars {
   hostId: string;
@@ -258,9 +258,11 @@ export const useUpdateRemoteProviderMutation = () => {
       provider,
       originalId,
       container,
+      editorSave,
     }: RemoteProviderBaseVars & {
       provider: Provider;
       originalId?: string;
+      editorSave?: ProviderEditorSave;
     }) => {
       const view = await updateRemoteProvider(
         hostId,
@@ -268,6 +270,7 @@ export const useUpdateRemoteProviderMutation = () => {
         provider,
         originalId,
         container,
+        editorSave,
       );
       return { view, vars: { hostId, app, container } };
     },

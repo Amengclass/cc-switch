@@ -11,6 +11,8 @@ import type {
 import type { BlockContent } from "./sessions";
 import type { InstalledSkill, SkillBackupEntry } from "./skills";
 import type {
+  ProviderEditorSave,
+  ProviderEditorView,
   ProviderSortUpdate,
 } from "./providers";
 import type {
@@ -168,11 +170,17 @@ export async function broadcastSwitchProvider(
   targets: BroadcastSwitchTarget[],
   providerId: string,
   app: string,
+  /** Provider 池来源：宿主机 id（不传 = 本机 DB） */
+  sourceHostId?: string,
+  /** 池来源为宿主机下的容器时传容器名 */
+  sourceContainer?: string,
 ): Promise<BroadcastSwitchResult[]> {
   return invoke<BroadcastSwitchResult[]>("broadcast_switch_provider", {
     targets,
     providerId,
     appType: app,
+    sourceHostId: sourceHostId ?? null,
+    sourceContainer: sourceContainer ?? null,
   });
 }
 
@@ -310,13 +318,15 @@ export async function addRemoteProvider(
 }
 
 /** 编辑远端目标的供应商（更新 SSOT；在生效位置时重写远端 live）。
- *  返回最新视图，调用方 setQueryData 直接刷新。 */
+ *  返回最新视图，调用方 setQueryData 直接刷新。
+ *  `editorSave`：编辑器保存上下文（与本地一致）——非关键字段的改动会写回远端 live。 */
 export async function updateRemoteProvider(
   hostId: string,
   app: string,
   provider: Provider,
   originalId?: string,
   container?: string,
+  editorSave?: ProviderEditorSave,
 ): Promise<RemoteProvidersView> {
   const view = await invoke<{
     providers: Provider[];
@@ -329,8 +339,27 @@ export async function updateRemoteProvider(
     provider,
     originalId: originalId ?? null,
     container: container ?? null,
+    editorSave: editorSave ?? null,
   });
   return toRemoteProvidersView(view);
+}
+
+/** 远端供应商编辑器底部 JSON 的显示内容（与本地投影同源，读远端 live 计算）。
+ *  支持 claude / codex / gemini / grokbuild。 */
+export async function getRemoteProviderEditorView(
+  hostId: string,
+  app: string,
+  settingsConfig: Record<string, unknown>,
+  category?: string,
+  container?: string,
+): Promise<ProviderEditorView> {
+  return invoke<ProviderEditorView>("get_remote_provider_editor_view", {
+    hostId,
+    app,
+    settingsConfig,
+    category: category ?? null,
+    container: container ?? null,
+  });
 }
 
 /** 删除远端目标的供应商（SSOT 移除；additive 且已写入 live 时同时移除 live）。

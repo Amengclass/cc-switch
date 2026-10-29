@@ -119,6 +119,23 @@ fn row_table_name(settings: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 远端预览用：按行算出「不随切换生效」的全局设置（与 [`view`] 同一套规则，不读本机）。
+pub(crate) fn inactive_fields_for(
+    row_settings: &Value,
+    display: &DocumentMut,
+) -> Vec<InactiveField> {
+    let row_table = row_table_name(row_settings);
+    let shown_table = GrokProjection::of(row_settings, false)
+        .ok()
+        .and_then(|projection| projection.table_name().map(str::to_string));
+    inactive_fields(
+        config_text(row_settings),
+        display,
+        row_table.as_deref(),
+        shown_table.as_deref(),
+    )
+}
+
 /// 行里保存着、但不随切换生效的全局设置。
 fn inactive_fields(
     row_text: &str,

@@ -4874,6 +4874,8 @@
   "batchApply": {
     "title": "一括適用",
     "noProvider": "（利用可能なプロバイダーなし）",
+    "source": "Provider ソース",
+    "sourceLocal": "このマシン",
     "host": "ホスト",
     "container": "コンテナ",
     "searchPlaceholder": "ホスト名 / アドレス / コンテナを検索…",

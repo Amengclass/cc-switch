@@ -27,6 +27,7 @@ import type {
 import { useLiveEditConflict } from "@/components/providers/LiveEditConflictDialog";
 import { toastEditorViewFailed } from "@/components/providers/forms/hooks/useDraftEditorProjection";
 import { usesEditorView } from "@/config/appConfig";
+import { getRemoteProviderEditorView } from "@/lib/api/remote";
 
 interface EditProviderDialogProps {
   open: boolean;
@@ -45,6 +46,9 @@ interface EditProviderDialogProps {
   modeView?: AppMode;
   /** 远端目标（本补丁层）：不读本机 live 预填，直接展示该目标 SSOT 配置 */
   isRemote?: boolean;
+  /** 远端目标 id / 容器：claude 用它读远端 live 做编辑器投影（与本地一致） */
+  remoteHostId?: string;
+  remoteContainerId?: string;
 }
 
 /** 直连时保存当前供应商会写进的配置文件 */
@@ -76,6 +80,8 @@ export function EditProviderDialog({
   isCurrent = false,
   modeView,
   isRemote = false,
+  remoteHostId,
+  remoteContainerId,
 }: EditProviderDialogProps) {
   const { t } = useTranslation();
   const [isFormSubmitting, setIsFormSubmitting] = useState(false);
@@ -153,9 +159,36 @@ export function EditProviderDialog({
       }
 
       // 远端目标（本补丁层）：live 预填读的是本机配置文件（getEditorView/getCurrent/
-      // getLiveProvider 全是本机 API），远端下会拿错机器的配置。直接回退到 SSOT
-      // （该目标自己的供应商配置），保存仍按远端路径写远端 SSOT。
+      // getLiveProvider 全是本机 API），远端下会拿错机器的配置。
+      // 有编辑器投影的应用（claude/codex/gemini/grokbuild）走远端投影，保存时非关键字段
+      // 的改动随 editorSave 写回远端 live；其余应用继续按 SSOT 展示。
       if (isRemote) {
+        if (usesEditorView(appId) && remoteHostId) {
+          try {
+            const view = await getRemoteProviderEditorView(
+              remoteHostId,
+              appId,
+              asRecord(provider.settingsConfig) ?? {},
+              provider.category,
+              remoteContainerId,
+            );
+            if (!cancelled) {
+              setEditorView(view);
+              setLiveSettings(view.settings);
+            }
+          } catch (error) {
+            if (!cancelled) {
+              setEditorView(null);
+              setLiveSettings(null);
+              toastEditorViewFailed(t, error);
+            }
+          } finally {
+            if (!cancelled) {
+              setHasLoadedLive(true);
+            }
+          }
+          return;
+        }
         if (!cancelled) {
           setLiveSettings(null);
           setEditorView(null);
@@ -266,7 +299,16 @@ export function EditProviderDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, provider?.id, appId, hasLoadedLive, isProxyTakeover, isRemote]); // 只依赖 provider.id，不依赖整个 provider 对象
+  }, [
+    open,
+    provider?.id,
+    appId,
+    hasLoadedLive,
+    isProxyTakeover,
+    isRemote,
+    remoteHostId,
+    remoteContainerId,
+  ]); // 只依赖 provider.id，不依赖整个 provider 对象
 
   const initialSettingsConfig = useMemo(
     () => liveSettings ?? asRecord(provider?.settingsConfig) ?? {},
@@ -430,6 +472,8 @@ export function EditProviderDialog({
           inactiveFields={editorView?.inactive}
           modeView={modeView}
           onStackLayoutChange={setStackLayout}
+          remoteTargetId={remoteHostId}
+          remoteContainerId={remoteContainerId}
         />
       )}
       {conflictDialog}
