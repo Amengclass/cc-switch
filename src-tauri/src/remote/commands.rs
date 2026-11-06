@@ -2253,8 +2253,9 @@ pub async fn update_remote_provider_meta(
 /// 与本地 `get_provider_editor_view` 同源，但只依赖远端数据：
 /// - claude / gemini：完全复用本地的纯投影器（读远端 live / `.env` / `settings.json`）；
 /// - codex / grokbuild：本地投影依赖本机 DB（官方账号、模型目录、设备签名）。远端在编辑
-///   「当前供应商」时直接显示远端 live 本身（此时 live 就是切换后的样子）；编辑非当前
-///   供应商时回退到行本身（与未接编辑器时一致）。
+///   「当前供应商」（或新增）时直接显示远端 live 本身（此时 live 就是切换后的样子）；
+///   编辑非当前供应商时回退到行本身（与未接编辑器时一致）。判定依据是前端传入的
+///   `providerId` 是否等于远端当前供应商，而不是「当前供应商是否存在」。
 #[tauri::command]
 pub async fn get_remote_provider_editor_view(
     state: State<'_, AppState>,
@@ -2263,6 +2264,7 @@ pub async fn get_remote_provider_editor_view(
     container: Option<String>,
     settings_config: Value,
     category: Option<String>,
+    provider_id: Option<String>,
 ) -> Result<crate::services::provider::EditorView, String> {
     use crate::services::provider::EditorView;
     use crate::services::provider::{codex_editor, editor_toml, gemini_editor, grok_editor};
@@ -2285,9 +2287,20 @@ pub async fn get_remote_provider_editor_view(
         &app,
         &ssot,
     )?;
-    let current_row = current_id
-        .as_deref()
-        .and_then(|id| ssot.providers.iter().find(|p| p.id == id));
+    // 只有「正在编辑当前供应商」或「新增供应商（未传 id）」时，才把当前 live
+    // 当作投影基底；编辑非当前供应商时必须回退到行本身 —— 否则会把当前供应商的
+    // live 配置拼到另一行上，预览的不是切换后的真实效果。
+    let editing_current = match provider_id.as_deref() {
+        Some(id) => current_id.as_deref() == Some(id),
+        None => true,
+    };
+    let current_row = if editing_current {
+        current_id
+            .as_deref()
+            .and_then(|id| ssot.providers.iter().find(|p| p.id == id))
+    } else {
+        None
+    };
 
     match app.as_str() {
         "claude" => {
@@ -3980,11 +3993,11 @@ pub async fn delete_remote_skill(
     // 卸载前备份（对齐本机：先备份再删；备份失败则中止，避免丢技能）
     let records = crate::remote::skill::read_remote_skills_json(&target, &home).await?;
     if let Some(record) = records.iter().find(|r| r.id == name) {
-        if let Err(e) =
-            backup_remote_skill_before_delete(&session, container.as_deref(), &home, record).await
-        {
-            log::warn!("[remote-skill] 卸载前备份失败，继续删除: {e}");
-        }
+        // 备份失败必须中止：继续删除会永久丢失这份技能（与本机
+        // `SkillService::uninstall_skill` 的语义一致）。
+        backup_remote_skill_before_delete(&session, container.as_deref(), &home, record)
+            .await
+            .map_err(|e| format!("卸载前备份失败，已中止删除以保留技能: {e}"))?;
     }
 
     crate::remote::skill::delete_remote_skill(
@@ -4062,7 +4075,7 @@ async fn backup_remote_skill_before_delete(
 }
 
 /// `RemoteSkillRecord` → `InstalledSkill`（备份 meta 用，前端复用本机类型）。
-fn installed_skill_from_record(
+pub(crate) fn installed_skill_from_record(
     record: &crate::remote::skill::RemoteSkillRecord,
 ) -> crate::app_config::InstalledSkill {
     crate::app_config::InstalledSkill {
@@ -4499,13 +4512,13 @@ pub async fn update_remote_skill(
 }
 
 /// 检查远端某个目标上各 Skill 是否有更新（对齐本机 `check_updates`）。
-/// 返回与本机一致的 `SkillUpdateInfo` 列表，供前端显示「可更新」标记。
+/// 返回与本机一致的结果：可更新列表 + 没读到的仓库（不再静默吞掉失败）。
 #[tauri::command]
 pub async fn check_remote_skill_updates(
     state: State<'_, AppState>,
     host_id: String,
     container: Option<String>,
-) -> Result<Vec<crate::services::skill::SkillUpdateInfo>, String> {
+) -> Result<crate::services::skill::SkillUpdateCheckResult, String> {
     let host = load_host(&state, &host_id)?;
     let password = resolve_password(&host)?;
     let session = connection::connect(&host, Some(&password)).await?;

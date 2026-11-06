@@ -7,6 +7,7 @@ import type {
   Provider,
   SessionMessage,
   SessionMeta,
+  UsageResult,
 } from "@/types";
 import type { BlockContent } from "./sessions";
 import type { InstalledSkill, SkillBackupEntry } from "./skills";
@@ -344,6 +345,24 @@ export async function updateRemoteProvider(
   return toRemoteProvidersView(view);
 }
 
+/**
+ * 远端供应商余量查询：读目标机（宿主机 / 容器）自己的 SSOT 里的 usage_script，
+ * 再走与本机一致的查询分派。远端模式下卡片/用量页必须用这个，不能查本机 DB。
+ */
+export async function queryRemoteProviderUsage(
+  hostId: string,
+  app: string,
+  providerId: string,
+  container?: string,
+): Promise<UsageResult> {
+  return invoke<UsageResult>("query_remote_provider_usage", {
+    hostId,
+    app,
+    providerId,
+    container: container ?? null,
+  });
+}
+
 /** 远端供应商编辑器底部 JSON 的显示内容（与本地投影同源，读远端 live 计算）。
  *  支持 claude / codex / gemini / grokbuild。 */
 export async function getRemoteProviderEditorView(
@@ -352,6 +371,7 @@ export async function getRemoteProviderEditorView(
   settingsConfig: Record<string, unknown>,
   category?: string,
   container?: string,
+  providerId?: string,
 ): Promise<ProviderEditorView> {
   return invoke<ProviderEditorView>("get_remote_provider_editor_view", {
     hostId,
@@ -359,6 +379,7 @@ export async function getRemoteProviderEditorView(
     settingsConfig,
     category: category ?? null,
     container: container ?? null,
+    providerId: providerId ?? null,
   });
 }
 
@@ -1018,8 +1039,8 @@ export async function updateRemoteSkill(
 export async function checkRemoteSkillUpdates(
   hostId: string,
   container?: string,
-): Promise<import("@/lib/api/skills").SkillUpdateInfo[]> {
-  return invoke<import("@/lib/api/skills").SkillUpdateInfo[]>(
+): Promise<import("@/lib/api/skills").SkillUpdateCheckResult> {
+  return invoke<import("@/lib/api/skills").SkillUpdateCheckResult>(
     "check_remote_skill_updates",
     { hostId, container: container ?? null },
   );

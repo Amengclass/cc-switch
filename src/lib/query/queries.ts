@@ -10,7 +10,10 @@ import {
 import type { Provider, Settings, UsageResult, SessionMeta } from "@/types";
 import { usageKeys } from "@/lib/query/usage";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import { listRemoteSessionsAll } from "@/lib/api/remote";
+import {
+  listRemoteSessionsAll,
+  queryRemoteProviderUsage,
+} from "@/lib/api/remote";
 
 const sortProviders = (
   providers: Record<string, Provider>,
@@ -101,6 +104,8 @@ export const useSettingsQuery = (): UseQueryResult<Settings> => {
 export interface UseUsageQueryOptions {
   enabled?: boolean;
   autoQueryInterval?: number; // 自动查询间隔（分钟），0 表示禁用
+  /** 远端目标：传了就读目标机自己的 SSOT，不查本机 DB */
+  remote?: { hostId: string; container?: string };
 }
 
 /** keep-last-good 判定所需的最小结果形状（UsageResult / SubscriptionQuota 都满足）。 */
@@ -249,7 +254,7 @@ export const useUsageQuery = (
   appId: AppId,
   options?: UseUsageQueryOptions,
 ) => {
-  const { enabled = true, autoQueryInterval = 0 } = options || {};
+  const { enabled = true, autoQueryInterval = 0, remote } = options || {};
 
   // 计算 staleTime：如果有自动刷新间隔，使用该间隔；否则默认 5 分钟
   // 这样可以避免切换 app 页面时重复触发查询
@@ -259,9 +264,23 @@ export const useUsageQuery = (
       : 5 * 60 * 1000; // 默认 5 分钟
 
   const query = useQuery<UsageResult>({
-    queryKey: usageKeys.script(providerId, appId),
-    queryFn: async () => usageApi.query(providerId, appId),
-    enabled: enabled && !!providerId,
+    // 远端目标必须进 key：同一 provider id 在不同主机/容器上的额度互不相干，
+    // 共用 key 会把 A 机器的余量显示到 B 机器上。
+    queryKey: [
+      ...usageKeys.script(providerId, appId),
+      remote?.hostId ?? null,
+      remote?.container ?? null,
+    ],
+    queryFn: async () =>
+      remote
+        ? queryRemoteProviderUsage(
+            remote.hostId,
+            appId,
+            providerId,
+            remote.container,
+          )
+        : usageApi.query(providerId, appId),
+    enabled: enabled && !!providerId && (!remote || !!remote.hostId),
     refetchInterval:
       autoQueryInterval > 0
         ? Math.max(autoQueryInterval, 1) * 60 * 1000 // 最小1分钟

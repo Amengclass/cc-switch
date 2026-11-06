@@ -171,6 +171,7 @@ export function EditProviderDialog({
               asRecord(provider.settingsConfig) ?? {},
               provider.category,
               remoteContainerId,
+              provider.id,
             );
             if (!cancelled) {
               setEditorView(view);

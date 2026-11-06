@@ -53,6 +53,7 @@ import {
   isSessionAppId,
 } from "../utils";
 import { useReaderT } from "./i18n";
+import { useReaderContext } from "./context";
 import { PathChip } from "./PathChip";
 import { formatDuration } from "./toolSummary";
 import type { ReaderFilter } from "./turns";
@@ -505,10 +506,14 @@ const Sep = () => (
 function SessionUsageSummary({ session }: { session: SessionMeta }) {
   const { i18n } = useTranslation();
   const rt = useReaderT();
+  const { remoteTargetId } = useReaderContext();
+  // 远端会话的请求日志在目标机上，本机用量库里没有；显示空汇总会误导成「0 消耗」。
   const { data } = useSessionUsageSummary(
     session.providerId,
     session.sessionId,
+    !remoteTargetId,
   );
+  if (remoteTargetId) return null;
   if (!data || data.totalRequests === 0) return null;
 
   const locale = getLocaleFromLanguage(getResolvedLang(i18n));

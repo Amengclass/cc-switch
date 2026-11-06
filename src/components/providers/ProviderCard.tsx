@@ -59,6 +59,9 @@ interface ProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   isTesting?: boolean;
   dragHandleProps?: DragHandleProps;
+  /** 远端目标：有值时用量查询读目标机自己的 SSOT，而不是本机 DB */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 /** 当前那张：模式色边框 + 淡底；共存式「已添加」是中性的。 */
@@ -209,6 +212,8 @@ export function ProviderCard({
   onOpenTerminal,
   isTesting,
   dragHandleProps,
+  remoteTargetId,
+  remoteContainerId,
 }: ProviderCardProps) {
   const { t } = useTranslation();
   const codexOfficialIdentity = resolveCodexOfficialIdentity(appId, provider);
@@ -298,6 +303,9 @@ export function ProviderCard({
   const { data: usage } = useUsageQuery(provider.id, appId, {
     enabled: scriptUsageActive,
     autoQueryInterval,
+    remote: remoteTargetId
+      ? { hostId: remoteTargetId, container: remoteContainerId }
+      : undefined,
   });
 
   const isTokenPlan =
@@ -529,6 +537,8 @@ export function ProviderCard({
                   usageEnabled={usageEnabled}
                   isCurrent={isCurrent}
                   isInConfig={isInConfig}
+                  remoteTargetId={remoteTargetId}
+                  remoteContainerId={remoteContainerId}
                   inline={true}
                 />
               )}
@@ -591,6 +601,8 @@ export function ProviderCard({
             usageEnabled={usageEnabled}
             isCurrent={isCurrent}
             isInConfig={isInConfig}
+            remoteTargetId={remoteTargetId}
+            remoteContainerId={remoteContainerId}
             inline={false}
           />
         </div>

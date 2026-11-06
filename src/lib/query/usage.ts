@@ -367,11 +367,19 @@ export function useSessionUsageLastSync() {
   });
 }
 
-/** 单个会话的用量汇总（会话阅读页头部），只数会话日志导入的行。 */
-export function useSessionUsageSummary(appType: string, sessionId: string) {
+/**
+ * 单个会话的用量汇总（会话阅读页头部），只数会话日志导入的行。
+ * `enabled=false` 用于远端会话：日志在目标机上，本机 DB 查不到。
+ */
+export function useSessionUsageSummary(
+  appType: string,
+  sessionId: string,
+  enabled = true,
+) {
   return useQuery({
     queryKey: usageKeys.session(appType, sessionId),
     queryFn: () => usageApi.getSessionUsageSummary(appType, sessionId),
+    enabled: enabled && !!appType && !!sessionId,
     refetchInterval: DEFAULT_REFETCH_INTERVAL_MS,
     refetchIntervalInBackground: false,
   });

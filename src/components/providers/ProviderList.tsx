@@ -445,6 +445,8 @@ export function ProviderList({
       onOpenTerminal={onOpenTerminal}
       onTest={handleTest}
       isTesting={isChecking(provider.id)}
+      remoteTargetId={remoteTargetId}
+      remoteContainerId={remoteContainerId}
     />
   );
 
@@ -580,6 +582,8 @@ interface SortableProviderCardProps {
   onOpenTerminal?: (provider: Provider) => void;
   onTest?: (provider: Provider) => void;
   isTesting: boolean;
+  remoteTargetId?: string;
+  remoteContainerId?: string;
 }
 
 function SortableProviderCard(props: SortableProviderCardProps) {

@@ -170,6 +170,21 @@ const backupsKey = (remoteTargetId?: string, remoteContainerId?: string) =>
       ]
     : ["skills", "backups"];
 
+/**
+ * 更新检测结果必须按目标隔离：同一批 Skill 在不同主机/容器上的
+ * content_hash 各不相同，共用 key 会把 A 目标的「有更新」标记显示到 B 目标上。
+ */
+const updatesKey = (remoteTargetId?: string, remoteContainerId?: string) =>
+  remoteTargetId
+    ? [
+        "skills",
+        "updates",
+        "remote",
+        remoteTargetId,
+        remoteContainerId ?? "__host__",
+      ]
+    : ["skills", "updates"];
+
 export function useSkillBackups(
   remoteTargetId?: string,
   remoteContainerId?: string,
@@ -321,7 +336,7 @@ export function useUninstallSkill(
       // A completed update check may still contain this Skill. Remove it so
       // Update All cannot target an ID that was just uninstalled.
       queryClient.setQueryData<SkillUpdateCheckResult>(
-        ["skills", "updates"],
+        updatesKey(remoteTargetId, remoteContainerId),
         (oldData) =>
           oldData && {
             ...oldData,
@@ -334,7 +349,9 @@ export function useUninstallSkill(
     // unmanaged copy after a successful uninstall.
     onSettled: () =>
       Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+        queryClient.invalidateQueries({
+          queryKey: backupsKey(remoteTargetId, remoteContainerId),
+        }),
         queryClient.invalidateQueries({
           queryKey: unmanagedKey(remoteTargetId, remoteContainerId),
         }),
@@ -660,14 +677,15 @@ export function useCheckSkillUpdates(
   remoteContainerId?: string,
 ) {
   return useQuery({
-    queryKey: ["skills", "updates"],
+    queryKey: updatesKey(remoteTargetId, remoteContainerId),
     queryFn: async () => {
       if (remoteTargetId) {
-        const updates = await checkRemoteSkillUpdates(
+        // 远端后端已返回与本机同构的 { updates, failures }，直接透传，
+        // 不再把没读到的仓库吞成空数组。
+        return await checkRemoteSkillUpdates(
           remoteTargetId,
           remoteContainerId,
         );
-        return { updates, failures: [] } as SkillUpdateCheckResult;
       }
       return skillsApi.checkUpdates();
     },
@@ -698,7 +716,7 @@ export function useUpdateSkill(
         );
       });
       queryClient.setQueryData<SkillUpdateCheckResult>(
-        ["skills", "updates"],
+        updatesKey(remoteTargetId, remoteContainerId),
         (oldData) => {
           if (!oldData) return oldData;
           return {
@@ -711,7 +729,9 @@ export function useUpdateSkill(
     // Updating creates an uninstall-style backup before replacing SSOT files;
     // refresh even when replacement or persistence fails later.
     onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["skills", "backups"] }),
+      queryClient.invalidateQueries({
+        queryKey: backupsKey(remoteTargetId, remoteContainerId),
+      }),
   });
 }
 

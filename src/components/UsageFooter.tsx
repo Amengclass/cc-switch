@@ -26,6 +26,9 @@ interface UsageFooterProps {
   usageEnabled: boolean; // 是否启用了用量查询
   isCurrent: boolean; // 是否为当前激活的供应商
   isInConfig?: boolean; // OpenCode: 是否已添加到配置
+  /** 远端目标：有值时余量查询读目标机自己的 SSOT */
+  remoteTargetId?: string;
+  remoteContainerId?: string;
   inline?: boolean; // 是否内联显示（在按钮左侧）
 }
 
@@ -103,6 +106,8 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   usageEnabled,
   isCurrent,
   isInConfig = false,
+  remoteTargetId,
+  remoteContainerId,
   inline = false,
 }) => {
   const { t } = useTranslation();
@@ -125,6 +130,9 @@ const UsageFooter: React.FC<UsageFooterProps> = ({
   } = useUsageQuery(providerId, appId, {
     enabled: usageEnabled,
     autoQueryInterval,
+    remote: remoteTargetId
+      ? { hostId: remoteTargetId, container: remoteContainerId }
+      : undefined,
   });
   const refresh = () => refetch();
 

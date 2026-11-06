@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { FileText, FolderOpen } from "lucide-react";
+import { Copy, FileText, FolderOpen } from "lucide-react";
 import { memo, useCallback, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -8,6 +8,7 @@ import { copyText } from "@/lib/clipboard";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { highlightText } from "../utils";
+import { useReaderContext } from "./context";
 
 const MAX_DISPLAY_LENGTH = 48;
 
@@ -82,6 +83,8 @@ export const PathChip = memo(function PathChip({
   className,
 }: PathChipProps) {
   const { t } = useTranslation();
+  const { remoteTargetId } = useReaderContext();
+  const isRemote = Boolean(remoteTargetId);
   const localPath = fileUrlToPath(path);
   const display = shortenPath(localPath, projectDir);
 
@@ -104,6 +107,22 @@ export const PathChip = memo(function PathChip({
       onReveal(localPath);
       return;
     }
+    // 远端会话的路径在目标机上，本机 Finder 打不开：改为复制远端路径，
+    // 避免调用本机 reveal 去打开一个同名的本机路径（指错机器）。
+    if (isRemote) {
+      try {
+        await copyText(localPath);
+        toast.success(
+          t("sessionManager.remotePathCopied", {
+            defaultValue: "已复制远端路径 {{path}}",
+            path: localPath,
+          }),
+        );
+      } catch {
+        toast.error(t("common.error", { defaultValue: "复制失败" }));
+      }
+      return;
+    }
     try {
       await revealSessionPath(localPath);
     } catch (error) {
@@ -113,14 +132,18 @@ export const PathChip = memo(function PathChip({
           : t("common.error", { defaultValue: "操作失败" }),
       );
     }
-  }, [localPath, onReveal, t]);
+  }, [isRemote, localPath, onReveal, t]);
 
   const copyLabel = t("sessionManager.reader.path.copy", {
     defaultValue: "复制路径",
   });
-  const revealLabel = t("sessionManager.reader.path.reveal", {
-    defaultValue: "在 Finder 中显示",
-  });
+  const revealLabel = isRemote
+    ? t("sessionManager.reader.path.copyRemote", {
+        defaultValue: "复制远端路径",
+      })
+    : t("sessionManager.reader.path.reveal", {
+        defaultValue: "在 Finder 中显示",
+      });
 
   return (
     <span
@@ -150,7 +173,11 @@ export const PathChip = memo(function PathChip({
           onClick={() => void handleReveal()}
           className="inline-flex h-full shrink-0 items-center rounded-e-control border-s border-border px-1 py-0.5 text-fg-3 transition-colors hover:bg-selected hover:text-fg-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <FolderOpen aria-hidden className="size-3" />
+          {isRemote ? (
+            <Copy aria-hidden className="size-3" />
+          ) : (
+            <FolderOpen aria-hidden className="size-3" />
+          )}
         </button>
       </HoverTip>
     </span>
