@@ -265,12 +265,15 @@ export const useUsageQuery = (
 
   const query = useQuery<UsageResult>({
     // 远端目标必须进 key：同一 provider id 在不同主机/容器上的额度互不相干，
-    // 共用 key 会把 A 机器的余量显示到 B 机器上。
-    queryKey: [
-      ...usageKeys.script(providerId, appId),
-      remote?.hostId ?? null,
-      remote?.container ?? null,
-    ],
+    // 共用 key 会把 A 机器的余量显示到 B 机器上。本地模式保持历史 key 不变，
+    // 避免既有缓存与依赖该 key 的调用方失效。
+    queryKey: remote
+      ? [
+          ...usageKeys.script(providerId, appId),
+          remote.hostId,
+          remote.container ?? null,
+        ]
+      : usageKeys.script(providerId, appId),
     queryFn: async () =>
       remote
         ? queryRemoteProviderUsage(

@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { AlertTriangle, ExternalLink } from "lucide-react";
@@ -287,10 +287,16 @@ const HermesMemoryPanel: React.FC<HermesMemoryPanelProps> = ({
 
   // 离开记忆页就丢掉草稿，回来时重新读文件
   useEffect(() => () => hermesMemoryDrafts.reset(), []);
-  // 切换目标（本机 ↔ 远端 / 不同远端）：草稿来自另一个目标，必须清掉
+  // 切换目标（本机 ↔ 远端 / 不同远端）：草稿来自另一个目标，必须清掉。
+  // 首次挂载不清：草稿正是在这个 effect 之前从当前目标读进来的。
+  const targetKey = `${remoteTargetId ?? ""}|${remoteContainerId ?? ""}`;
+  const prevTargetKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    hermesMemoryDrafts.reset();
-  }, [remoteTargetId, remoteContainerId]);
+    if (prevTargetKeyRef.current !== null && prevTargetKeyRef.current !== targetKey) {
+      hermesMemoryDrafts.reset();
+    }
+    prevTargetKeyRef.current = targetKey;
+  }, [hermesMemoryDrafts, targetKey]);
 
   const limitOf = (kind: HermesMemoryKind) =>
     (kind === "memory" ? limits?.memory : limits?.user) ??

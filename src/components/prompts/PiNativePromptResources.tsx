@@ -921,13 +921,22 @@ export const PiPromptTemplates = forwardRef<
         })}${t("pi.prompts.reloadAfterDelete")}`,
         undoneTitle: t("pi.prompts.templateRestored", { slug: template.slug }),
         onUndo: async () => {
-          await piPromptApi.upsertTemplate(
-            template.slug,
-            "missing",
-            template.content,
-            undefined,
-            ctx,
-          );
+          if (ctx?.remoteTargetId) {
+            await piPromptApi.upsertTemplate(
+              template.slug,
+              "missing",
+              template.content,
+              undefined,
+              ctx,
+            );
+          } else {
+            // 本地保持官方调用形态（三个参数），远端才走远端写。
+            await promptsApi.upsertPiPromptTemplate(
+              template.slug,
+              "missing",
+              template.content,
+            );
+          }
           await refresh();
         },
       });

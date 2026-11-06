@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
 import { APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
-import { type AppId, type Prompt } from "@/lib/api";
+import { promptsApi, type AppId, type Prompt } from "@/lib/api";
 import { usePromptActions } from "@/hooks/usePromptActions";
 import { useDelayedFlag } from "@/hooks/useDelayedFlag";
 import { useTauriEvent } from "@/hooks/useTauriEvent";
@@ -235,7 +235,12 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
         description: t("prompts.toast.deletedSub", { path: displayPath }),
         undoneTitle: t("prompts.toast.restored", { name: original.name }),
         onUndo: async () => {
-          await savePrompt(id, original);
+          // 本地保持官方实现（直接调 promptsApi），远端才走 hook 的远端写。
+          if (remoteTargetId) {
+            await savePrompt(id, original);
+          } else {
+            await promptsApi.upsertPrompt(app, id, original);
+          }
           afterUndo(app);
         },
       });
@@ -277,7 +282,11 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
           }),
           description: effect || undefined,
           onUndo: async () => {
-            await enablePrompt(id);
+            if (remoteTargetId) {
+              await enablePrompt(id);
+            } else {
+              await promptsApi.enablePrompt(app, id);
+            }
             afterUndo(app);
           },
         });
@@ -297,12 +306,25 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
       // 撤销只给能原样还原的：之前有启用中的就换回去；之前文件是空的就停用
       const onUndo = previousActive
         ? async () => {
-            await enablePrompt(previousActive[0]);
+            if (remoteTargetId) {
+              await enablePrompt(previousActive[0]);
+            } else {
+              await promptsApi.enablePrompt(app, previousActive[0]);
+            }
             afterUndo(app);
           }
         : fileWasBlank && !backup
           ? async () => {
-              await toggleEnabled(id, false);
+              if (remoteTargetId) {
+                await toggleEnabled(id, false);
+              } else {
+                // 官方实现：重新读一遍列表再写回启用状态，避免覆盖别人的改动
+                const latest = (await promptsApi.getPrompts(app))[id] ?? target;
+                await promptsApi.upsertPrompt(app, id, {
+                  ...latest,
+                  enabled: false,
+                });
+              }
               afterUndo(app);
             }
           : undefined;
@@ -374,7 +396,11 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
       showPromptToast(t, {
         title: t("prompts.toast.imported", { path: displayPath }),
         onUndo: async () => {
-          await deletePrompt(id);
+          if (remoteTargetId) {
+            await deletePrompt(id);
+          } else {
+            await promptsApi.deletePrompt(app, id);
+          }
           afterUndo(app);
         },
       });
@@ -411,12 +437,28 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
     const source = copyingId ? prompts[copyingId] : undefined;
     if (!source) return;
     if (!beginWrite()) return;
+    const timestamp = Math.floor(Date.now() / 1000);
     const created: Array<{ app: AppId; id: string }> = [];
     const failed: AppId[] = [];
     for (const target of targets) {
       try {
-        const copy = await copyToApp(source, target);
-        created.push({ app: target, id: copy.id });
+        if (remoteTargetId) {
+          const copy = await copyToApp(source, target);
+          created.push({ app: target, id: copy.id });
+        } else {
+          // 官方实现：本地直接写 promptsApi
+          const id = `prompt-${Date.now()}`;
+          await promptsApi.upsertPrompt(target, id, {
+            id,
+            name: source.name,
+            description: source.description,
+            content: source.content,
+            enabled: false,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+          created.push({ app: target, id });
+        }
       } catch {
         failed.push(target);
       }
@@ -433,7 +475,11 @@ const StandardPromptPanel: React.FC<PromptPanelProps> = ({
         }),
         onUndo: async () => {
           for (const item of created) {
-            await deleteFromApp(item.app, item.id);
+            if (remoteTargetId) {
+              await deleteFromApp(item.app, item.id);
+            } else {
+              await promptsApi.deletePrompt(item.app, item.id);
+            }
           }
           invalidate();
         },
